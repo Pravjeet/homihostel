@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "47219235653",
+    "project_id": "homihostel-57391",
+    "storage_bucket": "homihostel-57391.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:47219235653:android:66afa7e9b031cf2916fc2c",
+        "android_client_info": {
+          "package_name": "com.example.hostel_app"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyBXPw_A_MLvMDaQzhoseyaVRa4RQoN117A"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}

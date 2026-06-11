@@ -1,6 +1,6 @@
 import 'package:flutter/material.dart';
+import 'super_admin_dashboard.dart'; // Make sure the path matches your project directory structure
 
-// 1. THE PUBLIC STATEFUL WIDGET PIPELINE
 class SuperAdminSetupScreen extends StatefulWidget {
   const SuperAdminSetupScreen({super.key});
 
@@ -8,7 +8,6 @@ class SuperAdminSetupScreen extends StatefulWidget {
   State<SuperAdminSetupScreen> createState() => _SuperAdminSetupScreenState();
 }
 
-// 2. THE PRIVATE IMPLEMENTATION HOLDER
 class _SuperAdminSetupScreenState extends State<SuperAdminSetupScreen> {
   // Global key to validate form rules before processing strings
   final _formKey = GlobalKey<FormState>();
@@ -37,24 +36,18 @@ class _SuperAdminSetupScreenState extends State<SuperAdminSetupScreen> {
       String adminName = _adminNameController.text.trim();
       String email = _emailController.text.trim();
 
-      showDialog(
-        context: context,
-        builder: (context) => AlertDialog(
-          title: const Text('Registration Form Data Captured'),
-          content: Text(
-            'Institution: $instName\n'
-            'Super Admin: $adminName\n'
-            'Email: $email\n\n'
-            'Next step: We will handle background logic to generate '
-            'the hidden abstract ID and push this to Firestore!',
+      // Seamlessly navigate to the dashboard, passing the registration metadata parameters
+      Navigator.pushAndRemoveUntil(
+        context,
+        MaterialPageRoute(
+          builder: (context) => SuperAdminDashboard(
+            institutionName: instName,
+            adminName: adminName,
+            email: email,
           ),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.pop(context),
-              child: const Text('Excellent'),
-            ),
-          ],
         ),
+        (route) =>
+            false, // Clears routing stacks so they cannot accidently pop back onto registration
       );
     }
   }
@@ -84,7 +77,7 @@ class _SuperAdminSetupScreenState extends State<SuperAdminSetupScreen> {
               borderRadius: BorderRadius.circular(16),
               boxShadow: [
                 BoxShadow(
-                  color: Colors.black.withOpacity(0.05),
+                  color: Colors.black.withValues(alpha: .05),
                   blurRadius: 20,
                   spreadRadius: 5,
                 ),

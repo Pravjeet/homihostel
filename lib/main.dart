@@ -55,7 +55,6 @@ class _SplashScreenState extends State<SplashScreen> {
         child: Column(
           mainAxisAlignment: MainAxisAlignment.center,
           children: [
-            // TODO: Replace with custom asset image later
             Icon(Icons.home_work, size: 100, color: Colors.white),
 
             SizedBox(height: 20),
