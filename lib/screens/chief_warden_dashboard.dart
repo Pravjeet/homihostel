@@ -1,25 +1,26 @@
 import 'package:flutter/material.dart';
 import 'firebase_auth_service.dart';
 import 'auth_gate.dart';
-import 'user_management_view.dart';
+// Import your module views here when ready, e.g.:
+// import 'student_management_view.dart';
 
-class SuperAdminDashboard extends StatefulWidget {
+class ChiefWardenDashboard extends StatefulWidget {
   final String institutionName;
-  final String adminName;
+  final String wardenName;
   final String email;
 
-  const SuperAdminDashboard({
+  const ChiefWardenDashboard({
     super.key,
     required this.institutionName,
-    required this.adminName,
+    required this.wardenName,
     required this.email,
   });
 
   @override
-  State<SuperAdminDashboard> createState() => _SuperAdminDashboardState();
+  State<ChiefWardenDashboard> createState() => _ChiefWardenDashboardState();
 }
 
-class _SuperAdminDashboardState extends State<SuperAdminDashboard> {
+class _ChiefWardenDashboardState extends State<ChiefWardenDashboard> {
   int _selectedIndex = 0;
   bool _isSidebarExpanded = true;
 
@@ -96,32 +97,32 @@ class _SuperAdminDashboardState extends State<SuperAdminDashboard> {
                   child: Row(
                     children: [
                       const CircleAvatar(
-                        backgroundColor: Color(0xFF6366F1),
+                        backgroundColor: Color(
+                          0xFF10B981,
+                        ), // Changed to a distinct green for Warden
                         child: Icon(
-                          Icons.admin_panel_settings,
+                          Icons
+                              .shield_rounded, // Changed icon to represent Warden
                           color: Colors.white,
                         ),
                       ),
-
                       if (_isSidebarExpanded) ...[
                         const SizedBox(width: 12),
-
                         Expanded(
                           child: Column(
                             crossAxisAlignment: CrossAxisAlignment.start,
-                            children: const [
+                            children: [
                               Text(
-                                'SLIET',
-                                style: TextStyle(
+                                widget.institutionName,
+                                style: const TextStyle(
                                   color: Colors.white,
                                   fontWeight: FontWeight.bold,
                                 ),
                                 overflow: TextOverflow.ellipsis,
                               ),
-
                               Text(
-                                'Pravjeet',
-                                style: TextStyle(
+                                widget.wardenName,
+                                style: const TextStyle(
                                   color: Colors.grey,
                                   fontSize: 11,
                                 ),
@@ -141,20 +142,23 @@ class _SuperAdminDashboardState extends State<SuperAdminDashboard> {
                     children: [
                       _buildSidebarTile(
                         index: 0,
-                        label: 'User Management',
-                        icon: Icons.person_add_alt_1_rounded,
+                        label: 'Student Overview',
+                        icon: Icons.groups_rounded,
                       ),
-
                       _buildSidebarTile(
                         index: 1,
-                        label: 'Hostel Configuration',
-                        icon: Icons.domain_rounded,
+                        label: 'Room Allocation',
+                        icon: Icons.meeting_room_rounded,
                       ),
-
                       _buildSidebarTile(
                         index: 2,
-                        label: 'System Diagnostics',
-                        icon: Icons.analytics_rounded,
+                        label: 'Leave & Gatepasses',
+                        icon: Icons.transfer_within_a_station_rounded,
+                      ),
+                      _buildSidebarTile(
+                        index: 3,
+                        label: 'Complaints',
+                        icon: Icons.report_problem_rounded,
                       ),
                     ],
                   ),
@@ -206,14 +210,11 @@ class _SuperAdminDashboardState extends State<SuperAdminDashboard> {
             child: IndexedStack(
               index: _selectedIndex,
               children: [
-                Padding(
-                  padding: const EdgeInsets.all(40),
-                  child: UserManagementView(collegeId: collegeId),
-                ),
-
-                const Center(child: Text('Hostel Configuration Module')),
-
-                const Center(child: Text('System Diagnostics Module')),
+                // Replace these Center placeholders with your actual view components
+                const Center(child: Text('Student Overview Module')),
+                const Center(child: Text('Room Allocation Module')),
+                const Center(child: Text('Leave & Gatepasses Module')),
+                const Center(child: Text('Complaints Module')),
               ],
             ),
           ),
@@ -233,11 +234,13 @@ class _SuperAdminDashboardState extends State<SuperAdminDashboard> {
       padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
       child: ListTile(
         selected: isSelected,
-        selectedTileColor: const Color(0xFF6366F1).withOpacity(0.15),
+        selectedTileColor: const Color(
+          0xFF10B981,
+        ).withOpacity(0.15), // Matched highlight color
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
         leading: Icon(
           icon,
-          color: isSelected ? const Color(0xFF6366F1) : Colors.white60,
+          color: isSelected ? const Color(0xFF10B981) : Colors.white60,
         ),
         title: _isSidebarExpanded
             ? Text(

@@ -1,8 +1,16 @@
 import 'package:flutter/material.dart';
+import 'package:firebase_core/firebase_core.dart'; // ADD THIS IMPORT
+import 'firebase_options.dart'; // ADD THIS IMPORT
 import 'screens/auth_gate.dart';
-// Import our new intermediate workspace gate
 
-void main() {
+// Change main() to be an asynchronous function
+void main() async {
+  // 1. You MUST add this line whenever main() is async
+  WidgetsFlutterBinding.ensureInitialized();
+
+  // 2. Turn on Firebase using the options file you generated
+  await Firebase.initializeApp(options: DefaultFirebaseOptions.currentPlatform);
+
   runApp(const HostelAdminApp());
 }
 
@@ -60,7 +68,7 @@ class _SplashScreenState extends State<SplashScreen> {
             SizedBox(height: 20),
 
             Text(
-              'HomiHostel', // Capitalized both 'H's here
+              'HomiHostel',
               style: TextStyle(
                 color: Colors.white,
                 fontSize: 28,

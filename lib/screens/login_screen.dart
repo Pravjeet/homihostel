@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'super_admin_dashboard.dart';
 
 class LoginScreen extends StatefulWidget {
   const LoginScreen({super.key});
@@ -22,28 +23,22 @@ class _LoginScreenState extends State<LoginScreen> {
   }
 
   void _handleLogin() {
-    if (_formKey.currentState!.validate()) {
-      String email = _emailController.text.trim();
-
-      showDialog(
-        context: context,
-        builder: (context) => AlertDialog(
-          title: const Text('Authentication Triggered'),
-          content: Text(
-            'Attempting login for: $email\n\n'
-            'Next step: We will use Firebase Auth to verify credentials, '
-            'read the Firestore user document, discover their hidden institution ID, '
-            'and route them to their matching dashboard role!',
-          ),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.pop(context),
-              child: const Text('Understood'),
-            ),
-          ],
-        ),
-      );
+    // 1. Basic form validation
+    if (!_formKey.currentState!.validate()) {
+      return;
     }
+
+    // 2. BYPASS AUTHENTICATION - Navigate directly using dummy data
+    Navigator.pushReplacement(
+      context,
+      MaterialPageRoute(
+        builder: (_) => SuperAdminDashboard(
+          institutionName: 'Demo Institution',
+          adminName: 'Demo Admin',
+          email: _emailController.text.trim(),
+        ),
+      ),
+    );
   }
 
   @override
@@ -71,7 +66,7 @@ class _LoginScreenState extends State<LoginScreen> {
               borderRadius: BorderRadius.circular(16),
               boxShadow: [
                 BoxShadow(
-                  color: Colors.black.withOpacity(0.05),
+                  color: Colors.black.withValues(alpha: .05),
                   blurRadius: 20,
                   spreadRadius: 5,
                 ),
@@ -104,13 +99,13 @@ class _LoginScreenState extends State<LoginScreen> {
                   ),
                   const Divider(height: 32),
 
-                  // Email Field
+                  // EMAIL FIELD
                   TextFormField(
                     controller: _emailController,
                     keyboardType: TextInputType.emailAddress,
                     decoration: const InputDecoration(
                       labelText: 'Account Email Address',
-                      prefixIcon: Icon(Icons.email_outlined, size: 20),
+                      prefixIcon: Icon(Icons.email_outlined),
                       filled: true,
                       fillColor: Color(0xFFF8F9FA),
                       border: OutlineInputBorder(
@@ -120,21 +115,20 @@ class _LoginScreenState extends State<LoginScreen> {
                     ),
                     validator: (value) {
                       if (value == null || value.trim().isEmpty) {
-                        return 'Please enter your registered email address';
+                        return 'Please enter your email';
                       }
                       return null;
                     },
                   ),
-
                   const SizedBox(height: 20),
 
-                  // Password Field
+                  // PASSWORD FIELD
                   TextFormField(
                     controller: _passwordController,
                     obscureText: _isPasswordHidden,
                     decoration: InputDecoration(
                       labelText: 'Workspace Password',
-                      prefixIcon: const Icon(Icons.lock_outlined, size: 20),
+                      prefixIcon: const Icon(Icons.lock_outlined),
                       filled: true,
                       fillColor: const Color(0xFFF8F9FA),
                       border: const OutlineInputBorder(
@@ -146,7 +140,6 @@ class _LoginScreenState extends State<LoginScreen> {
                           _isPasswordHidden
                               ? Icons.visibility_off_outlined
                               : Icons.visibility_outlined,
-                          size: 20,
                         ),
                         onPressed: () {
                           setState(() {
@@ -157,15 +150,14 @@ class _LoginScreenState extends State<LoginScreen> {
                     ),
                     validator: (value) {
                       if (value == null || value.isEmpty) {
-                        return 'Please provide your account password';
+                        return 'Please enter password';
                       }
                       return null;
                     },
                   ),
-
                   const SizedBox(height: 32),
 
-                  // Action Sign In Button
+                  // SUBMIT BUTTON
                   SizedBox(
                     width: double.infinity,
                     height: 52,
@@ -177,9 +169,9 @@ class _LoginScreenState extends State<LoginScreen> {
                         shape: RoundedRectangleBorder(
                           borderRadius: BorderRadius.circular(8),
                         ),
-                        elevation: 0,
                       ),
                       child: const Text(
+                        // Removed "(Bypass Auth)" here
                         'Enter Console Workspace',
                         style: TextStyle(
                           fontSize: 15,

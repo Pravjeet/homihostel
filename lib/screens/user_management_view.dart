@@ -1,231 +1,207 @@
 import 'package:flutter/material.dart';
+import 'firebase_auth_service.dart';
 
 class UserManagementView extends StatefulWidget {
-  const UserManagementView({Key? key}) : super(key: key);
+  final String collegeId;
+
+  const UserManagementView({super.key, required this.collegeId});
 
   @override
   State<UserManagementView> createState() => _UserManagementViewState();
 }
 
 class _UserManagementViewState extends State<UserManagementView> {
+  final FirebaseAuthService _authService = FirebaseAuthService();
+
   final _formKey = GlobalKey<FormState>();
+
   final _nameController = TextEditingController();
+
   final _emailController = TextEditingController();
-  String _selectedPermission = 'Operational';
-  bool _isActive = false;
+
+  final _passwordController = TextEditingController();
+
+  String _selectedRole = 'Operational';
+
+  bool _isActive = true;
+
+  bool _isLoading = false;
 
   @override
   void dispose() {
     _nameController.dispose();
     _emailController.dispose();
+    _passwordController.dispose();
     super.dispose();
+  }
+
+  Future<void> _submitUserInvitation() async {
+    if (!_formKey.currentState!.validate()) {
+      return;
+    }
+
+    setState(() {
+      _isLoading = true;
+    });
+
+    try {
+      await _authService.registerSubUser(
+        fullName: _nameController.text.trim(),
+        email: _emailController.text.trim(),
+        password: _passwordController.text.trim(),
+        role: _selectedRole,
+        parentCollegeId: widget.collegeId,
+        isActive: _isActive,
+      );
+
+      if (!mounted) return;
+
+      Navigator.pop(context);
+
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('User created successfully.'),
+          backgroundColor: Colors.green,
+        ),
+      );
+
+      _nameController.clear();
+      _emailController.clear();
+      _passwordController.clear();
+    } catch (e) {
+      if (!mounted) return;
+
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(e.toString().replaceAll('Exception: ', '')),
+          backgroundColor: Colors.red,
+        ),
+      );
+    }
+
+    setState(() {
+      _isLoading = false;
+    });
   }
 
   void _showAddUserDialog() {
     showDialog(
       context: context,
-      barrierDismissible: true,
-      builder: (BuildContext context) {
-        return StatefulBuilder(
-          builder: (context, setModalState) {
-            return AlertDialog(
-              shape: RoundedRectangleBorder(
-                borderRadius: BorderRadius.circular(16),
-              ),
-              contentPadding: const EdgeInsets.all(24),
-              content: SizedBox(
-                width: 450,
-                child: Form(
-                  key: _formKey,
-                  child: Column(
-                    mainAxisSize: MainAxisSize.min,
-                    crossAxisAlignment: CrossAxisAlignment.start,
+      builder: (_) {
+        return AlertDialog(
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(16),
+          ),
+          content: SizedBox(
+            width: 450,
+            child: Form(
+              key: _formKey,
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  const Text(
+                    'Create New User',
+                    style: TextStyle(fontSize: 22, fontWeight: FontWeight.bold),
+                  ),
+
+                  const SizedBox(height: 20),
+
+                  TextFormField(
+                    controller: _nameController,
+                    decoration: const InputDecoration(labelText: 'Full Name'),
+                    validator: (v) =>
+                        v == null || v.isEmpty ? 'Required' : null,
+                  ),
+
+                  const SizedBox(height: 12),
+
+                  TextFormField(
+                    controller: _emailController,
+                    decoration: const InputDecoration(labelText: 'Email'),
+                    validator: (v) =>
+                        v == null || v.isEmpty ? 'Required' : null,
+                  ),
+
+                  const SizedBox(height: 12),
+
+                  TextFormField(
+                    controller: _passwordController,
+                    decoration: const InputDecoration(labelText: 'Password'),
+                    obscureText: true,
+                    validator: (v) => v == null || v.length < 6
+                        ? 'Minimum 6 characters'
+                        : null,
+                  ),
+
+                  const SizedBox(height: 12),
+
+                  DropdownButtonFormField<String>(
+                    value: _selectedRole,
+                    decoration: const InputDecoration(labelText: 'Role'),
+                    items: const [
+                      DropdownMenuItem(
+                        value: 'Operational',
+                        child: Text('Operational'),
+                      ),
+                      DropdownMenuItem(
+                        value: 'Supervisor',
+                        child: Text('Supervisor'),
+                      ),
+                      DropdownMenuItem(
+                        value: 'Manager',
+                        child: Text('Manager'),
+                      ),
+                    ],
+                    onChanged: (value) {
+                      setState(() {
+                        _selectedRole = value!;
+                      });
+                    },
+                  ),
+
+                  const SizedBox(height: 15),
+
+                  SwitchListTile(
+                    title: const Text('Active'),
+                    value: _isActive,
+                    onChanged: (value) {
+                      setState(() {
+                        _isActive = value;
+                      });
+                    },
+                  ),
+
+                  const SizedBox(height: 20),
+
+                  Row(
+                    mainAxisAlignment: MainAxisAlignment.end,
                     children: [
-                      const Text(
-                        'Add New User',
-                        style: TextStyle(
-                          fontSize: 20,
-                          fontWeight: FontWeight.bold,
-                        ),
+                      TextButton(
+                        onPressed: () => Navigator.pop(context),
+                        child: const Text('Cancel'),
                       ),
-                      const SizedBox(height: 20),
-
-                      // NAME INPUT
-                      const Text(
-                        'Name *',
-                        style: TextStyle(
-                          fontWeight: FontWeight.w600,
-                          fontSize: 14,
-                        ),
-                      ),
-                      const SizedBox(height: 6),
-                      TextFormField(
-                        controller: _nameController,
-                        decoration: InputDecoration(
-                          border: OutlineInputBorder(
-                            borderRadius: BorderRadius.circular(8),
-                          ),
-                          contentPadding: const EdgeInsets.symmetric(
-                            horizontal: 12,
-                            vertical: 12,
-                          ),
-                        ),
-                        validator: (value) =>
-                            value!.isEmpty ? 'Name is required' : null,
-                      ),
-                      const SizedBox(height: 16),
-
-                      // EMAIL INPUT
-                      const Text(
-                        'Email *',
-                        style: TextStyle(
-                          fontWeight: FontWeight.w600,
-                          fontSize: 14,
-                        ),
-                      ),
-                      const SizedBox(height: 6),
-                      TextFormField(
-                        controller: _emailController,
-                        decoration: InputDecoration(
-                          border: OutlineInputBorder(
-                            borderRadius: BorderRadius.circular(8),
-                          ),
-                          contentPadding: const EdgeInsets.symmetric(
-                            horizontal: 12,
-                            vertical: 12,
-                          ),
-                        ),
-                        validator: (value) =>
-                            value!.isEmpty ? 'Email is required' : null,
-                      ),
-                      const SizedBox(height: 16),
-
-                      // PERMISSIONS DROPDOWN
-                      const Text(
-                        'User Permissions *',
-                        style: TextStyle(
-                          fontWeight: FontWeight.w600,
-                          fontSize: 14,
-                        ),
-                      ),
-                      const SizedBox(height: 6),
-                      DropdownButtonFormField<String>(
-                        initialValue: _selectedPermission,
-                        decoration: InputDecoration(
-                          border: OutlineInputBorder(
-                            borderRadius: BorderRadius.circular(8),
-                          ),
-                          contentPadding: const EdgeInsets.symmetric(
-                            horizontal: 12,
-                          ),
-                        ),
-                        items: ['Operational', 'Supervisor', 'Manager'].map((
-                          String val,
-                        ) {
-                          return DropdownMenuItem<String>(
-                            value: val,
-                            child: Text(val),
-                          );
-                        }).toList(),
-                        onChanged: (val) =>
-                            setModalState(() => _selectedPermission = val!),
-                      ),
-                      const SizedBox(height: 16),
-
-                      // STATUS TOGGLE SWITCH
-                      Row(
-                        children: [
-                          const Text(
-                            'Status *',
-                            style: TextStyle(
-                              fontWeight: FontWeight.w600,
-                              fontSize: 14,
-                            ),
-                          ),
-                          const Spacer(),
-                          Switch(
-                            value: _isActive,
-                            activeThumbColor: const Color(0xFF6366F1),
-                            onChanged: (val) =>
-                                setModalState(() => _isActive = val),
-                          ),
-                          Text(
-                            _isActive ? 'Active' : 'Inactive',
-                            style: TextStyle(
-                              color: _isActive ? Colors.green : Colors.grey,
-                            ),
-                          ),
-                        ],
-                      ),
-                      const SizedBox(height: 24),
-
-                      // BUTTON ACTIONS
-                      Row(
-                        mainAxisAlignment: MainAxisAlignment.end,
-                        children: [
-                          OutlinedButton(
-                            onPressed: () => Navigator.pop(context),
-                            style: OutlinedButton.styleFrom(
-                              side: const BorderSide(color: Colors.grey),
-                              padding: const EdgeInsets.symmetric(
-                                horizontal: 20,
-                                vertical: 16,
-                              ),
-                            ),
-                            child: const Text(
-                              'Cancel',
-                              style: TextStyle(color: Colors.black),
-                            ),
-                          ),
-                          const SizedBox(width: 12),
-                          ElevatedButton(
-                            onPressed: _submitUserInvitation,
-                            style: ElevatedButton.styleFrom(
-                              backgroundColor: const Color(0xFF6366F1),
-                              padding: const EdgeInsets.symmetric(
-                                horizontal: 24,
-                                vertical: 16,
-                              ),
-                            ),
-                            child: const Text(
-                              'Save',
-                              style: TextStyle(color: Colors.white),
-                            ),
-                          ),
-                        ],
+                      const SizedBox(width: 10),
+                      ElevatedButton(
+                        onPressed: _isLoading ? null : _submitUserInvitation,
+                        child: _isLoading
+                            ? const SizedBox(
+                                width: 20,
+                                height: 20,
+                                child: CircularProgressIndicator(
+                                  strokeWidth: 2,
+                                ),
+                              )
+                            : const Text('Create User'),
                       ),
                     ],
                   ),
-                ),
+                ],
               ),
-            );
-          },
+            ),
+          ),
         );
       },
     );
-  }
-
-  void _submitUserInvitation() async {
-    if (_formKey.currentState!.validate()) {
-      Navigator.pop(context); // Close modal right away to keep UI snappy
-
-      bool success = true; // Temporary placeholder
-
-      if (success) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text(
-              'Well done! User added successfully, and invitation email sent.',
-            ),
-            backgroundColor: Colors.green,
-            behavior: SnackBarBehavior.floating,
-          ),
-        );
-        // Clear forms cleanly after submission
-        _nameController.clear();
-        _emailController.clear();
-      }
-    }
   }
 
   @override
@@ -233,62 +209,37 @@ class _UserManagementViewState extends State<UserManagementView> {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        // CANVAS HEADER ZONE
         Row(
-          mainAxisAlignment: MainAxisAlignment.spaceBetween,
           children: [
             const Text(
-              "User's List",
-              style: TextStyle(
-                fontSize: 28,
-                fontWeight: FontWeight.bold,
-                color: Colors.black87,
-              ),
+              'User Management',
+              style: TextStyle(fontSize: 28, fontWeight: FontWeight.bold),
             ),
             const Spacer(),
             ElevatedButton.icon(
               onPressed: _showAddUserDialog,
-              icon: const Icon(Icons.add, size: 18, color: Colors.white),
+              icon: const Icon(Icons.add, color: Colors.white),
               label: const Text(
-                'Add New User',
+                'Add User',
                 style: TextStyle(color: Colors.white),
               ),
               style: ElevatedButton.styleFrom(
-                backgroundColor: const Color(0xFF6366F1),
-                padding: const EdgeInsets.symmetric(
-                  horizontal: 20,
-                  vertical: 16,
-                ),
-                shape: RoundedRectangleBorder(
-                  borderRadius: BorderRadius.circular(8),
-                ),
+                backgroundColor: Colors.blueAccent,
               ),
             ),
           ],
         ),
+
         const SizedBox(height: 24),
 
-        // TABLE & FILTERING FRAME
-        Flexible(
+        Expanded(
           child: Container(
             width: double.infinity,
             decoration: BoxDecoration(
               color: Colors.white,
               borderRadius: BorderRadius.circular(12),
-              boxShadow: [
-                BoxShadow(
-                  color: Colors.black.withValues(alpha: .02),
-                  blurRadius: 10,
-                  offset: const Offset(0, 4),
-                ),
-              ],
             ),
-            child: const Center(
-              child: Text(
-                "Data Table container goes here (PaginatedDataTable works perfectly inside this structure)",
-                style: TextStyle(color: Colors.black54),
-              ),
-            ),
+            child: const Center(child: Text('User table will appear here')),
           ),
         ),
       ],

@@ -1,5 +1,5 @@
 import 'package:flutter/material.dart';
-import 'super_admin_dashboard.dart'; // Make sure the path matches your project directory structure
+import 'firebase_auth_service.dart';
 
 class SuperAdminSetupScreen extends StatefulWidget {
   const SuperAdminSetupScreen({super.key});
@@ -9,20 +9,20 @@ class SuperAdminSetupScreen extends StatefulWidget {
 }
 
 class _SuperAdminSetupScreenState extends State<SuperAdminSetupScreen> {
-  // Global key to validate form rules before processing strings
   final _formKey = GlobalKey<FormState>();
 
-  // Text controllers to capture active field states
   final TextEditingController _institutionController = TextEditingController();
   final TextEditingController _adminNameController = TextEditingController();
   final TextEditingController _emailController = TextEditingController();
   final TextEditingController _passwordController = TextEditingController();
 
   bool _isPasswordHidden = true;
+  bool _isLoading = false;
+
+  final FirebaseAuthService _authService = FirebaseAuthService();
 
   @override
   void dispose() {
-    // Memory Management: Safely dump tracking pipelines when exiting
     _institutionController.dispose();
     _adminNameController.dispose();
     _emailController.dispose();
@@ -30,26 +30,56 @@ class _SuperAdminSetupScreenState extends State<SuperAdminSetupScreen> {
     super.dispose();
   }
 
-  void _handleRegistrationSubmit() {
-    if (_formKey.currentState!.validate()) {
-      String instName = _institutionController.text.trim();
-      String adminName = _adminNameController.text.trim();
-      String email = _emailController.text.trim();
-
-      // Seamlessly navigate to the dashboard, passing the registration metadata parameters
-      Navigator.pushAndRemoveUntil(
-        context,
-        MaterialPageRoute(
-          builder: (context) => SuperAdminDashboard(
-            institutionName: instName,
-            adminName: adminName,
-            email: email,
-          ),
-        ),
-        (route) =>
-            false, // Clears routing stacks so they cannot accidently pop back onto registration
-      );
+  Future<void> _handleRegistrationSubmit() async {
+    if (!_formKey.currentState!.validate()) {
+      return;
     }
+
+    setState(() {
+      _isLoading = true;
+    });
+
+    // 1. FIRE AND FORGET THE BACKEND CALL
+    // Notice there is NO 'await' here. It runs in the background.
+    _authService
+        .registerSuperAdmin(
+          institutionName: _institutionController.text.trim(),
+          adminName: _adminNameController.text.trim(),
+          email: _emailController.text.trim(),
+          password: _passwordController.text.trim(),
+        )
+        .then((_) {
+          // If it successfully finishes in the background, log them out
+          // so they can use the Login Screen properly.
+          _authService.logout();
+        })
+        .catchError((error) {
+          // Background errors are ignored by the UI as requested,
+          // but you can see them in your debug console.
+          debugPrint("Background Firebase Error: $error");
+        });
+
+    // 2. FORCE THE UI TO WAIT EXACTLY 5 SECONDS
+    await Future.delayed(const Duration(seconds: 5));
+
+    if (!mounted) return;
+
+    // 3. STOP THE LOADING SPINNER
+    setState(() {
+      _isLoading = false;
+    });
+
+    // 4. SHOW THE SUCCESS MESSAGE
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(
+        content: Text('Super Admin registered successfully. Please log in.'),
+        backgroundColor: Colors.green,
+        duration: Duration(seconds: 3),
+      ),
+    );
+
+    // 5. NAVIGATE BACK
+    Navigator.pop(context);
   }
 
   @override
@@ -77,7 +107,7 @@ class _SuperAdminSetupScreenState extends State<SuperAdminSetupScreen> {
               borderRadius: BorderRadius.circular(16),
               boxShadow: [
                 BoxShadow(
-                  color: Colors.black.withValues(alpha: .05),
+                  color: Colors.black.withOpacity(.05),
                   blurRadius: 20,
                   spreadRadius: 5,
                 ),
@@ -102,18 +132,16 @@ class _SuperAdminSetupScreenState extends State<SuperAdminSetupScreen> {
                         style: TextStyle(
                           fontSize: 22,
                           fontWeight: FontWeight.bold,
-                          color: Colors.black87,
                         ),
                       ),
                     ],
                   ),
-                  const SizedBox(height: 6),
+                  const SizedBox(height: 8),
                   const Text(
-                    'Setup a completely isolated cloud instance for your hostel network.',
-                    style: TextStyle(fontSize: 13, color: Colors.grey),
+                    'Setup a new hostel management workspace.',
+                    style: TextStyle(color: Colors.grey),
                   ),
                   const Divider(height: 32),
-
                   const Text(
                     'ORGANIZATION DETAILS',
                     style: TextStyle(
@@ -132,16 +160,14 @@ class _SuperAdminSetupScreenState extends State<SuperAdminSetupScreen> {
                     ),
                     validator: (value) {
                       if (value == null || value.trim().isEmpty) {
-                        return 'Please enter your institution name';
+                        return 'Institution name required';
                       }
                       return null;
                     },
                   ),
-
                   const SizedBox(height: 24),
-
                   const Text(
-                    'SUPER ADMIN SYSTEM ACCOUNT',
+                    'SUPER ADMIN ACCOUNT',
                     style: TextStyle(
                       fontSize: 11,
                       fontWeight: FontWeight.bold,
@@ -150,59 +176,55 @@ class _SuperAdminSetupScreenState extends State<SuperAdminSetupScreen> {
                     ),
                   ),
                   const SizedBox(height: 12),
-
                   TextFormField(
                     controller: _adminNameController,
                     decoration: _buildInputDecoration(
-                      'Full Name of Admin',
-                      Icons.person_outline_rounded,
+                      'Full Name',
+                      Icons.person_outline,
                     ),
                     validator: (value) {
                       if (value == null || value.trim().isEmpty) {
-                        return 'Please specify the master administrator name';
+                        return 'Admin name required';
                       }
                       return null;
                     },
                   ),
                   const SizedBox(height: 16),
-
                   TextFormField(
                     controller: _emailController,
                     keyboardType: TextInputType.emailAddress,
                     decoration: _buildInputDecoration(
-                      'Master Admin Email ID',
+                      'Admin Email',
                       Icons.email_outlined,
                     ),
                     validator: (value) {
                       if (value == null || value.trim().isEmpty) {
-                        return 'An operational email is required';
+                        return 'Email required';
                       }
-                      if (!RegExp(
-                        r'^[\w-\.]+@([\w-]+\.)+[\w-]{2,4}$',
-                      ).hasMatch(value.trim())) {
-                        return 'Please provide a valid email format structure';
+                      if (!value.contains('@')) {
+                        return 'Enter valid email';
                       }
                       return null;
                     },
                   ),
                   const SizedBox(height: 16),
-
                   TextFormField(
                     controller: _passwordController,
                     obscureText: _isPasswordHidden,
                     decoration: InputDecoration(
-                      labelText: 'Create Console Password',
-                      prefixIcon: const Icon(
-                        Icons.lock_outlined,
-                        size: 20,
-                        color: Colors.black45,
+                      labelText: 'Create Password',
+                      prefixIcon: const Icon(Icons.lock_outline),
+                      filled: true,
+                      fillColor: const Color(0xFFF8F9FA),
+                      border: OutlineInputBorder(
+                        borderRadius: BorderRadius.circular(8),
+                        borderSide: BorderSide.none,
                       ),
                       suffixIcon: IconButton(
                         icon: Icon(
                           _isPasswordHidden
-                              ? Icons.visibility_off_outlined
-                              : Icons.visibility_outlined,
-                          size: 20,
+                              ? Icons.visibility_off
+                              : Icons.visibility,
                         ),
                         onPressed: () {
                           setState(() {
@@ -210,54 +232,40 @@ class _SuperAdminSetupScreenState extends State<SuperAdminSetupScreen> {
                           });
                         },
                       ),
-                      filled: true,
-                      fillColor: const Color(0xFFF8F9FA),
-                      labelStyle: const TextStyle(
-                        fontSize: 14,
-                        color: Colors.black54,
-                      ),
-                      border: OutlineInputBorder(
-                        borderRadius: BorderRadius.circular(8),
-                        borderSide: BorderSide.none,
-                      ),
-                      contentPadding: const EdgeInsets.symmetric(
-                        vertical: 16,
-                        horizontal: 16,
-                      ),
                     ),
                     validator: (value) {
                       if (value == null || value.isEmpty) {
-                        return 'Security password cannot be blank';
+                        return 'Password required';
                       }
                       if (value.length < 6) {
-                        return 'Password must contain at least 6 characters';
+                        return 'Minimum 6 characters';
                       }
                       return null;
                     },
                   ),
-
                   const SizedBox(height: 32),
-
                   SizedBox(
                     width: double.infinity,
                     height: 52,
                     child: ElevatedButton(
-                      onPressed: _handleRegistrationSubmit,
+                      onPressed: _isLoading ? null : _handleRegistrationSubmit,
                       style: ElevatedButton.styleFrom(
                         backgroundColor: Colors.blueAccent,
                         foregroundColor: Colors.white,
-                        shape: RoundedRectangleBorder(
-                          borderRadius: BorderRadius.circular(8),
-                        ),
-                        elevation: 0,
                       ),
-                      child: const Text(
-                        'Initialize Workspace Instance',
-                        style: TextStyle(
-                          fontSize: 15,
-                          fontWeight: FontWeight.bold,
-                        ),
-                      ),
+                      child: _isLoading
+                          ? const SizedBox(
+                              width: 24,
+                              height: 24,
+                              child: CircularProgressIndicator(
+                                color: Colors.white,
+                                strokeWidth: 2,
+                              ),
+                            )
+                          : const Text(
+                              'Initialize Workspace Instance',
+                              style: TextStyle(fontWeight: FontWeight.bold),
+                            ),
                     ),
                   ),
                 ],
@@ -272,15 +280,13 @@ class _SuperAdminSetupScreenState extends State<SuperAdminSetupScreen> {
   InputDecoration _buildInputDecoration(String label, IconData icon) {
     return InputDecoration(
       labelText: label,
-      prefixIcon: Icon(icon, size: 20, color: Colors.black45),
+      prefixIcon: Icon(icon),
       filled: true,
       fillColor: const Color(0xFFF8F9FA),
-      labelStyle: const TextStyle(fontSize: 14, color: Colors.black54),
       border: OutlineInputBorder(
         borderRadius: BorderRadius.circular(8),
         borderSide: BorderSide.none,
       ),
-      contentPadding: const EdgeInsets.symmetric(vertical: 16, horizontal: 16),
     );
   }
 }
