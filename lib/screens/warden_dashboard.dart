@@ -4,23 +4,23 @@ import 'auth_gate.dart';
 import 'user_management_view.dart';
 import 'hostel_configuration_view.dart';
 
-class SuperAdminDashboard extends StatefulWidget {
+class WardenDashboard extends StatefulWidget {
   final String institutionName;
-  final String adminName;
+  final String wardenName;
   final String email;
 
-  const SuperAdminDashboard({
+  const WardenDashboard({
     super.key,
     required this.institutionName,
-    required this.adminName,
+    required this.wardenName,
     required this.email,
   });
 
   @override
-  State<SuperAdminDashboard> createState() => _SuperAdminDashboardState();
+  State<WardenDashboard> createState() => _WardenDashboardState();
 }
 
-class _SuperAdminDashboardState extends State<SuperAdminDashboard> {
+class _WardenDashboardState extends State<WardenDashboard> {
   int _selectedIndex = 0;
   bool _isSidebarExpanded = true;
 
@@ -99,7 +99,7 @@ class _SuperAdminDashboardState extends State<SuperAdminDashboard> {
                       const CircleAvatar(
                         backgroundColor: Color(0xFF6366F1),
                         child: Icon(
-                          Icons.admin_panel_settings,
+                          Icons.badge_rounded, // Distinct icon for the Warden
                           color: Colors.white,
                         ),
                       ),
@@ -118,7 +118,7 @@ class _SuperAdminDashboardState extends State<SuperAdminDashboard> {
                                 overflow: TextOverflow.ellipsis,
                               ),
                               Text(
-                                widget.adminName,
+                                widget.wardenName,
                                 style: const TextStyle(
                                   color: Colors.grey,
                                   fontSize: 11,

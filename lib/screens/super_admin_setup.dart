@@ -39,47 +39,50 @@ class _SuperAdminSetupScreenState extends State<SuperAdminSetupScreen> {
       _isLoading = true;
     });
 
-    // 1. FIRE AND FORGET THE BACKEND CALL
-    // Notice there is NO 'await' here. It runs in the background.
-    _authService
-        .registerSuperAdmin(
-          institutionName: _institutionController.text.trim(),
-          adminName: _adminNameController.text.trim(),
-          email: _emailController.text.trim(),
-          password: _passwordController.text.trim(),
-        )
-        .then((_) {
-          // If it successfully finishes in the background, log them out
-          // so they can use the Login Screen properly.
-          _authService.logout();
-        })
-        .catchError((error) {
-          // Background errors are ignored by the UI as requested,
-          // but you can see them in your debug console.
-          debugPrint("Background Firebase Error: $error");
+    try {
+      // 1. PROPERLY AWAIT THE BACKEND CALL
+      // The code will pause here until Firebase completely finishes
+      await _authService.registerSuperAdmin(
+        institutionName: _institutionController.text.trim(),
+        adminName: _adminNameController.text.trim(),
+        email: _emailController.text.trim(),
+        password: _passwordController.text.trim(),
+      );
+
+      // 2. Log them out so they can log in cleanly later
+      await _authService.logout();
+
+      if (!mounted) return;
+
+      // 3. SHOW REAL SUCCESS MESSAGE (Only runs if the code above succeeds)
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Super Admin registered successfully. Please log in.'),
+          backgroundColor: Colors.green,
+          duration: Duration(seconds: 3),
+        ),
+      );
+
+      // 4. NAVIGATE BACK
+      Navigator.pop(context);
+    } catch (error) {
+      // 5. CATCH AND DISPLAY THE REAL FIRESTORE ERROR
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('Registration Failed: $error'),
+          backgroundColor: Colors.red,
+          duration: const Duration(seconds: 6),
+        ),
+      );
+    } finally {
+      // 6. ALWAYS STOP THE LOADING SPINNER
+      if (mounted) {
+        setState(() {
+          _isLoading = false;
         });
-
-    // 2. FORCE THE UI TO WAIT EXACTLY 5 SECONDS
-    await Future.delayed(const Duration(seconds: 5));
-
-    if (!mounted) return;
-
-    // 3. STOP THE LOADING SPINNER
-    setState(() {
-      _isLoading = false;
-    });
-
-    // 4. SHOW THE SUCCESS MESSAGE
-    ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(
-        content: Text('Super Admin registered successfully. Please log in.'),
-        backgroundColor: Colors.green,
-        duration: Duration(seconds: 3),
-      ),
-    );
-
-    // 5. NAVIGATE BACK
-    Navigator.pop(context);
+      }
+    }
   }
 
   @override

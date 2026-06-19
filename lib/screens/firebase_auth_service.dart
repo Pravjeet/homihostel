@@ -1,9 +1,11 @@
-import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
+import 'package:firebase_core/firebase_core.dart';
+import 'package:cloud_firestore/cloud_firestore.dart'; // Added Firestore import
 
 class FirebaseAuthService {
   final FirebaseAuth _auth = FirebaseAuth.instance;
-  final FirebaseFirestore _firestore = FirebaseFirestore.instance;
+  final FirebaseFirestore _firestore =
+      FirebaseFirestore.instance; // Initialize Firestore
 
   // =====================================================
   // REGISTER SUPER ADMIN
@@ -15,6 +17,7 @@ class FirebaseAuthService {
     required String password,
   }) async {
     try {
+      // 1. Create Auth Account
       UserCredential userCredential = await _auth
           .createUserWithEmailAndPassword(email: email, password: password);
 
@@ -24,6 +27,7 @@ class FirebaseAuthService {
         throw Exception("Failed to create user account.");
       }
 
+      // 2. Generate College ID
       String cleanName = institutionName
           .replaceAll(RegExp(r'[^a-zA-Z0-9]'), '')
           .toLowerCase();
@@ -31,6 +35,7 @@ class FirebaseAuthService {
       String generatedCollegeId =
           'col_${cleanName}_${DateTime.now().millisecondsSinceEpoch.toString().substring(8)}';
 
+      // 3. Prepare Profile Data Map
       Map<String, dynamic> userProfile = {
         'uid': firebaseUser.uid,
         'name': adminName,
@@ -39,25 +44,31 @@ class FirebaseAuthService {
         'collegeId': generatedCollegeId,
         'institutionName': institutionName,
         'isActive': true,
-        'createdAt': FieldValue.serverTimestamp(),
+        'createdAt':
+            FieldValue.serverTimestamp(), // Matches the gold standard test
       };
 
+      // 4. WRITE TO FIRESTORE (Directly like the test)
+      // Using .doc(uid).set() instead of .add() to link Auth and Firestore
       await _firestore
           .collection('users')
           .doc(firebaseUser.uid)
           .set(userProfile);
 
+      // Optional: You might also want to save the college document directly here
       await _firestore.collection('colleges').doc(generatedCollegeId).set({
         'collegeId': generatedCollegeId,
         'institutionName': institutionName,
-        'initializedBy': firebaseUser.uid,
+        'adminUid': firebaseUser.uid,
         'createdAt': FieldValue.serverTimestamp(),
       });
 
       return userProfile;
     } on FirebaseAuthException catch (e) {
+      print("🚨 AUTH ERROR: ${e.message}");
       throw Exception(e.message ?? 'Failed to register institution.');
     } catch (e) {
+      print("🚨 FIRESTORE DENIED IT: $e");
       throw Exception(e.toString());
     }
   }
@@ -81,16 +92,17 @@ class FirebaseAuthService {
         throw Exception("User authentication failed.");
       }
 
-      DocumentSnapshot<Map<String, dynamic>> doc = await _firestore
+      // Fetch profile directly from Firestore
+      DocumentSnapshot<Map<String, dynamic>> userDoc = await _firestore
           .collection('users')
           .doc(user.uid)
           .get();
 
-      if (!doc.exists) {
+      if (!userDoc.exists || userDoc.data() == null) {
         throw Exception("User profile does not exist in Firestore.");
       }
 
-      return doc.data();
+      return userDoc.data();
     } on FirebaseAuthException catch (e) {
       throw Exception(e.message ?? "Authentication failed.");
     } catch (e) {
@@ -104,26 +116,24 @@ class FirebaseAuthService {
   Future<Map<String, dynamic>?> getCurrentUserProfile() async {
     try {
       User? user = _auth.currentUser;
-
       if (user == null) return null;
 
-      DocumentSnapshot<Map<String, dynamic>> doc = await _firestore
+      // Fetch profile directly from Firestore
+      DocumentSnapshot<Map<String, dynamic>> userDoc = await _firestore
           .collection('users')
           .doc(user.uid)
           .get();
 
-      if (!doc.exists) return null;
-
-      return doc.data();
+      return userDoc.data();
     } catch (e) {
       throw Exception(e.toString());
     }
   }
 
   // =====================================================
-  // REGISTER SUB USER
+  // REGISTER SUB USER (FIXED FOR SESSION HIJACKING)
   // =====================================================
-  Future<UserCredential?> registerSubUser({
+  Future<void> registerSubUser({
     required String fullName,
     required String email,
     required String role,
@@ -131,15 +141,25 @@ class FirebaseAuthService {
     required String parentCollegeId,
     required bool isActive,
   }) async {
+    FirebaseApp? tempApp;
     try {
-      UserCredential userCredential = await _auth
-          .createUserWithEmailAndPassword(email: email, password: password);
+      // 1. Initialize temporary Firebase app
+      tempApp = await Firebase.initializeApp(
+        name: 'tempSubUserCreationApp_${DateTime.now().millisecondsSinceEpoch}',
+        options: Firebase.app().options,
+      );
 
-      User? firebaseUser = userCredential.user;
+      // 2. Create the user using the temporary Auth instance
+      UserCredential userCredential = await FirebaseAuth.instanceFor(
+        app: tempApp,
+      ).createUserWithEmailAndPassword(email: email, password: password);
 
-      if (firebaseUser != null) {
-        await _firestore.collection('users').doc(firebaseUser.uid).set({
-          'uid': firebaseUser.uid,
+      User? newFirebaseUser = userCredential.user;
+
+      if (newFirebaseUser != null) {
+        // 3. WRITE TO FIRESTORE (Directly like the test)
+        await _firestore.collection('users').doc(newFirebaseUser.uid).set({
+          'uid': newFirebaseUser.uid,
           'name': fullName,
           'email': email,
           'role': role,
@@ -148,12 +168,17 @@ class FirebaseAuthService {
           'createdAt': FieldValue.serverTimestamp(),
         });
       }
-
-      return userCredential;
     } on FirebaseAuthException catch (e) {
+      print("🚨 SUB-USER AUTH ERROR: ${e.message}");
       throw Exception(e.message ?? 'Failed to create sub-user account.');
     } catch (e) {
+      print("🚨 SUB-USER FIRESTORE ERROR: $e");
       throw Exception(e.toString());
+    } finally {
+      // 4. Delete temp app
+      if (tempApp != null) {
+        await tempApp.delete();
+      }
     }
   }
 
@@ -162,37 +187,23 @@ class FirebaseAuthService {
   // =====================================================
   Future<String?> getCurrentCollegeId() async {
     try {
-      User? user = _auth.currentUser;
+      Map<String, dynamic>? userProfile = await getCurrentUserProfile();
+      if (userProfile == null) return null;
 
-      if (user == null) return null;
-
-      DocumentSnapshot doc = await _firestore
-          .collection('users')
-          .doc(user.uid)
-          .get();
-
-      if (!doc.exists) return null;
-
-      return doc['collegeId'];
+      return userProfile['collegeId'];
     } catch (_) {
       return null;
     }
   }
 
   // =====================================================
-  // LOGOUT
+  // LOGOUT & STATE HELPERS
   // =====================================================
   Future<void> logout() async {
     await _auth.signOut();
   }
 
-  // =====================================================
-  // CURRENT FIREBASE USER
-  // =====================================================
   User? get currentUser => _auth.currentUser;
 
-  // =====================================================
-  // AUTH STATE CHANGES
-  // =====================================================
   Stream<User?> get authStateChanges => _auth.authStateChanges();
 }

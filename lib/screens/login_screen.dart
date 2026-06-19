@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'super_admin_dashboard.dart';
+import 'firebase_auth_service.dart'; // Make sure this path is correct!
 
 class LoginScreen extends StatefulWidget {
   const LoginScreen({super.key});
@@ -13,7 +14,10 @@ class _LoginScreenState extends State<LoginScreen> {
   final TextEditingController _emailController = TextEditingController();
   final TextEditingController _passwordController = TextEditingController();
 
+  final FirebaseAuthService _authService = FirebaseAuthService();
+
   bool _isPasswordHidden = true;
+  bool _isLoading = false;
 
   @override
   void dispose() {
@@ -22,21 +26,75 @@ class _LoginScreenState extends State<LoginScreen> {
     super.dispose();
   }
 
-  void _handleLogin() {
+  Future<void> _handleLogin() async {
     // 1. Basic form validation
     if (!_formKey.currentState!.validate()) {
       return;
     }
 
-    // 2. BYPASS AUTHENTICATION - Navigate directly using dummy data
-    Navigator.pushReplacement(
-      context,
-      MaterialPageRoute(
-        builder: (_) => SuperAdminDashboard(
-          institutionName: 'Demo Institution',
-          adminName: 'Demo Admin',
-          email: _emailController.text.trim(),
-        ),
+    // 2. Start Loading State
+    setState(() {
+      _isLoading = true;
+    });
+
+    try {
+      // 3. Call the Auth Service to Login and fetch the user profile map
+      final userProfile = await _authService.loginUser(
+        email: _emailController.text.trim(),
+        password: _passwordController.text.trim(),
+      );
+
+      // Check if widget is still in the tree before navigating
+      if (!mounted) return;
+
+      if (userProfile != null) {
+        // 4. Extract the role
+        final String role = userProfile['role'] ?? 'Unknown';
+
+        // 5. Route based on role
+        if (role == 'SuperAdmin') {
+          Navigator.pushReplacement(
+            context,
+            MaterialPageRoute(
+              builder: (_) => SuperAdminDashboard(
+                institutionName:
+                    userProfile['institutionName'] ?? 'Institution',
+                adminName: userProfile['name'] ?? 'Admin',
+                email: userProfile['email'] ?? _emailController.text.trim(),
+              ),
+            ),
+          );
+        } else if (role == 'Warden') {
+          // TODO: Replace with WardenDashboard
+          _showErrorSnackBar('Warden Dashboard is under construction.');
+        } else if (role == 'Student') {
+          // TODO: Replace with StudentDashboard
+          _showErrorSnackBar('Student Dashboard is under construction.');
+        } else {
+          _showErrorSnackBar('Access Denied: Unknown Role.');
+        }
+      }
+    } catch (e) {
+      // Show error from Firebase if login fails (wrong password, etc.)
+      if (mounted) {
+        _showErrorSnackBar(e.toString().replaceAll('Exception: ', ''));
+      }
+    } finally {
+      // Stop Loading State
+      if (mounted) {
+        setState(() {
+          _isLoading = false;
+        });
+      }
+    }
+  }
+
+  void _showErrorSnackBar(String message) {
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(message),
+        backgroundColor: Colors.redAccent,
+        duration: const Duration(seconds: 4),
       ),
     );
   }
@@ -66,7 +124,9 @@ class _LoginScreenState extends State<LoginScreen> {
               borderRadius: BorderRadius.circular(16),
               boxShadow: [
                 BoxShadow(
-                  color: Colors.black.withValues(alpha: .05),
+                  color: Colors.black.withOpacity(
+                    .05,
+                  ), // Updated to withOpacity for older flutter versions, or keep withValues if you are on latest
                   blurRadius: 20,
                   spreadRadius: 5,
                 ),
@@ -162,22 +222,33 @@ class _LoginScreenState extends State<LoginScreen> {
                     width: double.infinity,
                     height: 52,
                     child: ElevatedButton(
-                      onPressed: _handleLogin,
+                      onPressed: _isLoading ? null : _handleLogin,
                       style: ElevatedButton.styleFrom(
                         backgroundColor: Colors.blueAccent,
                         foregroundColor: Colors.white,
                         shape: RoundedRectangleBorder(
                           borderRadius: BorderRadius.circular(8),
                         ),
-                      ),
-                      child: const Text(
-                        // Removed "(Bypass Auth)" here
-                        'Enter Console Workspace',
-                        style: TextStyle(
-                          fontSize: 15,
-                          fontWeight: FontWeight.bold,
+                        disabledBackgroundColor: Colors.blueAccent.withOpacity(
+                          0.6,
                         ),
                       ),
+                      child: _isLoading
+                          ? const SizedBox(
+                              width: 24,
+                              height: 24,
+                              child: CircularProgressIndicator(
+                                color: Colors.white,
+                                strokeWidth: 2,
+                              ),
+                            )
+                          : const Text(
+                              'Enter Console Workspace',
+                              style: TextStyle(
+                                fontSize: 15,
+                                fontWeight: FontWeight.bold,
+                              ),
+                            ),
                     ),
                   ),
                 ],
