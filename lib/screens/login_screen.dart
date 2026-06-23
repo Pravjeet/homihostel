@@ -1,6 +1,10 @@
 import 'package:flutter/material.dart';
+import 'firebase_auth_service.dart';
+
+// Dashboard Imports
 import 'super_admin_dashboard.dart';
-import 'firebase_auth_service.dart'; // Make sure this path is correct!
+import 'chief_warden_dashboard.dart';
+import 'warden_dashboard.dart';
 
 class LoginScreen extends StatefulWidget {
   const LoginScreen({super.key});
@@ -51,31 +55,53 @@ class _LoginScreenState extends State<LoginScreen> {
         // 4. Extract the role
         final String role = userProfile['role'] ?? 'Unknown';
 
+        // Extract common data for the dashboards
+        final String institutionName =
+            userProfile['institutionName'] ?? 'Institution';
+        final String userName = userProfile['name'] ?? 'User';
+        final String userEmail =
+            userProfile['email'] ?? _emailController.text.trim();
+
         // 5. Route based on role
         if (role == 'SuperAdmin') {
           Navigator.pushReplacement(
             context,
             MaterialPageRoute(
               builder: (_) => SuperAdminDashboard(
-                institutionName:
-                    userProfile['institutionName'] ?? 'Institution',
-                adminName: userProfile['name'] ?? 'Admin',
-                email: userProfile['email'] ?? _emailController.text.trim(),
+                institutionName: institutionName,
+                adminName: userName,
+                email: userEmail,
+              ),
+            ),
+          );
+        } else if (role == 'Chief Warden') {
+          Navigator.pushReplacement(
+            context,
+            MaterialPageRoute(
+              builder: (_) => ChiefWardenDashboard(
+                institutionName: institutionName,
+                wardenName: userName,
+                email: userEmail,
               ),
             ),
           );
         } else if (role == 'Warden') {
-          // TODO: Replace with WardenDashboard
-          _showErrorSnackBar('Warden Dashboard is under construction.');
-        } else if (role == 'Student') {
-          // TODO: Replace with StudentDashboard
-          _showErrorSnackBar('Student Dashboard is under construction.');
+          Navigator.pushReplacement(
+            context,
+            MaterialPageRoute(
+              builder: (_) => WardenDashboard(
+                institutionName: institutionName,
+                wardenName: userName,
+                email: userEmail,
+              ),
+            ),
+          );
         } else {
-          _showErrorSnackBar('Access Denied: Unknown Role.');
+          _showErrorSnackBar('Access Denied: Unrecognized or Unassigned Role.');
         }
       }
     } catch (e) {
-      // Show error from Firebase if login fails (wrong password, etc.)
+      // Show error from Firebase if login fails
       if (mounted) {
         _showErrorSnackBar(e.toString().replaceAll('Exception: ', ''));
       }
@@ -124,9 +150,7 @@ class _LoginScreenState extends State<LoginScreen> {
               borderRadius: BorderRadius.circular(16),
               boxShadow: [
                 BoxShadow(
-                  color: Colors.black.withOpacity(
-                    .05,
-                  ), // Updated to withOpacity for older flutter versions, or keep withValues if you are on latest
+                  color: Colors.black.withOpacity(.05),
                   blurRadius: 20,
                   spreadRadius: 5,
                 ),

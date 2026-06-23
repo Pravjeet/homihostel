@@ -1,11 +1,10 @@
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:firebase_core/firebase_core.dart';
-import 'package:cloud_firestore/cloud_firestore.dart'; // Added Firestore import
+import 'package:cloud_firestore/cloud_firestore.dart';
 
 class FirebaseAuthService {
   final FirebaseAuth _auth = FirebaseAuth.instance;
-  final FirebaseFirestore _firestore =
-      FirebaseFirestore.instance; // Initialize Firestore
+  final FirebaseFirestore _firestore = FirebaseFirestore.instance;
 
   // =====================================================
   // REGISTER SUPER ADMIN
@@ -44,18 +43,15 @@ class FirebaseAuthService {
         'collegeId': generatedCollegeId,
         'institutionName': institutionName,
         'isActive': true,
-        'createdAt':
-            FieldValue.serverTimestamp(), // Matches the gold standard test
+        'createdAt': FieldValue.serverTimestamp(),
       };
 
-      // 4. WRITE TO FIRESTORE (Directly like the test)
-      // Using .doc(uid).set() instead of .add() to link Auth and Firestore
+      // 4. WRITE TO FIRESTORE
       await _firestore
           .collection('users')
           .doc(firebaseUser.uid)
           .set(userProfile);
 
-      // Optional: You might also want to save the college document directly here
       await _firestore.collection('colleges').doc(generatedCollegeId).set({
         'collegeId': generatedCollegeId,
         'institutionName': institutionName,
@@ -92,7 +88,6 @@ class FirebaseAuthService {
         throw Exception("User authentication failed.");
       }
 
-      // Fetch profile directly from Firestore
       DocumentSnapshot<Map<String, dynamic>> userDoc = await _firestore
           .collection('users')
           .doc(user.uid)
@@ -118,7 +113,6 @@ class FirebaseAuthService {
       User? user = _auth.currentUser;
       if (user == null) return null;
 
-      // Fetch profile directly from Firestore
       DocumentSnapshot<Map<String, dynamic>> userDoc = await _firestore
           .collection('users')
           .doc(user.uid)
@@ -131,19 +125,19 @@ class FirebaseAuthService {
   }
 
   // =====================================================
-  // REGISTER SUB USER (FIXED FOR SESSION HIJACKING)
+  // REGISTER SUB USER (WITH PRESERVED SESSION ISOLATION)
   // =====================================================
   Future<void> registerSubUser({
     required String fullName,
     required String email,
-    required String role,
     required String password,
     required String parentCollegeId,
     required bool isActive,
+    String? role, // Optional/nullable role assignment
   }) async {
     FirebaseApp? tempApp;
     try {
-      // 1. Initialize temporary Firebase app
+      // 1. Initialize temporary Firebase app to prevent session hijack
       tempApp = await Firebase.initializeApp(
         name: 'tempSubUserCreationApp_${DateTime.now().millisecondsSinceEpoch}',
         options: Firebase.app().options,
@@ -157,7 +151,7 @@ class FirebaseAuthService {
       User? newFirebaseUser = userCredential.user;
 
       if (newFirebaseUser != null) {
-        // 3. WRITE TO FIRESTORE (Directly like the test)
+        // 3. WRITE TO FIRESTORE with injected college ID context
         await _firestore.collection('users').doc(newFirebaseUser.uid).set({
           'uid': newFirebaseUser.uid,
           'name': fullName,
@@ -175,10 +169,44 @@ class FirebaseAuthService {
       print("🚨 SUB-USER FIRESTORE ERROR: $e");
       throw Exception(e.toString());
     } finally {
-      // 4. Delete temp app
+      // 4. Clean up temp app context
       if (tempApp != null) {
         await tempApp.delete();
       }
+    }
+  }
+
+  // =====================================================
+  // FETCH USERS SHARED UNDER THE SAME COLLEGE ID
+  // =====================================================
+  Future<List<Map<String, dynamic>>> getUsersByCollegeId(
+    String collegeId,
+  ) async {
+    try {
+      QuerySnapshot<Map<String, dynamic>> snapshot = await _firestore
+          .collection('users')
+          .where('collegeId', isEqualTo: collegeId)
+          .get();
+
+      return snapshot.docs.map((doc) => doc.data()).toList();
+    } catch (e) {
+      print("🚨 FETCH USERS ERROR: $e");
+      throw Exception('Failed to load institution users.');
+    }
+  }
+
+  // =====================================================
+  // UPDATE USER ROLE
+  // =====================================================
+  Future<void> updateUserRole({
+    required String uid,
+    required String? newRole,
+  }) async {
+    try {
+      await _firestore.collection('users').doc(uid).update({'role': newRole});
+    } catch (e) {
+      print("🚨 UPDATE ROLE ERROR: $e");
+      throw Exception('Failed to update user role.');
     }
   }
 

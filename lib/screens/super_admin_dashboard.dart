@@ -3,6 +3,7 @@ import 'firebase_auth_service.dart';
 import 'auth_gate.dart';
 import 'user_management_view.dart';
 import 'hostel_configuration_view.dart';
+import 'roles_view.dart'; // <-- Added RolesView import
 
 class SuperAdminDashboard extends StatefulWidget {
   final String institutionName;
@@ -152,6 +153,16 @@ class _SuperAdminDashboardState extends State<SuperAdminDashboard> {
                         label: 'System Diagnostics',
                         icon: Icons.analytics_rounded,
                       ),
+                      _buildSidebarTile(
+                        index: 3,
+                        label: 'Roles',
+                        icon: Icons.shield_rounded,
+                      ),
+                      _buildSidebarTile(
+                        index: 4,
+                        label: 'Permissions',
+                        icon: Icons.vpn_key_rounded,
+                      ),
                     ],
                   ),
                 ),
@@ -214,6 +225,15 @@ class _SuperAdminDashboardState extends State<SuperAdminDashboard> {
                 ),
                 // Index 2: System Diagnostics
                 const Center(child: Text('System Diagnostics Module')),
+
+                // Index 3: Roles (Updated to use the new RolesView)
+                Padding(
+                  padding: const EdgeInsets.all(40),
+                  child: RolesView(collegeId: collegeId),
+                ),
+
+                // Index 4: Permissions
+                const Center(child: Text('Permissions Module')),
               ],
             ),
           ),

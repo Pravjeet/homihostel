@@ -12,19 +12,12 @@ class UserManagementView extends StatefulWidget {
 
 class _UserManagementViewState extends State<UserManagementView> {
   final FirebaseAuthService _authService = FirebaseAuthService();
-
   final _formKey = GlobalKey<FormState>();
-
   final _nameController = TextEditingController();
-
   final _emailController = TextEditingController();
-
   final _passwordController = TextEditingController();
 
-  String _selectedRole = 'Warden';
-
   bool _isLoading = false;
-
   List<Map<String, dynamic>> _users = [];
 
   @override
@@ -47,18 +40,13 @@ class _UserManagementViewState extends State<UserManagementView> {
     });
 
     try {
-      // Fetch users from Firebase (you'll need to implement this method)
-      // For now, we'll use dummy data with updated names
-      await Future.delayed(const Duration(seconds: 1));
+      // Fetch users from Firebase matching the current collegeId
+      final fetchedUsers = await _authService.getUsersByCollegeId(
+        widget.collegeId,
+      );
+
       setState(() {
-        _users = [
-          {'name': 'Deepak', 'email': 'deepak@example.com', 'role': 'Warden'},
-          {
-            'name': 'Rahul',
-            'email': 'rahul@example.com',
-            'role': 'Chief Warden',
-          },
-        ];
+        _users = fetchedUsers;
         _isLoading = false;
       });
     } catch (e) {
@@ -85,11 +73,11 @@ class _UserManagementViewState extends State<UserManagementView> {
     });
 
     try {
+      // Registers user. Role is intentionally omitted so it saves as null.
       await _authService.registerSubUser(
         fullName: _nameController.text.trim(),
         email: _emailController.text.trim(),
         password: _passwordController.text.trim(),
-        role: _selectedRole,
         parentCollegeId: widget.collegeId,
         isActive: true,
       );
@@ -100,11 +88,8 @@ class _UserManagementViewState extends State<UserManagementView> {
       _nameController.clear();
       _emailController.clear();
       _passwordController.clear();
-      setState(() {
-        _selectedRole = 'Warden';
-      });
 
-      // Reload users list
+      // Reload real-time structural data from backend
       await _loadUsers();
 
       ScaffoldMessenger.of(context).showSnackBar(
@@ -133,9 +118,6 @@ class _UserManagementViewState extends State<UserManagementView> {
     _nameController.clear();
     _emailController.clear();
     _passwordController.clear();
-    setState(() {
-      _selectedRole = 'Warden';
-    });
   }
 
   @override
@@ -143,7 +125,7 @@ class _UserManagementViewState extends State<UserManagementView> {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        // Title - No Add User Button Here
+        // Title Section
         const Text(
           'User Management',
           style: TextStyle(fontSize: 28, fontWeight: FontWeight.bold),
@@ -157,7 +139,7 @@ class _UserManagementViewState extends State<UserManagementView> {
 
         const SizedBox(height: 24),
 
-        // Create User Form - Full width card
+        // Create User Form Card
         Card(
           elevation: 2,
           shape: RoundedRectangleBorder(
@@ -171,14 +153,14 @@ class _UserManagementViewState extends State<UserManagementView> {
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   Row(
-                    children: [
+                    children: const [
                       Icon(
                         Icons.person_add,
                         color: Colors.blueAccent,
                         size: 24,
                       ),
-                      const SizedBox(width: 12),
-                      const Text(
+                      SizedBox(width: 12),
+                      Text(
                         'Create New User',
                         style: TextStyle(
                           fontSize: 18,
@@ -222,49 +204,17 @@ class _UserManagementViewState extends State<UserManagementView> {
 
                   const SizedBox(height: 16),
 
-                  Row(
-                    children: [
-                      Expanded(
-                        child: TextFormField(
-                          controller: _passwordController,
-                          decoration: const InputDecoration(
-                            labelText: 'Password',
-                            border: OutlineInputBorder(),
-                            prefixIcon: Icon(Icons.lock),
-                          ),
-                          obscureText: true,
-                          validator: (v) => v == null || v.length < 6
-                              ? 'Minimum 6 characters'
-                              : null,
-                        ),
-                      ),
-                      const SizedBox(width: 16),
-                      Expanded(
-                        child: DropdownButtonFormField<String>(
-                          value: _selectedRole,
-                          decoration: const InputDecoration(
-                            labelText: 'Role',
-                            border: OutlineInputBorder(),
-                            prefixIcon: Icon(Icons.admin_panel_settings),
-                          ),
-                          items: const [
-                            DropdownMenuItem(
-                              value: 'Warden',
-                              child: Text('Warden'),
-                            ),
-                            DropdownMenuItem(
-                              value: 'Chief Warden',
-                              child: Text('Chief Warden'),
-                            ),
-                          ],
-                          onChanged: (value) {
-                            setState(() {
-                              _selectedRole = value!;
-                            });
-                          },
-                        ),
-                      ),
-                    ],
+                  TextFormField(
+                    controller: _passwordController,
+                    decoration: const InputDecoration(
+                      labelText: 'Password',
+                      border: OutlineInputBorder(),
+                      prefixIcon: Icon(Icons.lock),
+                    ),
+                    obscureText: true,
+                    validator: (v) => v == null || v.length < 6
+                        ? 'Minimum 6 characters'
+                        : null,
                   ),
 
                   const SizedBox(height: 20),
@@ -309,7 +259,7 @@ class _UserManagementViewState extends State<UserManagementView> {
 
         const SizedBox(height: 24),
 
-        // Users List Section
+        // Users List Header Section
         Row(
           children: [
             const Text(
@@ -336,7 +286,7 @@ class _UserManagementViewState extends State<UserManagementView> {
 
         const SizedBox(height: 16),
 
-        // Users Table
+        // Users Data Viewport Layout Container
         Expanded(
           child: Container(
             width: double.infinity,
@@ -355,10 +305,10 @@ class _UserManagementViewState extends State<UserManagementView> {
             child: _isLoading
                 ? const Center(child: CircularProgressIndicator())
                 : _users.isEmpty
-                ? const Center(
+                ? Center(
                     child: Column(
                       mainAxisAlignment: MainAxisAlignment.center,
-                      children: [
+                      children: const [
                         Icon(
                           Icons.people_outline,
                           size: 64,
@@ -379,160 +329,179 @@ class _UserManagementViewState extends State<UserManagementView> {
                   )
                 : SingleChildScrollView(
                     scrollDirection: Axis.horizontal,
-                    child: DataTable(
-                      columnSpacing: 60,
-                      headingRowColor: MaterialStateColor.resolveWith(
-                        (states) => Colors.grey.shade50,
-                      ),
-                      columns: const [
-                        DataColumn(
-                          label: Text(
-                            'Name',
-                            style: TextStyle(fontWeight: FontWeight.bold),
-                          ),
+                    child: SingleChildScrollView(
+                      scrollDirection: Axis.vertical,
+                      child: DataTable(
+                        columnSpacing: 60,
+                        headingRowColor: MaterialStateColor.resolveWith(
+                          (states) => Colors.grey.shade50,
                         ),
-                        DataColumn(
-                          label: Text(
-                            'Email',
-                            style: TextStyle(fontWeight: FontWeight.bold),
+                        columns: const [
+                          DataColumn(
+                            label: Text(
+                              'Name',
+                              style: TextStyle(fontWeight: FontWeight.bold),
+                            ),
                           ),
-                        ),
-                        DataColumn(
-                          label: Text(
-                            'Role',
-                            style: TextStyle(fontWeight: FontWeight.bold),
+                          DataColumn(
+                            label: Text(
+                              'Email',
+                              style: TextStyle(fontWeight: FontWeight.bold),
+                            ),
                           ),
-                        ),
-                        DataColumn(
-                          label: Text(
-                            'Actions',
-                            style: TextStyle(fontWeight: FontWeight.bold),
+                          DataColumn(
+                            label: Text(
+                              'Role',
+                              style: TextStyle(fontWeight: FontWeight.bold),
+                            ),
                           ),
-                        ),
-                      ],
-                      rows: _users.map((user) {
-                        return DataRow(
-                          cells: [
-                            DataCell(
-                              Row(
-                                children: [
-                                  CircleAvatar(
-                                    radius: 16,
-                                    backgroundColor: Colors.grey.shade200,
-                                    child: Text(
-                                      (user['name'] ?? '')[0].toUpperCase(),
-                                      style: const TextStyle(
-                                        fontWeight: FontWeight.bold,
+                          DataColumn(
+                            label: Text(
+                              'Actions',
+                              style: TextStyle(fontWeight: FontWeight.bold),
+                            ),
+                          ),
+                        ],
+                        rows: _users.map((user) {
+                          final name = user['name'] ?? 'N/A';
+                          final email = user['email'] ?? 'N/A';
+                          // Now handles null gracefully with 'Unassigned'
+                          final role = user['role'] ?? 'Unassigned';
+
+                          // Helper for dynamic colors based on role
+                          Color badgeColor = Colors.grey.shade100;
+                          Color textColor = Colors.grey.shade800;
+
+                          if (role == 'Chief Warden') {
+                            badgeColor = Colors.purple.shade100;
+                            textColor = Colors.purple.shade800;
+                          } else if (role == 'Warden') {
+                            badgeColor = Colors.blue.shade100;
+                            textColor = Colors.blue.shade800;
+                          } else if (role == 'Unassigned') {
+                            badgeColor = Colors.orange.shade50;
+                            textColor = Colors.orange.shade800;
+                          }
+
+                          return DataRow(
+                            cells: [
+                              DataCell(
+                                Row(
+                                  children: [
+                                    CircleAvatar(
+                                      radius: 16,
+                                      backgroundColor: Colors.grey.shade200,
+                                      child: Text(
+                                        name.isNotEmpty
+                                            ? name[0].toUpperCase()
+                                            : '?',
+                                        style: const TextStyle(
+                                          fontWeight: FontWeight.bold,
+                                        ),
                                       ),
                                     ),
-                                  ),
-                                  const SizedBox(width: 8),
-                                  Text(user['name'] ?? ''),
-                                ],
+                                    const SizedBox(width: 8),
+                                    Text(name),
+                                  ],
+                                ),
                               ),
-                            ),
-                            DataCell(Text(user['email'] ?? '')),
-                            DataCell(
-                              Container(
-                                padding: const EdgeInsets.symmetric(
-                                  horizontal: 12,
-                                  vertical: 4,
-                                ),
-                                decoration: BoxDecoration(
-                                  color: user['role'] == 'Chief Warden'
-                                      ? Colors.purple.shade100
-                                      : Colors.blue.shade100,
-                                  borderRadius: BorderRadius.circular(12),
-                                ),
-                                child: Text(
-                                  user['role'] ?? '',
-                                  style: TextStyle(
-                                    fontWeight: FontWeight.w500,
-                                    color: user['role'] == 'Chief Warden'
-                                        ? Colors.purple.shade800
-                                        : Colors.blue.shade800,
-                                    fontSize: 12,
+                              DataCell(Text(email)),
+                              DataCell(
+                                Container(
+                                  padding: const EdgeInsets.symmetric(
+                                    horizontal: 12,
+                                    vertical: 4,
+                                  ),
+                                  decoration: BoxDecoration(
+                                    color: badgeColor,
+                                    borderRadius: BorderRadius.circular(12),
+                                  ),
+                                  child: Text(
+                                    role,
+                                    style: TextStyle(
+                                      fontWeight: FontWeight.w500,
+                                      color: textColor,
+                                      fontSize: 12,
+                                    ),
                                   ),
                                 ),
                               ),
-                            ),
-                            DataCell(
-                              Row(
-                                children: [
-                                  IconButton(
-                                    icon: const Icon(
-                                      Icons.edit,
-                                      size: 20,
-                                      color: Colors.blue,
-                                    ),
-                                    onPressed: () {
-                                      // Implement edit functionality
-                                      ScaffoldMessenger.of(
-                                        context,
-                                      ).showSnackBar(
-                                        const SnackBar(
-                                          content: Text(
-                                            'Edit functionality coming soon',
-                                          ),
-                                          backgroundColor: Colors.orange,
-                                        ),
-                                      );
-                                    },
-                                  ),
-                                  IconButton(
-                                    icon: const Icon(
-                                      Icons.delete,
-                                      size: 20,
-                                      color: Colors.red,
-                                    ),
-                                    onPressed: () {
-                                      // Implement delete functionality
-                                      showDialog(
-                                        context: context,
-                                        builder: (context) => AlertDialog(
-                                          title: const Text('Delete User'),
-                                          content: Text(
-                                            'Are you sure you want to delete ${user['name']}?',
-                                          ),
-                                          actions: [
-                                            TextButton(
-                                              onPressed: () =>
-                                                  Navigator.pop(context),
-                                              child: const Text('Cancel'),
+                              DataCell(
+                                Row(
+                                  children: [
+                                    IconButton(
+                                      icon: const Icon(
+                                        Icons.edit,
+                                        size: 20,
+                                        color: Colors.blue,
+                                      ),
+                                      onPressed: () {
+                                        ScaffoldMessenger.of(
+                                          context,
+                                        ).showSnackBar(
+                                          const SnackBar(
+                                            content: Text(
+                                              'Edit functionality coming soon',
                                             ),
-                                            TextButton(
-                                              onPressed: () {
-                                                Navigator.pop(context);
-                                                ScaffoldMessenger.of(
-                                                  context,
-                                                ).showSnackBar(
-                                                  const SnackBar(
-                                                    content: Text(
-                                                      'Delete functionality coming soon',
+                                            backgroundColor: Colors.orange,
+                                          ),
+                                        );
+                                      },
+                                    ),
+                                    IconButton(
+                                      icon: const Icon(
+                                        Icons.delete,
+                                        size: 20,
+                                        color: Colors.red,
+                                      ),
+                                      onPressed: () {
+                                        showDialog(
+                                          context: context,
+                                          builder: (context) => AlertDialog(
+                                            title: const Text('Delete User'),
+                                            content: Text(
+                                              'Are you sure you want to delete $name?',
+                                            ),
+                                            actions: [
+                                              TextButton(
+                                                onPressed: () =>
+                                                    Navigator.pop(context),
+                                                child: const Text('Cancel'),
+                                              ),
+                                              TextButton(
+                                                onPressed: () {
+                                                  Navigator.pop(context);
+                                                  ScaffoldMessenger.of(
+                                                    context,
+                                                  ).showSnackBar(
+                                                    const SnackBar(
+                                                      content: Text(
+                                                        'Delete functionality coming soon',
+                                                      ),
+                                                      backgroundColor:
+                                                          Colors.orange,
                                                     ),
-                                                    backgroundColor:
-                                                        Colors.orange,
+                                                  );
+                                                },
+                                                child: const Text(
+                                                  'Delete',
+                                                  style: TextStyle(
+                                                    color: Colors.red,
                                                   ),
-                                                );
-                                              },
-                                              child: const Text(
-                                                'Delete',
-                                                style: TextStyle(
-                                                  color: Colors.red,
                                                 ),
                                               ),
-                                            ),
-                                          ],
-                                        ),
-                                      );
-                                    },
-                                  ),
-                                ],
+                                            ],
+                                          ),
+                                        );
+                                      },
+                                    ),
+                                  ],
+                                ),
                               ),
-                            ),
-                          ],
-                        );
-                      }).toList(),
+                            ],
+                          );
+                        }).toList(),
+                      ),
                     ),
                   ),
           ),
