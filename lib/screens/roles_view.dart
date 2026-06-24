@@ -7,16 +7,17 @@ class RolesView extends StatefulWidget {
   const RolesView({super.key, required this.collegeId});
 
   @override
-  State<RolesView> createState() => _RolesViewState();
+  State<RolesView> createState() => RolesViewState(); // Changed to public state class
 }
 
-class _RolesViewState extends State<RolesView> {
+// Made state class public so parent can access refreshUsers method
+class RolesViewState extends State<RolesView> {
   final FirebaseAuthService _authService = FirebaseAuthService();
 
   bool _isLoading = false;
   List<Map<String, dynamic>> _allUsers = [];
-  bool _showOnlyUnassigned = true; // Defaults to showing users that need roles
 
+  // Strictly the roles you want to assign via this UI
   final List<String?> _availableRoles = [
     null, // Represents "Unassigned"
     'Student',
@@ -28,6 +29,11 @@ class _RolesViewState extends State<RolesView> {
   void initState() {
     super.initState();
     _loadUsers();
+  }
+
+  // Public method that parent widget can call to refresh users
+  Future<void> refreshUsers() async {
+    await _loadUsers();
   }
 
   Future<void> _loadUsers() async {
@@ -96,12 +102,10 @@ class _RolesViewState extends State<RolesView> {
 
   @override
   Widget build(BuildContext context) {
-    // Filter logic
-    final displayedUsers = _showOnlyUnassigned
-        ? _allUsers
-              .where((u) => u['role'] == null || u['role'] == 'Unassigned')
-              .toList()
-        : _allUsers;
+    // 1. Completely hide SuperAdmins from this management screen
+    final displayedUsers = _allUsers
+        .where((u) => u['role'] != 'SuperAdmin')
+        .toList();
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
@@ -127,44 +131,13 @@ class _RolesViewState extends State<RolesView> {
             // Refresh Button
             IconButton(
               icon: const Icon(Icons.refresh, color: Colors.blueAccent),
-              onPressed: _loadUsers,
+              onPressed: refreshUsers, // Changed to use public method
               tooltip: 'Refresh Users',
             ),
           ],
         ),
 
         const SizedBox(height: 24),
-
-        // Filter Toggle Section
-        Container(
-          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-          decoration: BoxDecoration(
-            color: Colors.white,
-            borderRadius: BorderRadius.circular(12),
-            border: Border.all(color: Colors.grey.shade200),
-          ),
-          child: Row(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              const Text(
-                'Show Only Unassigned',
-                style: TextStyle(fontWeight: FontWeight.w500),
-              ),
-              const SizedBox(width: 12),
-              Switch(
-                value: _showOnlyUnassigned,
-                onChanged: (val) {
-                  setState(() {
-                    _showOnlyUnassigned = val;
-                  });
-                },
-                activeColor: Colors.blueAccent,
-              ),
-            ],
-          ),
-        ),
-
-        const SizedBox(height: 16),
 
         // Users List
         Expanded(
@@ -176,19 +149,14 @@ class _RolesViewState extends State<RolesView> {
                     mainAxisAlignment: MainAxisAlignment.center,
                     children: [
                       Icon(
-                        Icons.check_circle_outline,
+                        Icons.group_off_outlined,
                         size: 64,
-                        color: Colors.green.shade300,
+                        color: Colors.grey.shade400,
                       ),
                       const SizedBox(height: 16),
-                      Text(
-                        _showOnlyUnassigned
-                            ? 'All users have been assigned roles!'
-                            : 'No users found.',
-                        style: const TextStyle(
-                          fontSize: 16,
-                          color: Colors.grey,
-                        ),
+                      const Text(
+                        'No users found.',
+                        style: TextStyle(fontSize: 16, color: Colors.grey),
                       ),
                     ],
                   ),
@@ -199,8 +167,16 @@ class _RolesViewState extends State<RolesView> {
                     final user = displayedUsers[index];
                     final name = user['name'] ?? 'Unknown';
                     final email = user['email'] ?? 'No Email';
-                    final currentRole = user['role'];
                     final uid = user['uid'];
+
+                    // The raw role from the database
+                    final rawRole = user['role'];
+
+                    // 2. CRASH PREVENTION: If a role is in the database but not in our
+                    // _availableRoles list, force the UI to display it as 'Unassigned'.
+                    final safeRole = _availableRoles.contains(rawRole)
+                        ? rawRole
+                        : null;
 
                     return Card(
                       margin: const EdgeInsets.only(bottom: 12),
@@ -218,7 +194,7 @@ class _RolesViewState extends State<RolesView> {
                             CircleAvatar(
                               backgroundColor: Colors.blue.shade50,
                               child: Text(
-                                name[0].toUpperCase(),
+                                name.isNotEmpty ? name[0].toUpperCase() : '?',
                                 style: TextStyle(
                                   color: Colors.blue.shade800,
                                   fontWeight: FontWeight.bold,
@@ -253,23 +229,23 @@ class _RolesViewState extends State<RolesView> {
                                 horizontal: 12,
                               ),
                               decoration: BoxDecoration(
-                                color: currentRole == null
+                                color: safeRole == null
                                     ? Colors.orange.shade50
                                     : Colors.grey.shade50,
                                 borderRadius: BorderRadius.circular(8),
                                 border: Border.all(
-                                  color: currentRole == null
+                                  color: safeRole == null
                                       ? Colors.orange.shade200
                                       : Colors.grey.shade300,
                                 ),
                               ),
                               child: DropdownButtonHideUnderline(
                                 child: DropdownButton<String?>(
-                                  value: currentRole,
+                                  value: safeRole, // Using the crash-safe role
                                   hint: const Text('Unassigned'),
                                   icon: const Icon(Icons.arrow_drop_down),
                                   style: TextStyle(
-                                    color: currentRole == null
+                                    color: safeRole == null
                                         ? Colors.orange.shade800
                                         : Colors.black87,
                                     fontWeight: FontWeight.w500,
@@ -281,7 +257,7 @@ class _RolesViewState extends State<RolesView> {
                                     );
                                   }).toList(),
                                   onChanged: (String? newRole) {
-                                    if (newRole != currentRole && uid != null) {
+                                    if (newRole != rawRole && uid != null) {
                                       _changeUserRole(uid, name, newRole);
                                     }
                                   },

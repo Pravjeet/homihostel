@@ -7,7 +7,7 @@ class FirebaseAuthService {
   final FirebaseFirestore _firestore = FirebaseFirestore.instance;
 
   // =====================================================
-  // REGISTER SUPER ADMIN
+  // REGISTER SUPER ADMIN (AND PROVISION WORKSPACE)
   // =====================================================
   Future<Map<String, dynamic>?> registerSuperAdmin({
     required String institutionName,
@@ -46,18 +46,69 @@ class FirebaseAuthService {
         'createdAt': FieldValue.serverTimestamp(),
       };
 
-      // 4. WRITE TO FIRESTORE
-      await _firestore
-          .collection('users')
-          .doc(firebaseUser.uid)
-          .set(userProfile);
+      // 4. WRITE TO FIRESTORE USING ATOMIC BATCH
+      WriteBatch batch = _firestore.batch();
 
-      await _firestore.collection('colleges').doc(generatedCollegeId).set({
+      // A. Save User Profile
+      DocumentReference userRef = _firestore
+          .collection('users')
+          .doc(firebaseUser.uid);
+      batch.set(userRef, userProfile);
+
+      // B. Save College Document
+      DocumentReference collegeRef = _firestore
+          .collection('colleges')
+          .doc(generatedCollegeId);
+      batch.set(collegeRef, {
         'collegeId': generatedCollegeId,
         'institutionName': institutionName,
         'adminUid': firebaseUser.uid,
         'createdAt': FieldValue.serverTimestamp(),
       });
+
+      // C. Provision Default Role Permissions for this College
+      Map<String, Map<String, dynamic>> defaultPermissions = {
+        'Chief Warden': {
+          'read': true,
+          'get': true,
+          'list': true,
+          'write': true,
+          'create': true,
+          'update': true,
+          'delete': true,
+        },
+        'Warden': {
+          'read': true,
+          'get': true,
+          'list': true,
+          'write': false,
+          'create': true,
+          'update': true,
+          'delete': false,
+        },
+        'Student': {
+          'read': false,
+          'get': true,
+          'list': false,
+          'write': false,
+          'create': false,
+          'update': true,
+          'delete': false,
+        },
+      };
+
+      for (var role in defaultPermissions.entries) {
+        DocumentReference permRef = collegeRef
+            .collection('role_permissions')
+            .doc(role.key);
+        // Add timestamp to the permission map before saving
+        Map<String, dynamic> permData = Map.from(role.value);
+        permData['updatedAt'] = FieldValue.serverTimestamp();
+        batch.set(permRef, permData);
+      }
+
+      // Commit the entire workspace setup at once
+      await batch.commit();
 
       return userProfile;
     } on FirebaseAuthException catch (e) {
@@ -156,7 +207,7 @@ class FirebaseAuthService {
           'uid': newFirebaseUser.uid,
           'name': fullName,
           'email': email,
-          'role': role,
+          'role': role ?? 'Student', // Fallback to Student if no role provided
           'collegeId': parentCollegeId,
           'isActive': isActive,
           'createdAt': FieldValue.serverTimestamp(),

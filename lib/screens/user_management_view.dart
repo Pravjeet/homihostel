@@ -3,8 +3,13 @@ import 'firebase_auth_service.dart';
 
 class UserManagementView extends StatefulWidget {
   final String collegeId;
+  final VoidCallback? onUserCreated; // Callback for parent notification
 
-  const UserManagementView({super.key, required this.collegeId});
+  const UserManagementView({
+    super.key,
+    required this.collegeId,
+    this.onUserCreated, // Optional callback parameter
+  });
 
   @override
   State<UserManagementView> createState() => _UserManagementViewState();
@@ -91,6 +96,9 @@ class _UserManagementViewState extends State<UserManagementView> {
 
       // Reload real-time structural data from backend
       await _loadUsers();
+
+      // Notify parent widget that a new user was created
+      widget.onUserCreated?.call();
 
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
