@@ -1,14 +1,16 @@
 import 'package:flutter/material.dart';
+import 'package:cloud_firestore/cloud_firestore.dart';
 import 'firebase_auth_service.dart';
+import 'add_user_screen.dart';
 
 class UserManagementView extends StatefulWidget {
   final String collegeId;
-  final VoidCallback? onUserCreated; // Callback for parent notification
+  final VoidCallback? onUserCreated;
 
   const UserManagementView({
     super.key,
     required this.collegeId,
-    this.onUserCreated, // Optional callback parameter
+    this.onUserCreated,
   });
 
   @override
@@ -17,26 +19,16 @@ class UserManagementView extends StatefulWidget {
 
 class _UserManagementViewState extends State<UserManagementView> {
   final FirebaseAuthService _authService = FirebaseAuthService();
-  final _formKey = GlobalKey<FormState>();
-  final _nameController = TextEditingController();
-  final _emailController = TextEditingController();
-  final _passwordController = TextEditingController();
 
   bool _isLoading = false;
   List<Map<String, dynamic>> _users = [];
+  String _searchQuery = '';
+  String _selectedRoleFilter = 'All';
 
   @override
   void initState() {
     super.initState();
     _loadUsers();
-  }
-
-  @override
-  void dispose() {
-    _nameController.dispose();
-    _emailController.dispose();
-    _passwordController.dispose();
-    super.dispose();
   }
 
   Future<void> _loadUsers() async {
@@ -45,476 +37,628 @@ class _UserManagementViewState extends State<UserManagementView> {
     });
 
     try {
-      // Fetch users from Firebase matching the current collegeId
       final fetchedUsers = await _authService.getUsersByCollegeId(
         widget.collegeId,
       );
 
+      if (!mounted) return;
       setState(() {
         _users = fetchedUsers;
         _isLoading = false;
       });
     } catch (e) {
+      if (!mounted) return;
       setState(() {
         _isLoading = false;
       });
-      if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
-          content: Text(e.toString().replaceAll('Exception: ', '')),
-          backgroundColor: Colors.red,
+          content: Text('Failed to load users: $e'),
+          backgroundColor: Colors.red.shade600,
         ),
       );
     }
   }
 
-  Future<void> _submitUserInvitation() async {
-    if (!_formKey.currentState!.validate()) {
-      return;
-    }
-
-    setState(() {
-      _isLoading = true;
-    });
-
-    try {
-      // Registers user. Role is intentionally omitted so it saves as null.
-      await _authService.registerSubUser(
-        fullName: _nameController.text.trim(),
-        email: _emailController.text.trim(),
-        password: _passwordController.text.trim(),
-        parentCollegeId: widget.collegeId,
-        isActive: true,
-      );
-
-      if (!mounted) return;
-
-      // Clear form after successful creation
-      _nameController.clear();
-      _emailController.clear();
-      _passwordController.clear();
-
-      // Reload real-time structural data from backend
-      await _loadUsers();
-
-      // Notify parent widget that a new user was created
-      widget.onUserCreated?.call();
-
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('User created successfully.'),
-          backgroundColor: Colors.green,
+  Future<void> _openAddUserScreen() async {
+    final result = await Navigator.push<bool>(
+      context,
+      MaterialPageRoute(
+        builder: (context) => AddUserScreen(
+          collegeId: widget.collegeId,
+          onUserCreated: widget.onUserCreated,
         ),
-      );
-    } catch (e) {
-      if (!mounted) return;
+      ),
+    );
 
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text(e.toString().replaceAll('Exception: ', '')),
-          backgroundColor: Colors.red,
-        ),
-      );
+    if (!mounted) return;
+    if (result == true) {
+      _loadUsers();
     }
-
-    setState(() {
-      _isLoading = false;
-    });
   }
 
-  void _resetForm() {
-    _nameController.clear();
-    _emailController.clear();
-    _passwordController.clear();
+  List<Map<String, dynamic>> get _filteredUsers {
+    var filtered = List<Map<String, dynamic>>.from(_users);
+
+    // Apply search filter
+    if (_searchQuery.isNotEmpty) {
+      filtered = filtered.where((user) {
+        final name = (user['name'] ?? '').toString().toLowerCase();
+        final email = (user['email'] ?? '').toString().toLowerCase();
+        final phone = (user['phoneNumber'] ?? '').toString().toLowerCase();
+        final query = _searchQuery.toLowerCase();
+        return name.contains(query) ||
+            email.contains(query) ||
+            phone.contains(query);
+      }).toList();
+    }
+
+    // Apply role filter
+    if (_selectedRoleFilter != 'All') {
+      filtered = filtered
+          .where(
+            (user) => (user['role'] ?? 'Unassigned') == _selectedRoleFilter,
+          )
+          .toList();
+    }
+
+    // Sort by creation date (newest first)
+    filtered.sort((a, b) {
+      final aTime = a['createdAt'] as Timestamp?;
+      final bTime = b['createdAt'] as Timestamp?;
+      if (aTime == null && bTime == null) return 0;
+      if (aTime == null) return 1;
+      if (bTime == null) return -1;
+      return bTime.compareTo(aTime);
+    });
+
+    return filtered;
+  }
+
+  List<String> get _availableRoles {
+    final roles = _users
+        .where((u) => u['role'] != null)
+        .map((u) => u['role'].toString())
+        .toSet()
+        .toList();
+    roles.sort();
+    return ['All', ...roles];
   }
 
   @override
   Widget build(BuildContext context) {
+    final filteredUsers = _filteredUsers;
+
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        // Title Section
-        const Text(
-          'User Management',
-          style: TextStyle(fontSize: 28, fontWeight: FontWeight.bold),
-        ),
-
-        const SizedBox(height: 8),
-        const Text(
-          'Create and manage users for your institution',
-          style: TextStyle(color: Colors.grey, fontSize: 14),
-        ),
-
-        const SizedBox(height: 24),
-
-        // Create User Form Card
-        Card(
-          elevation: 2,
-          shape: RoundedRectangleBorder(
-            borderRadius: BorderRadius.circular(12),
-          ),
-          child: Padding(
-            padding: const EdgeInsets.all(24.0),
-            child: Form(
-              key: _formKey,
+        // Header
+        Row(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Expanded(
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  Row(
-                    children: const [
-                      Icon(
-                        Icons.person_add,
-                        color: Colors.blueAccent,
-                        size: 24,
-                      ),
-                      SizedBox(width: 12),
-                      Text(
-                        'Create New User',
-                        style: TextStyle(
-                          fontSize: 18,
-                          fontWeight: FontWeight.bold,
-                        ),
-                      ),
-                    ],
-                  ),
-
-                  const SizedBox(height: 20),
-
-                  Row(
-                    children: [
-                      Expanded(
-                        child: TextFormField(
-                          controller: _nameController,
-                          decoration: const InputDecoration(
-                            labelText: 'Full Name',
-                            border: OutlineInputBorder(),
-                            prefixIcon: Icon(Icons.person),
-                          ),
-                          validator: (v) =>
-                              v == null || v.isEmpty ? 'Required' : null,
-                        ),
-                      ),
-                      const SizedBox(width: 16),
-                      Expanded(
-                        child: TextFormField(
-                          controller: _emailController,
-                          decoration: const InputDecoration(
-                            labelText: 'Email',
-                            border: OutlineInputBorder(),
-                            prefixIcon: Icon(Icons.email),
-                          ),
-                          validator: (v) =>
-                              v == null || v.isEmpty ? 'Required' : null,
-                        ),
-                      ),
-                    ],
-                  ),
-
-                  const SizedBox(height: 16),
-
-                  TextFormField(
-                    controller: _passwordController,
-                    decoration: const InputDecoration(
-                      labelText: 'Password',
-                      border: OutlineInputBorder(),
-                      prefixIcon: Icon(Icons.lock),
+                  Text(
+                    'User Management',
+                    style: TextStyle(
+                      fontSize: 28,
+                      fontWeight: FontWeight.w800,
+                      color: Colors.grey.shade900,
                     ),
-                    obscureText: true,
-                    validator: (v) => v == null || v.length < 6
-                        ? 'Minimum 6 characters'
-                        : null,
                   ),
-
-                  const SizedBox(height: 20),
-
-                  Row(
-                    children: [
-                      ElevatedButton(
-                        onPressed: _isLoading ? null : _submitUserInvitation,
-                        style: ElevatedButton.styleFrom(
-                          backgroundColor: Colors.blueAccent,
-                          padding: const EdgeInsets.symmetric(
-                            horizontal: 32,
-                            vertical: 12,
-                          ),
-                        ),
-                        child: _isLoading
-                            ? const SizedBox(
-                                width: 20,
-                                height: 20,
-                                child: CircularProgressIndicator(
-                                  strokeWidth: 2,
-                                  color: Colors.white,
-                                ),
-                              )
-                            : const Text(
-                                'Create User',
-                                style: TextStyle(color: Colors.white),
-                              ),
-                      ),
-                      const SizedBox(width: 12),
-                      TextButton(
-                        onPressed: _isLoading ? null : _resetForm,
-                        child: const Text('Clear Form'),
-                      ),
-                    ],
+                  const SizedBox(height: 6),
+                  Text(
+                    'Manage all users in one place. Control access, assign roles, and monitor activity across your platform.',
+                    style: TextStyle(color: Colors.grey.shade600, fontSize: 14),
                   ),
                 ],
               ),
             ),
-          ),
+            Row(
+              children: [
+                // Refresh button
+                Container(
+                  decoration: BoxDecoration(
+                    color: Colors.blue.shade50,
+                    borderRadius: BorderRadius.circular(12),
+                  ),
+                  child: IconButton(
+                    icon: Icon(
+                      Icons.refresh_rounded,
+                      color: Colors.blue.shade700,
+                    ),
+                    onPressed: _isLoading ? null : _loadUsers,
+                    tooltip: 'Refresh Data',
+                  ),
+                ),
+                const SizedBox(width: 12),
+                // Add User button
+                ElevatedButton.icon(
+                  onPressed: _openAddUserScreen,
+                  icon: const Icon(Icons.person_add_rounded, size: 20),
+                  label: const Text(
+                    'Add User',
+                    style: TextStyle(fontWeight: FontWeight.w600),
+                  ),
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: Colors.blue.shade600,
+                    foregroundColor: Colors.white,
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 20,
+                      vertical: 16,
+                    ),
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(8),
+                    ),
+                    elevation: 0,
+                  ),
+                ),
+              ],
+            ),
+          ],
         ),
 
         const SizedBox(height: 24),
 
-        // Users List Header Section
+        // Search and Filter bar
         Row(
           children: [
-            const Text(
-              'Registered Users',
-              style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold),
-            ),
-            const Spacer(),
-            Container(
-              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-              decoration: BoxDecoration(
-                color: Colors.blue.shade100,
-                borderRadius: BorderRadius.circular(20),
-              ),
-              child: Text(
-                '${_users.length} users',
-                style: TextStyle(
-                  color: Colors.blue.shade800,
-                  fontWeight: FontWeight.w500,
+            Expanded(
+              child: Container(
+                decoration: BoxDecoration(
+                  color: Colors.grey.shade50,
+                  borderRadius: BorderRadius.circular(12),
+                  border: Border.all(color: Colors.grey.shade200),
                 ),
+                child: TextField(
+                  onChanged: (value) {
+                    setState(() {
+                      _searchQuery = value;
+                    });
+                  },
+                  decoration: InputDecoration(
+                    hintText: 'Search users by name, email, or phone...',
+                    hintStyle: TextStyle(
+                      color: Colors.grey.shade400,
+                      fontSize: 14,
+                    ),
+                    prefixIcon: Icon(
+                      Icons.search_rounded,
+                      color: Colors.grey.shade500,
+                      size: 20,
+                    ),
+                    border: InputBorder.none,
+                    contentPadding: const EdgeInsets.symmetric(
+                      horizontal: 16,
+                      vertical: 14,
+                    ),
+                  ),
+                ),
+              ),
+            ),
+            const SizedBox(width: 12),
+            // Role filter dropdown
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 4),
+              decoration: BoxDecoration(
+                color: Colors.grey.shade50,
+                borderRadius: BorderRadius.circular(12),
+                border: Border.all(color: Colors.grey.shade200),
+              ),
+              child: DropdownButton<String>(
+                value: _selectedRoleFilter,
+                onChanged: (String? newValue) {
+                  if (newValue != null) {
+                    setState(() {
+                      _selectedRoleFilter = newValue;
+                    });
+                  }
+                },
+                underline: const SizedBox.shrink(),
+                padding: const EdgeInsets.symmetric(horizontal: 12),
+                icon: Icon(Icons.arrow_drop_down, color: Colors.grey.shade600),
+                style: TextStyle(color: Colors.grey.shade800, fontSize: 14),
+                items: _availableRoles.map((String role) {
+                  return DropdownMenuItem<String>(
+                    value: role,
+                    child: Text(role),
+                  );
+                }).toList(),
               ),
             ),
           ],
         ),
 
+        const SizedBox(height: 24),
+
+        // Stats row (Updated to just show Total Users)
+        Row(
+          children: [
+            _buildStatChip('Total Users', filteredUsers.length, Colors.blue),
+          ],
+        ),
+
         const SizedBox(height: 16),
 
-        // Users Data Viewport Layout Container
+        // Table with scroll
         Expanded(
-          child: Container(
-            width: double.infinity,
-            decoration: BoxDecoration(
-              color: Colors.white,
-              borderRadius: BorderRadius.circular(12),
-              boxShadow: [
-                BoxShadow(
-                  color: Colors.grey.withOpacity(0.1),
-                  spreadRadius: 1,
-                  blurRadius: 4,
-                  offset: const Offset(0, 2),
-                ),
-              ],
-            ),
-            child: _isLoading
-                ? const Center(child: CircularProgressIndicator())
-                : _users.isEmpty
-                ? Center(
-                    child: Column(
-                      mainAxisAlignment: MainAxisAlignment.center,
-                      children: const [
-                        Icon(
-                          Icons.people_outline,
-                          size: 64,
-                          color: Colors.grey,
-                        ),
-                        SizedBox(height: 16),
-                        Text(
-                          'No users found',
-                          style: TextStyle(fontSize: 16, color: Colors.grey),
-                        ),
-                        SizedBox(height: 8),
-                        Text(
-                          'Create your first user using the form above',
-                          style: TextStyle(fontSize: 14, color: Colors.grey),
-                        ),
-                      ],
-                    ),
-                  )
-                : SingleChildScrollView(
-                    scrollDirection: Axis.horizontal,
+          child: _isLoading
+              ? const Center(child: CircularProgressIndicator())
+              : filteredUsers.isEmpty
+              ? _buildEmptyState()
+              : Container(
+                  decoration: BoxDecoration(
+                    border: Border.all(color: Colors.grey.shade200),
+                    borderRadius: BorderRadius.circular(12),
+                  ),
+                  child: ClipRRect(
+                    borderRadius: BorderRadius.circular(12),
                     child: SingleChildScrollView(
-                      scrollDirection: Axis.vertical,
-                      child: DataTable(
-                        columnSpacing: 60,
-                        headingRowColor: MaterialStateColor.resolveWith(
-                          (states) => Colors.grey.shade50,
+                      scrollDirection: Axis.horizontal,
+                      child: SizedBox(
+                        width: MediaQuery.of(context).size.width - 48,
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            // Table Header (Status removed)
+                            Container(
+                              padding: const EdgeInsets.symmetric(
+                                horizontal: 16,
+                                vertical: 12,
+                              ),
+                              decoration: BoxDecoration(
+                                color: Colors.grey.shade50,
+                                border: Border(
+                                  bottom: BorderSide(
+                                    color: Colors.grey.shade200,
+                                  ),
+                                ),
+                              ),
+                              child: Row(
+                                children: [
+                                  _buildHeaderCell('Name', flex: 6),
+                                  _buildHeaderCell('Email', flex: 6),
+                                  _buildHeaderCell('Phone', flex: 4),
+                                  _buildHeaderCell('Role', flex: 3),
+                                  _buildHeaderCell('Joined', flex: 3),
+                                  _buildHeaderCell('Last Active', flex: 3),
+                                  _buildHeaderCell(
+                                    'Actions',
+                                    flex: 2,
+                                    center: true,
+                                  ),
+                                ],
+                              ),
+                            ),
+                            // Table Body
+                            Expanded(
+                              child: ListView.builder(
+                                padding: EdgeInsets.zero,
+                                itemCount: filteredUsers.length,
+                                itemBuilder: (context, index) {
+                                  final user = filteredUsers[index];
+                                  return _buildTableRow(user, index);
+                                },
+                              ),
+                            ),
+                          ],
                         ),
-                        columns: const [
-                          DataColumn(
-                            label: Text(
-                              'Name',
-                              style: TextStyle(fontWeight: FontWeight.bold),
-                            ),
-                          ),
-                          DataColumn(
-                            label: Text(
-                              'Email',
-                              style: TextStyle(fontWeight: FontWeight.bold),
-                            ),
-                          ),
-                          DataColumn(
-                            label: Text(
-                              'Role',
-                              style: TextStyle(fontWeight: FontWeight.bold),
-                            ),
-                          ),
-                          DataColumn(
-                            label: Text(
-                              'Actions',
-                              style: TextStyle(fontWeight: FontWeight.bold),
-                            ),
-                          ),
-                        ],
-                        rows: _users.map((user) {
-                          final name = user['name'] ?? 'N/A';
-                          final email = user['email'] ?? 'N/A';
-                          // Now handles null gracefully with 'Unassigned'
-                          final role = user['role'] ?? 'Unassigned';
-
-                          // Helper for dynamic colors based on role
-                          Color badgeColor = Colors.grey.shade100;
-                          Color textColor = Colors.grey.shade800;
-
-                          if (role == 'Chief Warden') {
-                            badgeColor = Colors.purple.shade100;
-                            textColor = Colors.purple.shade800;
-                          } else if (role == 'Warden') {
-                            badgeColor = Colors.blue.shade100;
-                            textColor = Colors.blue.shade800;
-                          } else if (role == 'Unassigned') {
-                            badgeColor = Colors.orange.shade50;
-                            textColor = Colors.orange.shade800;
-                          }
-
-                          return DataRow(
-                            cells: [
-                              DataCell(
-                                Row(
-                                  children: [
-                                    CircleAvatar(
-                                      radius: 16,
-                                      backgroundColor: Colors.grey.shade200,
-                                      child: Text(
-                                        name.isNotEmpty
-                                            ? name[0].toUpperCase()
-                                            : '?',
-                                        style: const TextStyle(
-                                          fontWeight: FontWeight.bold,
-                                        ),
-                                      ),
-                                    ),
-                                    const SizedBox(width: 8),
-                                    Text(name),
-                                  ],
-                                ),
-                              ),
-                              DataCell(Text(email)),
-                              DataCell(
-                                Container(
-                                  padding: const EdgeInsets.symmetric(
-                                    horizontal: 12,
-                                    vertical: 4,
-                                  ),
-                                  decoration: BoxDecoration(
-                                    color: badgeColor,
-                                    borderRadius: BorderRadius.circular(12),
-                                  ),
-                                  child: Text(
-                                    role,
-                                    style: TextStyle(
-                                      fontWeight: FontWeight.w500,
-                                      color: textColor,
-                                      fontSize: 12,
-                                    ),
-                                  ),
-                                ),
-                              ),
-                              DataCell(
-                                Row(
-                                  children: [
-                                    IconButton(
-                                      icon: const Icon(
-                                        Icons.edit,
-                                        size: 20,
-                                        color: Colors.blue,
-                                      ),
-                                      onPressed: () {
-                                        ScaffoldMessenger.of(
-                                          context,
-                                        ).showSnackBar(
-                                          const SnackBar(
-                                            content: Text(
-                                              'Edit functionality coming soon',
-                                            ),
-                                            backgroundColor: Colors.orange,
-                                          ),
-                                        );
-                                      },
-                                    ),
-                                    IconButton(
-                                      icon: const Icon(
-                                        Icons.delete,
-                                        size: 20,
-                                        color: Colors.red,
-                                      ),
-                                      onPressed: () {
-                                        showDialog(
-                                          context: context,
-                                          builder: (context) => AlertDialog(
-                                            title: const Text('Delete User'),
-                                            content: Text(
-                                              'Are you sure you want to delete $name?',
-                                            ),
-                                            actions: [
-                                              TextButton(
-                                                onPressed: () =>
-                                                    Navigator.pop(context),
-                                                child: const Text('Cancel'),
-                                              ),
-                                              TextButton(
-                                                onPressed: () {
-                                                  Navigator.pop(context);
-                                                  ScaffoldMessenger.of(
-                                                    context,
-                                                  ).showSnackBar(
-                                                    const SnackBar(
-                                                      content: Text(
-                                                        'Delete functionality coming soon',
-                                                      ),
-                                                      backgroundColor:
-                                                          Colors.orange,
-                                                    ),
-                                                  );
-                                                },
-                                                child: const Text(
-                                                  'Delete',
-                                                  style: TextStyle(
-                                                    color: Colors.red,
-                                                  ),
-                                                ),
-                                              ),
-                                            ],
-                                          ),
-                                        );
-                                      },
-                                    ),
-                                  ],
-                                ),
-                              ),
-                            ],
-                          );
-                        }).toList(),
                       ),
                     ),
                   ),
-          ),
+                ),
+        ),
+
+        const SizedBox(height: 12),
+
+        // Pagination info
+        Row(
+          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+          children: [
+            Text(
+              'Showing ${filteredUsers.length} of ${_users.length} users',
+              style: TextStyle(fontSize: 13, color: Colors.grey.shade600),
+            ),
+          ],
         ),
       ],
+    );
+  }
+
+  Widget _buildStatChip(String label, int count, Color color) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+      decoration: BoxDecoration(
+        color: color.withOpacity(0.1),
+        borderRadius: BorderRadius.circular(8),
+        border: Border.all(color: color.withOpacity(0.2)),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Container(
+            width: 8,
+            height: 8,
+            decoration: BoxDecoration(shape: BoxShape.circle, color: color),
+          ),
+          const SizedBox(width: 6),
+          Text(
+            '$label: $count',
+            style: TextStyle(
+              fontSize: 13,
+              fontWeight: FontWeight.w500,
+              color: color,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildHeaderCell(String text, {int flex = 1, bool center = false}) {
+    return Expanded(
+      flex: flex,
+      child: Text(
+        text,
+        style: TextStyle(
+          fontWeight: FontWeight.w600,
+          fontSize: 12,
+          color: Colors.grey.shade700,
+          letterSpacing: 0.3,
+        ),
+        textAlign: center ? TextAlign.center : TextAlign.left,
+      ),
+    );
+  }
+
+  Widget _buildTableRow(Map<String, dynamic> user, int index) {
+    final name = user['name'] ?? 'Unknown';
+    final email = user['email'] ?? 'No Email';
+    final phoneNumber = user['phoneNumber'] ?? '—';
+    final role = user['role'] ?? 'Unassigned';
+    final joinedDate = user['createdAt'] != null
+        ? _formatDate(user['createdAt'])
+        : '—';
+    final lastActive = user['lastActive'] != null
+        ? _formatDate(user['lastActive'])
+        : '—';
+
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+      decoration: BoxDecoration(
+        border: Border(
+          bottom: BorderSide(color: Colors.grey.shade100, width: 1),
+        ),
+        color: index % 2 == 0 ? Colors.white : Colors.grey.shade50,
+      ),
+      child: Row(
+        children: [
+          // Name with avatar
+          Expanded(
+            flex: 6,
+            child: Row(
+              children: [
+                CircleAvatar(
+                  radius: 16,
+                  backgroundColor: Colors.blue.shade50,
+                  child: Text(
+                    name.isNotEmpty ? name[0].toUpperCase() : '?',
+                    style: TextStyle(
+                      color: Colors.blue.shade800,
+                      fontWeight: FontWeight.bold,
+                      fontSize: 12,
+                    ),
+                  ),
+                ),
+                const SizedBox(width: 10),
+                Expanded(
+                  child: Text(
+                    name,
+                    style: TextStyle(
+                      fontWeight: FontWeight.w500,
+                      fontSize: 13,
+                      color: Colors.grey.shade900,
+                    ),
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                ),
+              ],
+            ),
+          ),
+          // Email
+          Expanded(
+            flex: 6,
+            child: Text(
+              email,
+              style: TextStyle(fontSize: 13, color: Colors.grey.shade700),
+              overflow: TextOverflow.ellipsis,
+            ),
+          ),
+          // Phone
+          Expanded(
+            flex: 4,
+            child: Text(
+              phoneNumber,
+              style: TextStyle(fontSize: 13, color: Colors.grey.shade700),
+              overflow: TextOverflow.ellipsis,
+            ),
+          ),
+          // Role (Status column removed)
+          Expanded(
+            flex: 3,
+            child: Container(
+              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+              decoration: BoxDecoration(
+                color: role == 'Unassigned'
+                    ? Colors.orange.shade50
+                    : Colors.grey.shade100,
+                borderRadius: BorderRadius.circular(12),
+              ),
+              child: Text(
+                role,
+                style: TextStyle(
+                  fontSize: 12,
+                  fontWeight: FontWeight.w500,
+                  color: role == 'Unassigned'
+                      ? Colors.orange.shade800
+                      : Colors.grey.shade700,
+                ),
+                textAlign: TextAlign.center,
+              ),
+            ),
+          ),
+          // Joined Date
+          Expanded(
+            flex: 3,
+            child: Text(
+              joinedDate,
+              style: TextStyle(fontSize: 12, color: Colors.grey.shade600),
+              textAlign: TextAlign.center,
+            ),
+          ),
+          // Last Active
+          Expanded(
+            flex: 3,
+            child: Text(
+              lastActive,
+              style: TextStyle(fontSize: 12, color: Colors.grey.shade600),
+              textAlign: TextAlign.center,
+            ),
+          ),
+          // Actions
+          Expanded(
+            flex: 2,
+            child: Row(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                IconButton(
+                  icon: Icon(
+                    Icons.edit_outlined,
+                    size: 18,
+                    color: Colors.grey.shade600,
+                  ),
+                  onPressed: () {
+                    // TODO: Implement edit user
+                  },
+                  tooltip: 'Edit user',
+                  padding: EdgeInsets.zero,
+                  constraints: const BoxConstraints(),
+                ),
+                const SizedBox(width: 8),
+                IconButton(
+                  icon: Icon(
+                    Icons.delete_outline,
+                    size: 18,
+                    color: Colors.red.shade400,
+                  ),
+                  onPressed: () => _showDeleteConfirmation(user),
+                  tooltip: 'Delete user',
+                  padding: EdgeInsets.zero,
+                  constraints: const BoxConstraints(),
+                ),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildEmptyState() {
+    return Center(
+      child: Column(
+        mainAxisAlignment: MainAxisAlignment.center,
+        children: [
+          Icon(Icons.group_off_outlined, size: 64, color: Colors.grey.shade300),
+          const SizedBox(height: 16),
+          Text(
+            'No users found',
+            style: TextStyle(fontSize: 16, color: Colors.grey.shade500),
+          ),
+          const SizedBox(height: 8),
+          Text(
+            _searchQuery.isNotEmpty || _selectedRoleFilter != 'All'
+                ? 'Try adjusting your filters'
+                : 'Tap "Add User" to create your first user.',
+            style: TextStyle(fontSize: 14, color: Colors.grey.shade400),
+          ),
+        ],
+      ),
+    );
+  }
+
+  String _formatDate(dynamic timestamp) {
+    if (timestamp == null) return '—';
+    try {
+      if (timestamp is Timestamp) {
+        final date = timestamp.toDate();
+        return '${_monthAbbr(date.month)} ${date.day}, ${date.year}';
+      }
+      return '—';
+    } catch (e) {
+      return '—';
+    }
+  }
+
+  String _monthAbbr(int month) {
+    const months = [
+      'Jan',
+      'Feb',
+      'Mar',
+      'Apr',
+      'May',
+      'Jun',
+      'Jul',
+      'Aug',
+      'Sep',
+      'Oct',
+      'Nov',
+      'Dec',
+    ];
+    return months[month - 1];
+  }
+
+  void _showDeleteConfirmation(Map<String, dynamic> user) {
+    showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Delete User'),
+        content: Text(
+          'Are you sure you want to delete "${user['name']}"? This action cannot be undone.',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text('Cancel'),
+          ),
+          TextButton(
+            onPressed: () async {
+              Navigator.pop(context);
+              try {
+                await _authService.deleteUser(user['uid']);
+                _loadUsers();
+                ScaffoldMessenger.of(context).showSnackBar(
+                  const SnackBar(
+                    content: Text('User deleted successfully'),
+                    backgroundColor: Colors.green,
+                  ),
+                );
+              } catch (e) {
+                ScaffoldMessenger.of(context).showSnackBar(
+                  SnackBar(
+                    content: Text('Failed to delete user: $e'),
+                    backgroundColor: Colors.red,
+                  ),
+                );
+              }
+            },
+            style: TextButton.styleFrom(foregroundColor: Colors.red),
+            child: const Text('Delete'),
+          ),
+        ],
+      ),
     );
   }
 }

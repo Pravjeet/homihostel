@@ -164,7 +164,7 @@ class _ChiefWardenDashboardState extends State<ChiefWardenDashboard> {
                   ),
                 ),
 
-                Divider(color: Colors.white.withOpacity(0.1)),
+                Divider(color: Colors.white.withValues(alpha: 0.1)),
 
                 ListTile(
                   leading: const Icon(
@@ -236,7 +236,7 @@ class _ChiefWardenDashboardState extends State<ChiefWardenDashboard> {
         selected: isSelected,
         selectedTileColor: const Color(
           0xFF10B981,
-        ).withOpacity(0.15), // Matched highlight color
+        ).withValues(alpha: 0.15), // Matched highlight color
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
         leading: Icon(
           icon,

@@ -156,7 +156,7 @@ class _WardenDashboardState extends State<WardenDashboard> {
                   ),
                 ),
 
-                Divider(color: Colors.white.withOpacity(0.1)),
+                Divider(color: Colors.white.withValues(alpha: 0.1)),
 
                 ListTile(
                   leading: const Icon(
@@ -233,7 +233,7 @@ class _WardenDashboardState extends State<WardenDashboard> {
       padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
       child: ListTile(
         selected: isSelected,
-        selectedTileColor: const Color(0xFF6366F1).withOpacity(0.15),
+        selectedTileColor: const Color(0xFF6366F1).withValues(alpha: 0.15),
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
         leading: Icon(
           icon,

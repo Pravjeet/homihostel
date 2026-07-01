@@ -1,5 +1,5 @@
 import 'package:flutter/material.dart';
-import 'permissions.dart'; // Import the file containing RolePermissions and PermissionsService
+import 'permissions.dart';
 
 class PermissionsView extends StatefulWidget {
   final String collegeId;
@@ -7,265 +7,488 @@ class PermissionsView extends StatefulWidget {
   const PermissionsView({super.key, required this.collegeId});
 
   @override
-  State<PermissionsView> createState() => _PermissionsViewState();
+  State<PermissionsView> createState() => PermissionsViewState();
 }
 
-class _PermissionsViewState extends State<PermissionsView> {
+class PermissionsViewState extends State<PermissionsView> {
   final PermissionsService _permissionsService = PermissionsService();
-  List<RolePermissions> _rolesPermissions = [];
-  bool _isLoading = true;
+
+  List<RolePermissions> _roles = [];
+  bool _isLoading = false;
+  bool _isSaving = false;
+
+  final Map<String, List<Map<String, String>>> _permissionCategories =
+      PermissionsService.getPermissionCategories();
 
   @override
   void initState() {
     super.initState();
-    _fetchPermissions();
+    _loadRoles();
   }
 
-  Future<void> _fetchPermissions() async {
-    setState(() => _isLoading = true);
-    final permissions = await _permissionsService.getAllRolePermissions(
-      widget.collegeId,
-    );
-
-    // If no permissions exist yet (first time login), initialize them
-    if (permissions.isEmpty) {
-      await _permissionsService.initializeDefaultPermissions(widget.collegeId);
-      final newPermissions = await _permissionsService.getAllRolePermissions(
-        widget.collegeId,
-      );
-      setState(() {
-        _rolesPermissions = newPermissions;
-        _isLoading = false;
-      });
-    } else {
-      setState(() {
-        _rolesPermissions = permissions;
-        _isLoading = false;
-      });
-    }
+  Future<void> refreshPermissions() async {
+    await _loadRoles();
   }
 
-  Future<void> _togglePermission(
-    RolePermissions role,
-    String permissionType,
-    bool newValue,
-  ) async {
-    RolePermissions updatedRole;
-
-    switch (permissionType) {
-      case 'read':
-        updatedRole = role.copyWith(canRead: newValue);
-        break;
-      case 'get':
-        updatedRole = role.copyWith(canGet: newValue);
-        break;
-      case 'list':
-        updatedRole = role.copyWith(canList: newValue);
-        break;
-      case 'write':
-        updatedRole = role.copyWith(canWrite: newValue);
-        break;
-      case 'create':
-        updatedRole = role.copyWith(canCreate: newValue);
-        break;
-      case 'update':
-        updatedRole = role.copyWith(canUpdate: newValue);
-        break;
-      case 'delete':
-        updatedRole = role.copyWith(canDelete: newValue);
-        break;
-      default:
-        return;
-    }
-
-    // Optimistic UI update
+  Future<void> _loadRoles() async {
     setState(() {
-      int index = _rolesPermissions.indexWhere(
-        (r) => r.roleName == role.roleName,
-      );
-      if (index != -1) {
-        _rolesPermissions[index] = updatedRole;
-      }
+      _isLoading = true;
     });
 
-    // Save to Firestore
     try {
-      await _permissionsService.updateRolePermission(
-        collegeId: widget.collegeId,
-        updatedPermission: updatedRole,
+      final fetchedRoles = await _permissionsService.getAllRolePermissions(
+        widget.collegeId,
       );
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('Permissions updated successfully!'),
-          backgroundColor: Colors.green,
-        ),
-      );
+
+      if (!mounted) return;
+
+      // Filter out SuperAdmin role
+      final filteredRoles = fetchedRoles
+          .where((role) => role.roleName != 'SuperAdmin')
+          .toList();
+
+      setState(() {
+        _roles = filteredRoles;
+        _isLoading = false;
+      });
     } catch (e) {
-      // Revert UI if update fails
-      _fetchPermissions();
+      if (!mounted) return;
+
+      setState(() {
+        _isLoading = false;
+      });
+
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
-          content: Text('Failed to update: $e'),
+          content: Text('Failed to load roles: $e'),
           backgroundColor: Colors.red,
         ),
       );
     }
   }
 
-  @override
-  Widget build(BuildContext context) {
-    if (_isLoading) {
-      return const Center(child: CircularProgressIndicator());
-    }
+  Future<void> _updateRolePermissions(RolePermissions updatedRole) async {
+    setState(() {
+      _isSaving = true;
+    });
 
-    if (_rolesPermissions.isEmpty) {
-      return const Center(child: Text("No roles found."));
-    }
+    try {
+      await _permissionsService.updateRolePermission(
+        collegeId: widget.collegeId,
+        updatedPermission: updatedRole,
+      );
 
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        const Text(
-          'Role Permissions Configuration',
-          style: TextStyle(
-            fontSize: 24,
-            fontWeight: FontWeight.bold,
-            color: Color(0xFF1E293B),
+      if (!mounted) return;
+
+      setState(() {
+        _isSaving = false;
+
+        final index = _roles.indexWhere(
+          (r) => r.roleName == updatedRole.roleName,
+        );
+
+        if (index != -1) {
+          _roles[index] = updatedRole;
+        }
+      });
+
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            'Permissions for ${updatedRole.roleName} updated successfully.',
           ),
+          backgroundColor: Colors.green,
         ),
-        const SizedBox(height: 8),
-        const Text(
-          'Toggle specific database access capabilities for each system role.',
-          style: TextStyle(fontSize: 14, color: Colors.grey),
+      );
+    } catch (e) {
+      if (!mounted) return;
+
+      setState(() {
+        _isSaving = false;
+      });
+
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('Failed to update permissions: $e'),
+          backgroundColor: Colors.red,
         ),
-        const SizedBox(height: 24),
-        Expanded(
-          child: ListView.builder(
-            itemCount: _rolesPermissions.length,
-            itemBuilder: (context, index) {
-              final role = _rolesPermissions[index];
-              return Card(
-                elevation: 0,
-                margin: const EdgeInsets.only(bottom: 16),
-                shape: RoundedRectangleBorder(
-                  borderRadius: BorderRadius.circular(12),
-                  side: BorderSide(color: Colors.grey.withOpacity(0.2)),
-                ),
-                child: Padding(
-                  padding: const EdgeInsets.all(20),
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(
-                        role.roleName,
-                        style: const TextStyle(
-                          fontSize: 20,
-                          fontWeight: FontWeight.bold,
-                          color: Colors.blueAccent,
-                        ),
-                      ),
-                      const Divider(height: 30),
+      );
+    }
+  }
 
-                      // Read Permissions Group
-                      const Text(
-                        'Read Access',
-                        style: TextStyle(
-                          fontWeight: FontWeight.w600,
-                          color: Colors.grey,
-                        ),
-                      ),
-                      const SizedBox(height: 10),
-                      Wrap(
-                        spacing: 20,
-                        runSpacing: 10,
-                        children: [
-                          _buildToggle(
-                            'Global Read (Get + List)',
-                            role.canRead,
-                            (val) => _togglePermission(role, 'read', val),
-                          ),
-                          _buildToggle(
-                            'Single Doc (Get)',
-                            role.canGet,
-                            (val) => _togglePermission(role, 'get', val),
-                          ),
-                          _buildToggle(
-                            'Query/List',
-                            role.canList,
-                            (val) => _togglePermission(role, 'list', val),
-                          ),
-                        ],
-                      ),
+  Widget _buildPermissionToggle(
+    String permissionKey,
+    String permissionLabel,
+    bool value,
+    RolePermissions role,
+  ) {
+    return SwitchListTile(
+      dense: true,
+      title: Text(
+        permissionLabel,
+        style: TextStyle(
+          fontSize: 14,
+          fontWeight: FontWeight.w600,
+          color: value ? Colors.blue.shade900 : Colors.grey.shade700,
+        ),
+      ),
+      value: value,
+      onChanged: _isSaving
+          ? null
+          : (newValue) {
+              setState(() {
+                final updatedRole = role.copyWith(
+                  canRead: permissionKey == 'read' ? newValue : role.canRead,
+                  canGet: permissionKey == 'get' ? newValue : role.canGet,
+                  canList: permissionKey == 'list' ? newValue : role.canList,
+                  canWrite: permissionKey == 'write' ? newValue : role.canWrite,
+                  canCreate: permissionKey == 'create'
+                      ? newValue
+                      : role.canCreate,
+                  canUpdate: permissionKey == 'update'
+                      ? newValue
+                      : role.canUpdate,
+                  canDelete: permissionKey == 'delete'
+                      ? newValue
+                      : role.canDelete,
+                );
 
-                      const SizedBox(height: 24),
+                final index = _roles.indexWhere(
+                  (r) => r.roleName == role.roleName,
+                );
 
-                      // Write Permissions Group
-                      const Text(
-                        'Write Access',
-                        style: TextStyle(
-                          fontWeight: FontWeight.w600,
-                          color: Colors.grey,
-                        ),
-                      ),
-                      const SizedBox(height: 10),
-                      Wrap(
-                        spacing: 20,
-                        runSpacing: 10,
-                        children: [
-                          _buildToggle(
-                            'Global Write (C/U/D)',
-                            role.canWrite,
-                            (val) => _togglePermission(role, 'write', val),
-                          ),
-                          _buildToggle(
-                            'Create',
-                            role.canCreate,
-                            (val) => _togglePermission(role, 'create', val),
-                          ),
-                          _buildToggle(
-                            'Update',
-                            role.canUpdate,
-                            (val) => _togglePermission(role, 'update', val),
-                          ),
-                          _buildToggle(
-                            'Delete',
-                            role.canDelete,
-                            (val) => _togglePermission(role, 'delete', val),
-                          ),
-                        ],
-                      ),
-                    ],
-                  ),
-                ),
-              );
+                if (index != -1) {
+                  _roles[index] = updatedRole;
+                }
+              });
             },
-          ),
-        ),
-      ],
     );
   }
 
-  Widget _buildToggle(String label, bool value, Function(bool) onChanged) {
-    return Container(
-      width: 250,
-      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-      decoration: BoxDecoration(
-        color: const Color(0xFFF8F9FA),
-        borderRadius: BorderRadius.circular(8),
-      ),
-      child: Row(
-        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+  bool _getPermissionValue(RolePermissions role, String key) {
+    switch (key) {
+      case 'read':
+        return role.canRead;
+      case 'get':
+        return role.canGet;
+      case 'list':
+        return role.canList;
+      case 'write':
+        return role.canWrite;
+      case 'create':
+        return role.canCreate;
+      case 'update':
+        return role.canUpdate;
+      case 'delete':
+        return role.canDelete;
+      default:
+        return false;
+    }
+  }
+
+  int _getPermissionCount(RolePermissions role) {
+    return [
+      role.canRead,
+      role.canGet,
+      role.canList,
+      role.canWrite,
+      role.canCreate,
+      role.canUpdate,
+      role.canDelete,
+    ].where((e) => e).length;
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.all(24.0),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Expanded(
-            child: Text(
-              label,
-              style: const TextStyle(fontSize: 14, fontWeight: FontWeight.w500),
-            ),
+          Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            children: [
+              Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    'Permissions Management',
+                    style: TextStyle(
+                      fontSize: 28,
+                      fontWeight: FontWeight.w800,
+                      color: Colors.grey.shade900,
+                    ),
+                  ),
+                  const SizedBox(height: 6),
+                  Text(
+                    'Configure role access permissions',
+                    style: TextStyle(color: Colors.grey.shade600, fontSize: 14),
+                  ),
+                ],
+              ),
+              Row(
+                children: [
+                  Container(
+                    decoration: BoxDecoration(
+                      color: Colors.blue.shade50,
+                      borderRadius: BorderRadius.circular(12),
+                    ),
+                    child: IconButton(
+                      onPressed: _isLoading ? null : _loadRoles,
+                      icon: Icon(
+                        Icons.refresh_rounded,
+                        color: Colors.blue.shade700,
+                      ),
+                      tooltip: 'Refresh Permissions',
+                    ),
+                  ),
+                ],
+              ),
+            ],
           ),
-          Switch(
-            value: value,
-            onChanged: onChanged,
-            activeColor: Colors.blueAccent,
+
+          const SizedBox(height: 24),
+
+          // Info card when no roles exist
+          if (!_isLoading && _roles.isEmpty)
+            Card(
+              elevation: 0,
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(12),
+                side: BorderSide(color: Colors.blue.shade100),
+              ),
+              color: Colors.blue.shade50,
+              child: Padding(
+                padding: const EdgeInsets.all(16.0),
+                child: Row(
+                  children: [
+                    Icon(Icons.info_outline, color: Colors.blue.shade700),
+                    const SizedBox(width: 12),
+                    Expanded(
+                      child: Text(
+                        'Create roles in the Role Management tab first, then configure their permissions here.',
+                        style: TextStyle(
+                          color: Colors.blue.shade700,
+                          fontSize: 14,
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+
+          const SizedBox(height: 24),
+
+          Expanded(
+            child: _isLoading
+                ? const Center(child: CircularProgressIndicator())
+                : _roles.isEmpty
+                ? Center(
+                    child: Column(
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      children: [
+                        Icon(
+                          Icons.shield_outlined,
+                          size: 64,
+                          color: Colors.grey.shade300,
+                        ),
+                        const SizedBox(height: 16),
+                        Text(
+                          'No roles created yet',
+                          style: TextStyle(
+                            fontSize: 18,
+                            fontWeight: FontWeight.w600,
+                            color: Colors.grey.shade600,
+                          ),
+                        ),
+                        const SizedBox(height: 8),
+                        Text(
+                          'Create roles in the Role Management tab first',
+                          style: TextStyle(
+                            fontSize: 14,
+                            color: Colors.grey.shade500,
+                          ),
+                        ),
+                      ],
+                    ),
+                  )
+                : ListView.builder(
+                    itemCount: _roles.length,
+                    itemBuilder: (context, index) {
+                      final role = _roles[index];
+                      final count = _getPermissionCount(role);
+
+                      return Card(
+                        margin: const EdgeInsets.only(bottom: 16),
+                        elevation: 0,
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(12),
+                          side: BorderSide(color: Colors.grey.shade200),
+                        ),
+                        child: ExpansionTile(
+                          title: Row(
+                            children: [
+                              Icon(
+                                Icons.admin_panel_settings,
+                                color: count > 0
+                                    ? Colors.blue.shade700
+                                    : Colors.grey.shade500,
+                                size: 24,
+                              ),
+                              const SizedBox(width: 12),
+                              Text(
+                                role.roleName,
+                                style: TextStyle(
+                                  fontWeight: FontWeight.bold,
+                                  color: Colors.grey.shade900,
+                                  fontSize: 16,
+                                ),
+                              ),
+                            ],
+                          ),
+                          subtitle: Padding(
+                            padding: const EdgeInsets.only(left: 36.0, top: 4),
+                            child: Text(
+                              '$count / 7 permissions enabled',
+                              style: TextStyle(
+                                color: count > 0
+                                    ? Colors.blue.shade600
+                                    : Colors.grey.shade500,
+                                fontSize: 13,
+                              ),
+                            ),
+                          ),
+                          children: [
+                            Padding(
+                              padding: const EdgeInsets.all(16),
+                              child: Column(
+                                children: [
+                                  ..._permissionCategories.entries.map((
+                                    category,
+                                  ) {
+                                    return Column(
+                                      crossAxisAlignment:
+                                          CrossAxisAlignment.start,
+                                      children: [
+                                        Align(
+                                          alignment: Alignment.centerLeft,
+                                          child: Padding(
+                                            padding: const EdgeInsets.only(
+                                              bottom: 12,
+                                              top: 8,
+                                            ),
+                                            child: Row(
+                                              children: [
+                                                Icon(
+                                                  category.key ==
+                                                          'Read Operations'
+                                                      ? Icons.visibility
+                                                      : Icons.edit,
+                                                  size: 18,
+                                                  color: Colors.grey.shade700,
+                                                ),
+                                                const SizedBox(width: 8),
+                                                Text(
+                                                  category.key,
+                                                  style: TextStyle(
+                                                    fontWeight: FontWeight.bold,
+                                                    color: Colors.grey.shade700,
+                                                    fontSize: 15,
+                                                  ),
+                                                ),
+                                              ],
+                                            ),
+                                          ),
+                                        ),
+                                        GridView.builder(
+                                          shrinkWrap: true,
+                                          physics:
+                                              const NeverScrollableScrollPhysics(),
+                                          gridDelegate:
+                                              const SliverGridDelegateWithMaxCrossAxisExtent(
+                                                maxCrossAxisExtent: 350,
+                                                mainAxisExtent: 60,
+                                              ),
+                                          itemCount: category.value.length,
+                                          itemBuilder: (context, permIndex) {
+                                            final permission =
+                                                category.value[permIndex];
+
+                                            final key = permission['key']!;
+                                            final label = permission['label']!;
+
+                                            return _buildPermissionToggle(
+                                              key,
+                                              label,
+                                              _getPermissionValue(role, key),
+                                              role,
+                                            );
+                                          },
+                                        ),
+                                      ],
+                                    );
+                                  }),
+
+                                  const SizedBox(height: 20),
+                                  Divider(color: Colors.grey.shade200),
+                                  const SizedBox(height: 16),
+
+                                  Align(
+                                    alignment: Alignment.centerRight,
+                                    child: ElevatedButton.icon(
+                                      onPressed: _isSaving
+                                          ? null
+                                          : () {
+                                              final updatedRole = _roles
+                                                  .firstWhere(
+                                                    (r) =>
+                                                        r.roleName ==
+                                                        role.roleName,
+                                                  );
+
+                                              _updateRolePermissions(
+                                                updatedRole,
+                                              );
+                                            },
+                                      icon: _isSaving
+                                          ? const SizedBox(
+                                              width: 16,
+                                              height: 16,
+                                              child: CircularProgressIndicator(
+                                                strokeWidth: 2,
+                                                color: Colors.white,
+                                              ),
+                                            )
+                                          : const Icon(Icons.save),
+                                      label: Text(
+                                        _isSaving
+                                            ? 'Saving...'
+                                            : 'Save Changes',
+                                      ),
+                                      style: ElevatedButton.styleFrom(
+                                        backgroundColor: Colors.blue.shade600,
+                                        foregroundColor: Colors.white,
+                                        padding: const EdgeInsets.symmetric(
+                                          horizontal: 24,
+                                          vertical: 12,
+                                        ),
+                                        shape: RoundedRectangleBorder(
+                                          borderRadius: BorderRadius.circular(
+                                            8,
+                                          ),
+                                        ),
+                                      ),
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            ),
+                          ],
+                        ),
+                      );
+                    },
+                  ),
           ),
         ],
       ),

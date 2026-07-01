@@ -150,7 +150,7 @@ class _LoginScreenState extends State<LoginScreen> {
               borderRadius: BorderRadius.circular(16),
               boxShadow: [
                 BoxShadow(
-                  color: Colors.black.withOpacity(.05),
+                  color: Colors.black.withValues(alpha: .05),
                   blurRadius: 20,
                   spreadRadius: 5,
                 ),
@@ -253,8 +253,8 @@ class _LoginScreenState extends State<LoginScreen> {
                         shape: RoundedRectangleBorder(
                           borderRadius: BorderRadius.circular(8),
                         ),
-                        disabledBackgroundColor: Colors.blueAccent.withOpacity(
-                          0.6,
+                        disabledBackgroundColor: Colors.blueAccent.withValues(
+                          alpha: 0.6,
                         ),
                       ),
                       child: _isLoading

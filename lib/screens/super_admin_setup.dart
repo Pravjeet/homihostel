@@ -110,7 +110,7 @@ class _SuperAdminSetupScreenState extends State<SuperAdminSetupScreen> {
               borderRadius: BorderRadius.circular(16),
               boxShadow: [
                 BoxShadow(
-                  color: Colors.black.withOpacity(.05),
+                  color: Colors.black.withValues(alpha: .05),
                   blurRadius: 20,
                   spreadRadius: 5,
                 ),

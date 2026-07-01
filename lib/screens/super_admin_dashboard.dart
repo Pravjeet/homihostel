@@ -1,9 +1,11 @@
 import 'package:flutter/material.dart';
 import 'firebase_auth_service.dart';
+import 'permissions.dart';
 import 'auth_gate.dart';
 import 'user_management_view.dart';
 import 'hostel_configuration_view.dart';
 import 'roles_view.dart';
+import 'permissions_view.dart';
 
 class SuperAdminDashboard extends StatefulWidget {
   final String institutionName;
@@ -26,12 +28,15 @@ class _SuperAdminDashboardState extends State<SuperAdminDashboard> {
   bool _isSidebarExpanded = true;
 
   final FirebaseAuthService _authService = FirebaseAuthService();
+  final PermissionsService _permissionsService = PermissionsService();
 
   String collegeId = '';
   bool isLoading = true;
 
-  // Key to access RolesView state and call refreshUsers
+  // Keys to access child states for refresh functionality
   final GlobalKey<RolesViewState> _rolesViewKey = GlobalKey<RolesViewState>();
+  final GlobalKey<PermissionsViewState> _permissionsViewKey =
+      GlobalKey<PermissionsViewState>();
 
   @override
   void initState() {
@@ -44,26 +49,45 @@ class _SuperAdminDashboardState extends State<SuperAdminDashboard> {
       final profile = await _authService.getCurrentUserProfile();
 
       if (profile != null) {
+        final cid = profile['collegeId'] ?? '';
         setState(() {
-          collegeId = profile['collegeId'] ?? '';
+          collegeId = cid;
           isLoading = false;
         });
+
+        // Initialize default permissions if this is a new college
+        await _initializePermissionsIfNeeded(cid);
       } else {
         setState(() {
           isLoading = false;
         });
       }
-    } catch (_) {
+    } catch (e) {
+      print("🚨 Error loading college ID: $e");
       setState(() {
         isLoading = false;
       });
     }
   }
 
-  // Callback that will be triggered when a user is created
+  Future<void> _initializePermissionsIfNeeded(String cid) async {
+    try {
+      final existingRoles = await _permissionsService.getAllRolePermissions(
+        cid,
+      );
+      if (existingRoles.isEmpty) {
+        await _permissionsService.initializeDefaultPermissions(cid);
+        print("✅ Default permissions initialized for college: $cid");
+      }
+    } catch (e) {
+      print("⚠️ Error initializing permissions: $e");
+    }
+  }
+
   void _onUserCreated() {
-    // Refresh the roles view to show the new user immediately
+    // Refresh both roles and permissions views
     _rolesViewKey.currentState?.refreshUsers();
+    _permissionsViewKey.currentState?.refreshPermissions();
   }
 
   Future<void> _logout() async {
@@ -99,6 +123,7 @@ class _SuperAdminDashboardState extends State<SuperAdminDashboard> {
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
+                  // --- Sidebar Header ---
                   Container(
                     padding: const EdgeInsets.symmetric(
                       vertical: 24,
@@ -125,9 +150,11 @@ class _SuperAdminDashboardState extends State<SuperAdminDashboard> {
                                   style: const TextStyle(
                                     color: Colors.white,
                                     fontWeight: FontWeight.bold,
+                                    fontSize: 14,
                                   ),
                                   overflow: TextOverflow.ellipsis,
                                 ),
+                                const SizedBox(height: 2),
                                 Text(
                                   widget.adminName,
                                   style: const TextStyle(
@@ -144,6 +171,7 @@ class _SuperAdminDashboardState extends State<SuperAdminDashboard> {
                     ),
                   ),
 
+                  // --- Sidebar Navigation Items ---
                   Expanded(
                     child: ListView(
                       padding: const EdgeInsets.symmetric(vertical: 12),
@@ -160,16 +188,11 @@ class _SuperAdminDashboardState extends State<SuperAdminDashboard> {
                         ),
                         _buildSidebarTile(
                           index: 2,
-                          label: 'System Diagnostics',
-                          icon: Icons.analytics_rounded,
-                        ),
-                        _buildSidebarTile(
-                          index: 3,
                           label: 'Roles',
                           icon: Icons.shield_rounded,
                         ),
                         _buildSidebarTile(
-                          index: 4,
+                          index: 3,
                           label: 'Permissions',
                           icon: Icons.vpn_key_rounded,
                         ),
@@ -177,7 +200,8 @@ class _SuperAdminDashboardState extends State<SuperAdminDashboard> {
                     ),
                   ),
 
-                  Divider(color: Colors.white.withOpacity(0.1)),
+                  // --- Sidebar Footer ---
+                  Divider(color: Colors.white.withValues(alpha: 0.1)),
 
                   ListTile(
                     leading: const Icon(
@@ -224,33 +248,35 @@ class _SuperAdminDashboardState extends State<SuperAdminDashboard> {
             child: IndexedStack(
               index: _selectedIndex,
               children: [
-                // Index 0: User Management (Updated with callback)
+                // Index 0: User Management
                 Padding(
                   padding: const EdgeInsets.all(40),
                   child: UserManagementView(
                     collegeId: collegeId,
-                    onUserCreated: _onUserCreated, // Pass callback
+                    onUserCreated: _onUserCreated,
                   ),
                 ),
+
                 // Index 1: Hostel Configuration
                 Padding(
                   padding: const EdgeInsets.all(40),
                   child: HostelConfigurationView(collegeId: collegeId),
                 ),
-                // Index 2: System Diagnostics
-                const Center(child: Text('System Diagnostics Module')),
 
-                // Index 3: Roles (Updated with key for refreshing)
+                // Index 2: Roles
                 Padding(
                   padding: const EdgeInsets.all(40),
-                  child: RolesView(
-                    key: _rolesViewKey, // Key to access state for refreshing
+                  child: RolesView(key: _rolesViewKey, collegeId: collegeId),
+                ),
+
+                // Index 3: Permissions
+                Padding(
+                  padding: const EdgeInsets.all(40),
+                  child: PermissionsView(
+                    key: _permissionsViewKey,
                     collegeId: collegeId,
                   ),
                 ),
-
-                // Index 4: Permissions
-                const Center(child: Text('Permissions Module')),
               ],
             ),
           ),
@@ -259,6 +285,9 @@ class _SuperAdminDashboardState extends State<SuperAdminDashboard> {
     );
   }
 
+  // =====================================================
+  // SIDEBAR TILE BUILDER
+  // =====================================================
   Widget _buildSidebarTile({
     required int index,
     required String label,
@@ -270,11 +299,12 @@ class _SuperAdminDashboardState extends State<SuperAdminDashboard> {
       padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
       child: ListTile(
         selected: isSelected,
-        selectedTileColor: const Color(0xFF6366F1).withOpacity(0.15),
+        selectedTileColor: const Color(0xFF6366F1).withValues(alpha: 0.15),
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
         leading: Icon(
           icon,
           color: isSelected ? const Color(0xFF6366F1) : Colors.white60,
+          size: 22,
         ),
         title: _isSidebarExpanded
             ? Text(
@@ -282,6 +312,7 @@ class _SuperAdminDashboardState extends State<SuperAdminDashboard> {
                 style: TextStyle(
                   color: isSelected ? Colors.white : Colors.white60,
                   fontWeight: isSelected ? FontWeight.bold : FontWeight.normal,
+                  fontSize: 14,
                 ),
               )
             : null,
