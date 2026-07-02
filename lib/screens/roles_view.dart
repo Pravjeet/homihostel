@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:cloud_firestore/cloud_firestore.dart'; // Added for custom fields
 import 'firebase_auth_service.dart';
 import 'permissions.dart';
 
@@ -48,6 +49,7 @@ class RolesViewState extends State<RolesView> {
       final fetchedUsers = await _authService.getUsersByCollegeId(
         widget.collegeId,
       );
+
       final fetchedRoles = await _permissionsService.getAllRolePermissions(
         widget.collegeId,
       );
@@ -67,6 +69,7 @@ class RolesViewState extends State<RolesView> {
     } catch (e) {
       if (!mounted) return;
       setState(() => _isLoading = false);
+
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
           content: Text('Error loading data: $e'),
@@ -78,6 +81,7 @@ class RolesViewState extends State<RolesView> {
 
   Future<void> _createNewRole() async {
     final roleName = _newRoleController.text.trim();
+
     if (roleName.isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
@@ -168,9 +172,11 @@ class RolesViewState extends State<RolesView> {
       );
     } catch (e) {
       if (!mounted) return;
+
       setState(() {
         _isCreatingRole = false;
       });
+
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
           content: Text('Failed to create role: $e'),
@@ -179,6 +185,69 @@ class RolesViewState extends State<RolesView> {
         ),
       );
     }
+  }
+
+  // --- NEW METHOD: Add Custom Field Dialog ---
+  void _showAddFieldDialog(String roleName) {
+    final TextEditingController fieldController = TextEditingController();
+    showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: Text('Add Field to $roleName'),
+        content: TextField(
+          controller: fieldController,
+          decoration: const InputDecoration(
+            labelText: 'Field Name (e.g., Department, Grade)',
+            border: OutlineInputBorder(),
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text('Cancel'),
+          ),
+          ElevatedButton(
+            onPressed: () async {
+              if (fieldController.text.isNotEmpty) {
+                try {
+                  await FirebaseFirestore.instance
+                      .collection('colleges')
+                      .doc(widget.collegeId)
+                      .collection('roles')
+                      .doc(roleName)
+                      .set({
+                        'customFields': FieldValue.arrayUnion([
+                          fieldController.text.trim(),
+                        ]),
+                      }, SetOptions(merge: true));
+
+                  if (mounted) {
+                    Navigator.pop(context);
+                    setState(() {}); // Refresh UI to trigger FutureBuilder
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      const SnackBar(
+                        content: Text('Custom field added.'),
+                        backgroundColor: Colors.green,
+                      ),
+                    );
+                  }
+                } catch (e) {
+                  if (mounted) {
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      SnackBar(
+                        content: Text('Failed to add field: $e'),
+                        backgroundColor: Colors.red,
+                      ),
+                    );
+                  }
+                }
+              }
+            },
+            child: const Text('Add Field'),
+          ),
+        ],
+      ),
+    );
   }
 
   Future<void> _deleteRole(String roleName) async {
@@ -258,6 +327,7 @@ class RolesViewState extends State<RolesView> {
 
     if (confirmed == true && mounted) {
       setState(() => _isDeletingRole = true);
+
       try {
         await _permissionsService.deleteRolePermissions(
           collegeId: widget.collegeId,
@@ -405,9 +475,11 @@ class RolesViewState extends State<RolesView> {
 
     if (confirmed == true && mounted) {
       setState(() => _isCleaningUp = true);
+
       try {
         await _permissionsService.cleanupAllRoles(widget.collegeId);
         await _loadData();
+
         if (mounted) {
           ScaffoldMessenger.of(context).showSnackBar(
             SnackBar(
@@ -453,6 +525,7 @@ class RolesViewState extends State<RolesView> {
       await _authService.updateUserRole(uid: uid, newRole: newRole);
 
       if (!mounted) return;
+
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
           content: Text('$userName assigned to ${newRole ?? 'Unassigned'}'),
@@ -465,6 +538,7 @@ class RolesViewState extends State<RolesView> {
       setState(() {
         _allUsers = previousUsers;
       });
+
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
@@ -483,7 +557,8 @@ class RolesViewState extends State<RolesView> {
         .toList();
 
     // Build role names list for dropdown (exclude SuperAdmin)
-    List<String?> roleNames = [null]; // Unassigned option
+    List<String?> roleNames = [null];
+    // Unassigned option
     roleNames.addAll(_allRoles.map((role) => role.roleName).toList());
 
     return Padding(
@@ -716,7 +791,7 @@ class RolesViewState extends State<RolesView> {
 
           const SizedBox(height: 32),
 
-          // --- AVAILABLE ROLES LIST ---
+          // --- AVAILABLE ROLES LIST (UPDATED WITH CUSTOM FIELDS) ---
           if (_allRoles.isNotEmpty) ...[
             Text(
               'Available Roles (${_allRoles.length})',
@@ -728,12 +803,14 @@ class RolesViewState extends State<RolesView> {
             ),
             const SizedBox(height: 12),
             Container(
-              height: 80,
-              padding: const EdgeInsets.symmetric(horizontal: 4),
-              child: ListView.separated(
-                scrollDirection: Axis.horizontal,
+              constraints: BoxConstraints(
+                maxHeight:
+                    MediaQuery.of(context).size.height *
+                    0.35, // Prevent it from taking the whole screen
+              ),
+              child: ListView.builder(
+                shrinkWrap: true,
                 itemCount: _allRoles.length,
-                separatorBuilder: (_, __) => const SizedBox(width: 12),
                 itemBuilder: (context, index) {
                   final role = _allRoles[index];
                   final permCount = [
@@ -746,61 +823,166 @@ class RolesViewState extends State<RolesView> {
                     role.canDelete,
                   ].where((p) => p == true).length;
 
-                  return Container(
-                    padding: const EdgeInsets.symmetric(
-                      horizontal: 20,
-                      vertical: 12,
-                    ),
-                    decoration: BoxDecoration(
-                      color: Colors.blue.shade50,
+                  return Card(
+                    margin: const EdgeInsets.only(bottom: 12),
+                    elevation: 0,
+                    shape: RoundedRectangleBorder(
                       borderRadius: BorderRadius.circular(12),
-                      border: Border.all(color: Colors.blue.shade200),
+                      side: BorderSide(color: Colors.grey.shade200),
                     ),
-                    child: Row(
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        Icon(
-                          Icons.shield_outlined,
-                          color: Colors.blue.shade700,
-                          size: 20,
-                        ),
-                        const SizedBox(width: 8),
-                        Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          mainAxisSize: MainAxisSize.min,
-                          children: [
-                            Text(
-                              role.roleName,
-                              style: TextStyle(
-                                fontWeight: FontWeight.w600,
-                                color: Colors.blue.shade800,
-                              ),
-                            ),
-                            Text(
-                              '$permCount permissions',
-                              style: TextStyle(
-                                fontSize: 10,
-                                color: Colors.blue.shade600,
-                              ),
-                            ),
-                          ],
-                        ),
-                        const SizedBox(width: 12),
-                        InkWell(
-                          onTap: _isDeletingRole
-                              ? null
-                              : () => _deleteRole(role.roleName),
-                          borderRadius: BorderRadius.circular(20),
-                          child: Padding(
-                            padding: const EdgeInsets.all(4.0),
-                            child: Icon(
-                              Icons.close_rounded,
-                              size: 18,
-                              color: Colors.red.shade400,
-                            ),
+                    color: Colors.white,
+                    child: Theme(
+                      // Removes the borders ExpansionTile adds by default
+                      data: Theme.of(
+                        context,
+                      ).copyWith(dividerColor: Colors.transparent),
+                      child: ExpansionTile(
+                        leading: Container(
+                          padding: const EdgeInsets.all(8),
+                          decoration: BoxDecoration(
+                            color: Colors.blue.shade50,
+                            borderRadius: BorderRadius.circular(8),
+                          ),
+                          child: Icon(
+                            Icons.shield_outlined,
+                            color: Colors.blue.shade700,
+                            size: 20,
                           ),
                         ),
-                      ],
+                        title: Text(
+                          role.roleName,
+                          style: TextStyle(
+                            fontWeight: FontWeight.w600,
+                            color: Colors.blue.shade900,
+                          ),
+                        ),
+                        subtitle: Text(
+                          '$permCount permissions • Click to manage fields',
+                          style: TextStyle(
+                            fontSize: 12,
+                            color: Colors.grey.shade600,
+                          ),
+                        ),
+                        trailing: IconButton(
+                          icon: Icon(
+                            Icons.delete_outline,
+                            color: Colors.red.shade400,
+                          ),
+                          onPressed: _isDeletingRole
+                              ? null
+                              : () => _deleteRole(role.roleName),
+                          tooltip: 'Delete Role',
+                        ),
+                        childrenPadding: const EdgeInsets.fromLTRB(
+                          20,
+                          0,
+                          20,
+                          20,
+                        ),
+                        children: [
+                          Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              const Divider(),
+                              const SizedBox(height: 8),
+                              FutureBuilder<DocumentSnapshot>(
+                                future: FirebaseFirestore.instance
+                                    .collection('colleges')
+                                    .doc(widget.collegeId)
+                                    .collection('roles')
+                                    .doc(role.roleName)
+                                    .get(),
+                                builder: (context, snapshot) {
+                                  if (snapshot.connectionState ==
+                                      ConnectionState.waiting) {
+                                    return const Center(
+                                      child: Padding(
+                                        padding: EdgeInsets.all(16),
+                                        child: CircularProgressIndicator(),
+                                      ),
+                                    );
+                                  }
+
+                                  List<dynamic> fields = [];
+                                  if (snapshot.hasData &&
+                                      snapshot.data!.exists) {
+                                    final data =
+                                        snapshot.data!.data()
+                                            as Map<String, dynamic>;
+                                    fields = data['customFields'] ?? [];
+                                  }
+
+                                  return Column(
+                                    crossAxisAlignment:
+                                        CrossAxisAlignment.start,
+                                    children: [
+                                      Text(
+                                        'Custom Detail Fields for ${role.roleName}s:',
+                                        style: TextStyle(
+                                          fontWeight: FontWeight.w600,
+                                          color: Colors.grey.shade800,
+                                        ),
+                                      ),
+                                      const SizedBox(height: 12),
+                                      if (fields.isEmpty)
+                                        Text(
+                                          'No custom fields defined yet.',
+                                          style: TextStyle(
+                                            color: Colors.grey.shade500,
+                                            fontSize: 13,
+                                            fontStyle: FontStyle.italic,
+                                          ),
+                                        )
+                                      else
+                                        Wrap(
+                                          spacing: 8,
+                                          runSpacing: 8,
+                                          children: fields
+                                              .map(
+                                                (field) => Chip(
+                                                  label: Text(field.toString()),
+                                                  backgroundColor:
+                                                      Colors.blue.shade50,
+                                                  labelStyle: TextStyle(
+                                                    color: Colors.blue.shade900,
+                                                    fontSize: 13,
+                                                  ),
+                                                  side: BorderSide.none,
+                                                ),
+                                              )
+                                              .toList(),
+                                        ),
+                                      const SizedBox(height: 16),
+                                      TextButton.icon(
+                                        onPressed: () =>
+                                            _showAddFieldDialog(role.roleName),
+                                        icon: const Icon(
+                                          Icons.add_circle_outline,
+                                          size: 20,
+                                        ),
+                                        label: const Text('Add Detail Field'),
+                                        style: TextButton.styleFrom(
+                                          foregroundColor: Colors.blue.shade700,
+                                          backgroundColor: Colors.blue.shade50,
+                                          padding: const EdgeInsets.symmetric(
+                                            horizontal: 16,
+                                            vertical: 12,
+                                          ),
+                                          shape: RoundedRectangleBorder(
+                                            borderRadius: BorderRadius.circular(
+                                              8,
+                                            ),
+                                          ),
+                                        ),
+                                      ),
+                                    ],
+                                  );
+                                },
+                              ),
+                            ],
+                          ),
+                        ],
+                      ),
                     ),
                   );
                 },

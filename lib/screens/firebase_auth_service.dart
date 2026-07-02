@@ -18,7 +18,6 @@ class FirebaseAuthService {
     try {
       UserCredential userCredential = await _auth
           .createUserWithEmailAndPassword(email: email, password: password);
-
       User? firebaseUser = userCredential.user;
 
       if (firebaseUser == null) {
@@ -32,10 +31,8 @@ class FirebaseAuthService {
       String cleanName = institutionName
           .replaceAll(RegExp(r'[^a-zA-Z0-9]'), '')
           .toLowerCase();
-
       String generatedCollegeId =
           'col_${cleanName}_${DateTime.now().millisecondsSinceEpoch.toString().substring(8)}';
-
       Map<String, dynamic> userProfile = {
         'uid': firebaseUser.uid,
         'name': adminName,
@@ -71,7 +68,6 @@ class FirebaseAuthService {
       DocumentReference roleRef = collegeRef
           .collection('role_permissions')
           .doc('SuperAdmin');
-
       batch.set(roleRef, {
         'read': true,
         'get': true,
@@ -82,7 +78,6 @@ class FirebaseAuthService {
         'delete': true,
         'updatedAt': FieldValue.serverTimestamp(),
       });
-
       await batch.commit();
 
       // Return updated user with fresh data
@@ -108,7 +103,6 @@ class FirebaseAuthService {
         email: email,
         password: password,
       );
-
       User? user = credential.user;
 
       if (user == null) {
@@ -132,7 +126,6 @@ class FirebaseAuthService {
           .collection('users')
           .doc(uid)
           .get();
-
       if (!userDoc.exists || userDoc.data() == null) {
         return null;
       }
@@ -167,7 +160,6 @@ class FirebaseAuthService {
           .doc(collegeId)
           .collection('role_permissions')
           .get();
-
       List<String> roles = [];
       for (var doc in snapshot.docs) {
         // Exclude SuperAdmin from available roles
@@ -224,11 +216,9 @@ class FirebaseAuthService {
         name: 'tempSubUserCreationApp_${DateTime.now().millisecondsSinceEpoch}',
         options: Firebase.app().options,
       );
-
       UserCredential userCredential = await FirebaseAuth.instanceFor(
         app: tempApp,
       ).createUserWithEmailAndPassword(email: email, password: password);
-
       User? newFirebaseUser = userCredential.user;
 
       if (newFirebaseUser == null) {
@@ -257,7 +247,6 @@ class FirebaseAuthService {
           .collection('users')
           .doc(newFirebaseUser.uid)
           .set(userData);
-
       return userData;
     } on FirebaseAuthException catch (e) {
       print("🚨 SUB-USER AUTH ERROR: ${e.message}");
@@ -273,7 +262,7 @@ class FirebaseAuthService {
   }
 
   // =====================================================
-  // UPDATE USER PROFILE (WITH ALL FIELDS)
+  // UPDATE USER PROFILE (WITH ALL FIELDS - STANDARD)
   // =====================================================
   Future<void> updateUserProfile({
     required String uid,
@@ -285,7 +274,6 @@ class FirebaseAuthService {
   }) async {
     try {
       Map<String, dynamic> updateData = {};
-
       if (name != null) {
         updateData['name'] = name;
         // Update Firebase Auth display name
@@ -307,6 +295,29 @@ class FirebaseAuthService {
     } catch (e) {
       print("🚨 UPDATE PROFILE ERROR: $e");
       throw Exception('Failed to update user profile.');
+    }
+  }
+
+  // =====================================================
+  // UPDATE ALL USER DETAILS (Including Dynamic Custom Data)
+  // =====================================================
+  Future<void> updateUserDetails(String uid, Map<String, dynamic> data) async {
+    try {
+      data['updatedAt'] = FieldValue.serverTimestamp();
+
+      // If name is being updated, we also need to update Firebase Auth display name
+      if (data.containsKey('name')) {
+        User? user = _auth.currentUser;
+        if (user != null && user.uid == uid) {
+          await user.updateDisplayName(data['name']);
+          await user.reload();
+        }
+      }
+
+      await _firestore.collection('users').doc(uid).update(data);
+    } catch (e) {
+      print("🚨 UPDATE DETAILS ERROR: $e");
+      throw Exception('Failed to update user details.');
     }
   }
 
@@ -354,7 +365,6 @@ class FirebaseAuthService {
           .collection('users')
           .where('collegeId', isEqualTo: collegeId)
           .get();
-
       return snapshot.docs.map((doc) => doc.data()).toList();
     } catch (e) {
       print("🚨 FETCH USERS ERROR: $e");
@@ -366,24 +376,22 @@ class FirebaseAuthService {
   Future<Map<String, int>> getUserStatistics(String collegeId) async {
     try {
       final users = await getUsersByCollegeId(collegeId);
-
       int total = 0;
       int students = 0;
       int wardens = 0;
       int chiefWardens = 0;
-
       for (var user in users) {
         if (user['role'] == 'SuperAdmin') continue;
 
         total++;
-
         final role = user['role'] ?? 'Unassigned';
-        if (role == 'Student')
+        if (role == 'Student') {
           students++;
-        else if (role == 'Warden')
+        } else if (role == 'Warden') {
           wardens++;
-        else if (role == 'Chief Warden')
+        } else if (role == 'Chief Warden') {
           chiefWardens++;
+        }
       }
 
       return {
@@ -408,7 +416,6 @@ class FirebaseAuthService {
           .doc(collegeId)
           .collection('role_permissions')
           .get();
-
       WriteBatch batch = _firestore.batch();
       int deletedCount = 0;
 

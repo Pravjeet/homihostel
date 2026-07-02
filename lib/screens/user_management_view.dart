@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'firebase_auth_service.dart';
 import 'add_user_screen.dart';
+import 'user_details_screen.dart'; // Added import for the new screen
 
 class UserManagementView extends StatefulWidget {
   final String collegeId;
@@ -19,7 +20,6 @@ class UserManagementView extends StatefulWidget {
 
 class _UserManagementViewState extends State<UserManagementView> {
   final FirebaseAuthService _authService = FirebaseAuthService();
-
   bool _isLoading = false;
   List<Map<String, dynamic>> _users = [];
   String _searchQuery = '';
@@ -35,12 +35,10 @@ class _UserManagementViewState extends State<UserManagementView> {
     setState(() {
       _isLoading = true;
     });
-
     try {
       final fetchedUsers = await _authService.getUsersByCollegeId(
         widget.collegeId,
       );
-
       if (!mounted) return;
       setState(() {
         _users = fetchedUsers;
@@ -70,7 +68,6 @@ class _UserManagementViewState extends State<UserManagementView> {
         ),
       ),
     );
-
     if (!mounted) return;
     if (result == true) {
       _loadUsers();
@@ -79,7 +76,6 @@ class _UserManagementViewState extends State<UserManagementView> {
 
   List<Map<String, dynamic>> get _filteredUsers {
     var filtered = List<Map<String, dynamic>>.from(_users);
-
     // Apply search filter
     if (_searchQuery.isNotEmpty) {
       filtered = filtered.where((user) {
@@ -111,7 +107,6 @@ class _UserManagementViewState extends State<UserManagementView> {
       if (bTime == null) return -1;
       return bTime.compareTo(aTime);
     });
-
     return filtered;
   }
 
@@ -128,7 +123,6 @@ class _UserManagementViewState extends State<UserManagementView> {
   @override
   Widget build(BuildContext context) {
     final filteredUsers = _filteredUsers;
-
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
@@ -273,7 +267,7 @@ class _UserManagementViewState extends State<UserManagementView> {
 
         const SizedBox(height: 24),
 
-        // Stats row (Updated to just show Total Users)
+        // Stats row
         Row(
           children: [
             _buildStatChip('Total Users', filteredUsers.length, Colors.blue),
@@ -302,7 +296,7 @@ class _UserManagementViewState extends State<UserManagementView> {
                         child: Column(
                           crossAxisAlignment: CrossAxisAlignment.start,
                           children: [
-                            // Table Header (Status removed)
+                            // Table Header
                             Container(
                               padding: const EdgeInsets.symmetric(
                                 horizontal: 16,
@@ -425,143 +419,177 @@ class _UserManagementViewState extends State<UserManagementView> {
         ? _formatDate(user['lastActive'])
         : '—';
 
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-      decoration: BoxDecoration(
-        border: Border(
-          bottom: BorderSide(color: Colors.grey.shade100, width: 1),
-        ),
-        color: index % 2 == 0 ? Colors.white : Colors.grey.shade50,
-      ),
-      child: Row(
-        children: [
-          // Name with avatar
-          Expanded(
-            flex: 6,
-            child: Row(
-              children: [
-                CircleAvatar(
-                  radius: 16,
-                  backgroundColor: Colors.blue.shade50,
+    return Material(
+      color: index % 2 == 0 ? Colors.white : Colors.grey.shade50,
+      child: InkWell(
+        hoverColor: Colors.blue.shade50.withOpacity(0.5),
+        onTap: () async {
+          // Navigate to User Details Screen
+          final result = await Navigator.push(
+            context,
+            MaterialPageRoute(
+              builder: (context) =>
+                  UserDetailsScreen(user: user, collegeId: widget.collegeId),
+            ),
+          );
+          // If the user was updated, refresh the list
+          if (result == true) {
+            _loadUsers();
+          }
+        },
+        child: Container(
+          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+          decoration: BoxDecoration(
+            border: Border(
+              bottom: BorderSide(color: Colors.grey.shade100, width: 1),
+            ),
+          ),
+          child: Row(
+            children: [
+              // Name with avatar
+              Expanded(
+                flex: 6,
+                child: Row(
+                  children: [
+                    CircleAvatar(
+                      radius: 16,
+                      backgroundColor: Colors.blue.shade50,
+                      child: Text(
+                        name.isNotEmpty ? name[0].toUpperCase() : '?',
+                        style: TextStyle(
+                          color: Colors.blue.shade800,
+                          fontWeight: FontWeight.bold,
+                          fontSize: 12,
+                        ),
+                      ),
+                    ),
+                    const SizedBox(width: 10),
+                    Expanded(
+                      child: Text(
+                        name,
+                        style: TextStyle(
+                          fontWeight: FontWeight.w500,
+                          fontSize: 13,
+                          color: Colors.grey.shade900,
+                        ),
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              // Email
+              Expanded(
+                flex: 6,
+                child: Text(
+                  email,
+                  style: TextStyle(fontSize: 13, color: Colors.grey.shade700),
+                  overflow: TextOverflow.ellipsis,
+                ),
+              ),
+              // Phone
+              Expanded(
+                flex: 4,
+                child: Text(
+                  phoneNumber,
+                  style: TextStyle(fontSize: 13, color: Colors.grey.shade700),
+                  overflow: TextOverflow.ellipsis,
+                ),
+              ),
+              // Role
+              Expanded(
+                flex: 3,
+                child: Container(
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 8,
+                    vertical: 4,
+                  ),
+                  decoration: BoxDecoration(
+                    color: role == 'Unassigned'
+                        ? Colors.orange.shade50
+                        : Colors.grey.shade100,
+                    borderRadius: BorderRadius.circular(12),
+                  ),
                   child: Text(
-                    name.isNotEmpty ? name[0].toUpperCase() : '?',
+                    role,
                     style: TextStyle(
-                      color: Colors.blue.shade800,
-                      fontWeight: FontWeight.bold,
                       fontSize: 12,
-                    ),
-                  ),
-                ),
-                const SizedBox(width: 10),
-                Expanded(
-                  child: Text(
-                    name,
-                    style: TextStyle(
                       fontWeight: FontWeight.w500,
-                      fontSize: 13,
-                      color: Colors.grey.shade900,
+                      color: role == 'Unassigned'
+                          ? Colors.orange.shade800
+                          : Colors.grey.shade700,
                     ),
-                    overflow: TextOverflow.ellipsis,
+                    textAlign: TextAlign.center,
                   ),
                 ),
-              ],
-            ),
-          ),
-          // Email
-          Expanded(
-            flex: 6,
-            child: Text(
-              email,
-              style: TextStyle(fontSize: 13, color: Colors.grey.shade700),
-              overflow: TextOverflow.ellipsis,
-            ),
-          ),
-          // Phone
-          Expanded(
-            flex: 4,
-            child: Text(
-              phoneNumber,
-              style: TextStyle(fontSize: 13, color: Colors.grey.shade700),
-              overflow: TextOverflow.ellipsis,
-            ),
-          ),
-          // Role (Status column removed)
-          Expanded(
-            flex: 3,
-            child: Container(
-              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-              decoration: BoxDecoration(
-                color: role == 'Unassigned'
-                    ? Colors.orange.shade50
-                    : Colors.grey.shade100,
-                borderRadius: BorderRadius.circular(12),
               ),
-              child: Text(
-                role,
-                style: TextStyle(
-                  fontSize: 12,
-                  fontWeight: FontWeight.w500,
-                  color: role == 'Unassigned'
-                      ? Colors.orange.shade800
-                      : Colors.grey.shade700,
+              // Joined Date
+              Expanded(
+                flex: 3,
+                child: Text(
+                  joinedDate,
+                  style: TextStyle(fontSize: 12, color: Colors.grey.shade600),
+                  textAlign: TextAlign.center,
                 ),
-                textAlign: TextAlign.center,
               ),
-            ),
-          ),
-          // Joined Date
-          Expanded(
-            flex: 3,
-            child: Text(
-              joinedDate,
-              style: TextStyle(fontSize: 12, color: Colors.grey.shade600),
-              textAlign: TextAlign.center,
-            ),
-          ),
-          // Last Active
-          Expanded(
-            flex: 3,
-            child: Text(
-              lastActive,
-              style: TextStyle(fontSize: 12, color: Colors.grey.shade600),
-              textAlign: TextAlign.center,
-            ),
-          ),
-          // Actions
-          Expanded(
-            flex: 2,
-            child: Row(
-              mainAxisAlignment: MainAxisAlignment.center,
-              children: [
-                IconButton(
-                  icon: Icon(
-                    Icons.edit_outlined,
-                    size: 18,
-                    color: Colors.grey.shade600,
-                  ),
-                  onPressed: () {
-                    // TODO: Implement edit user
-                  },
-                  tooltip: 'Edit user',
-                  padding: EdgeInsets.zero,
-                  constraints: const BoxConstraints(),
+              // Last Active
+              Expanded(
+                flex: 3,
+                child: Text(
+                  lastActive,
+                  style: TextStyle(fontSize: 12, color: Colors.grey.shade600),
+                  textAlign: TextAlign.center,
                 ),
-                const SizedBox(width: 8),
-                IconButton(
-                  icon: Icon(
-                    Icons.delete_outline,
-                    size: 18,
-                    color: Colors.red.shade400,
-                  ),
-                  onPressed: () => _showDeleteConfirmation(user),
-                  tooltip: 'Delete user',
-                  padding: EdgeInsets.zero,
-                  constraints: const BoxConstraints(),
+              ),
+              // Actions
+              Expanded(
+                flex: 2,
+                child: Row(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: [
+                    // Keeping edit button for fast actions, but it's redundant now
+                    IconButton(
+                      icon: Icon(
+                        Icons.edit_outlined,
+                        size: 18,
+                        color: Colors.grey.shade600,
+                      ),
+                      onPressed: () async {
+                        final result = await Navigator.push(
+                          context,
+                          MaterialPageRoute(
+                            builder: (context) => UserDetailsScreen(
+                              user: user,
+                              collegeId: widget.collegeId,
+                            ),
+                          ),
+                        );
+                        if (result == true) {
+                          _loadUsers();
+                        }
+                      },
+                      tooltip: 'Edit user',
+                      padding: EdgeInsets.zero,
+                      constraints: const BoxConstraints(),
+                    ),
+                    const SizedBox(width: 8),
+                    IconButton(
+                      icon: Icon(
+                        Icons.delete_outline,
+                        size: 18,
+                        color: Colors.red.shade400,
+                      ),
+                      onPressed: () => _showDeleteConfirmation(user),
+                      tooltip: 'Delete user',
+                      padding: EdgeInsets.zero,
+                      constraints: const BoxConstraints(),
+                    ),
+                  ],
                 ),
-              ],
-            ),
+              ),
+            ],
           ),
-        ],
+        ),
       ),
     );
   }
