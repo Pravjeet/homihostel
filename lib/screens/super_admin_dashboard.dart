@@ -6,6 +6,7 @@ import 'user_management_view.dart';
 import 'hostel_configuration_view.dart';
 import 'roles_view.dart';
 import 'permissions_view.dart';
+import 'user_dashboard_view.dart'; // Add this import
 
 class SuperAdminDashboard extends StatefulWidget {
   final String institutionName;
@@ -24,7 +25,7 @@ class SuperAdminDashboard extends StatefulWidget {
 }
 
 class _SuperAdminDashboardState extends State<SuperAdminDashboard> {
-  int _selectedIndex = 0;
+  int _selectedIndex = 0; // Keep starting at 0 (User Management)
   bool _isSidebarExpanded = true;
 
   final FirebaseAuthService _authService = FirebaseAuthService();
@@ -176,25 +177,35 @@ class _SuperAdminDashboardState extends State<SuperAdminDashboard> {
                     child: ListView(
                       padding: const EdgeInsets.symmetric(vertical: 12),
                       children: [
+                        // User Management (Index 0)
                         _buildSidebarTile(
                           index: 0,
                           label: 'User Management',
                           icon: Icons.person_add_alt_1_rounded,
                         ),
+                        // Hostel Configuration (Index 1)
                         _buildSidebarTile(
                           index: 1,
                           label: 'Hostel Configuration',
                           icon: Icons.domain_rounded,
                         ),
+                        // Roles (Index 2)
                         _buildSidebarTile(
                           index: 2,
                           label: 'Roles',
                           icon: Icons.shield_rounded,
                         ),
+                        // Permissions (Index 3)
                         _buildSidebarTile(
                           index: 3,
                           label: 'Permissions',
                           icon: Icons.vpn_key_rounded,
+                        ),
+                        // NEW: User Dashboard tile (Index 4 - LAST)
+                        _buildSidebarTile(
+                          index: 4,
+                          label: 'User Dashboard',
+                          icon: Icons.dashboard_rounded,
                         ),
                       ],
                     ),
@@ -275,6 +286,16 @@ class _SuperAdminDashboardState extends State<SuperAdminDashboard> {
                   child: PermissionsView(
                     key: _permissionsViewKey,
                     collegeId: collegeId,
+                  ),
+                ),
+
+                // Index 4: User Dashboard (NEW - LAST)
+                Padding(
+                  padding: const EdgeInsets.all(40),
+                  child: UserDashboardView(
+                    collegeId: collegeId,
+                    adminName: widget.adminName,
+                    email: widget.email,
                   ),
                 ),
               ],
