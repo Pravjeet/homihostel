@@ -1,11 +1,12 @@
 import 'package:flutter/material.dart';
-import 'firebase_auth_service.dart';
 
-// Dashboard Imports
-import 'super_admin_dashboard.dart';
-import 'chief_warden_dashboard.dart';
-import 'warden_dashboard.dart';
+import '../core/theme.dart';
+import '../services/auth_service.dart';
+import 'register_college_screen.dart';
 
+/// Single sign-in form for *everyone* — super admin, warden, student.
+/// There is deliberately no role picker: the role comes from the database,
+/// never from something the user can choose at the login screen.
 class LoginScreen extends StatefulWidget {
   const LoginScreen({super.key});
 
@@ -15,267 +16,206 @@ class LoginScreen extends StatefulWidget {
 
 class _LoginScreenState extends State<LoginScreen> {
   final _formKey = GlobalKey<FormState>();
-  final TextEditingController _emailController = TextEditingController();
-  final TextEditingController _passwordController = TextEditingController();
+  final _email = TextEditingController();
+  final _password = TextEditingController();
 
-  final FirebaseAuthService _authService = FirebaseAuthService();
-
-  bool _isPasswordHidden = true;
-  bool _isLoading = false;
+  bool _obscure = true;
+  bool _busy = false;
+  String? _error;
 
   @override
   void dispose() {
-    _emailController.dispose();
-    _passwordController.dispose();
+    _email.dispose();
+    _password.dispose();
     super.dispose();
   }
 
-  Future<void> _handleLogin() async {
-    // 1. Basic form validation
-    if (!_formKey.currentState!.validate()) {
-      return;
-    }
-
-    // 2. Start Loading State
+  Future<void> _submit() async {
+    if (!_formKey.currentState!.validate()) return;
     setState(() {
-      _isLoading = true;
+      _busy = true;
+      _error = null;
     });
-
     try {
-      // 3. Call the Auth Service to Login and fetch the user profile map
-      final userProfile = await _authService.loginUser(
-        email: _emailController.text.trim(),
-        password: _passwordController.text.trim(),
+      await AuthService.instance.signIn(
+        email: _email.text,
+        password: _password.text,
       );
-
-      // Check if widget is still in the tree before navigating
-      if (!mounted) return;
-
-      if (userProfile != null) {
-        // 4. Extract the role
-        final String role = userProfile['role'] ?? 'Unknown';
-
-        // Extract common data for the dashboards
-        final String institutionName =
-            userProfile['institutionName'] ?? 'Institution';
-        final String userName = userProfile['name'] ?? 'User';
-        final String userEmail =
-            userProfile['email'] ?? _emailController.text.trim();
-
-        // 5. Route based on role
-        if (role == 'SuperAdmin') {
-          Navigator.pushReplacement(
-            context,
-            MaterialPageRoute(
-              builder: (_) => SuperAdminDashboard(
-                institutionName: institutionName,
-                adminName: userName,
-                email: userEmail,
-              ),
-            ),
-          );
-        } else if (role == 'Chief Warden') {
-          Navigator.pushReplacement(
-            context,
-            MaterialPageRoute(
-              builder: (_) => ChiefWardenDashboard(
-                institutionName: institutionName,
-                wardenName: userName,
-                email: userEmail,
-              ),
-            ),
-          );
-        } else if (role == 'Warden') {
-          Navigator.pushReplacement(
-            context,
-            MaterialPageRoute(
-              builder: (_) => WardenDashboard(
-                institutionName: institutionName,
-                wardenName: userName,
-                email: userEmail,
-              ),
-            ),
-          );
-        } else {
-          _showErrorSnackBar('Access Denied: Unrecognized or Unassigned Role.');
-        }
-      }
+      // No navigation here — AuthGate reacts to the auth state change.
     } catch (e) {
-      // Show error from Firebase if login fails
-      if (mounted) {
-        _showErrorSnackBar(e.toString().replaceAll('Exception: ', ''));
-      }
+      if (mounted) setState(() => _error = AuthService.describeError(e));
     } finally {
-      // Stop Loading State
-      if (mounted) {
-        setState(() {
-          _isLoading = false;
-        });
-      }
+      if (mounted) setState(() => _busy = false);
     }
   }
 
-  void _showErrorSnackBar(String message) {
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(
-        content: Text(message),
-        backgroundColor: Colors.redAccent,
-        duration: const Duration(seconds: 4),
-      ),
-    );
+  Future<void> _resetPassword() async {
+    final email = _email.text.trim();
+    if (email.isEmpty) {
+      setState(() => _error = 'Enter your email above first, then tap this.');
+      return;
+    }
+    try {
+      await AuthService.instance.sendPasswordReset(email);
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Password reset link sent to $email')),
+      );
+    } catch (e) {
+      if (mounted) setState(() => _error = AuthService.describeError(e));
+    }
   }
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      backgroundColor: const Color(0xFFF5F7FA),
-      appBar: AppBar(
-        backgroundColor: Colors.transparent,
-        elevation: 0,
-        leading: IconButton(
-          icon: const Icon(
-            Icons.arrow_back_ios_new_rounded,
-            color: Colors.black87,
-          ),
-          onPressed: () => Navigator.pop(context),
-        ),
-      ),
+      backgroundColor: AppColors.canvas,
       body: Center(
         child: SingleChildScrollView(
-          child: Container(
-            width: 450,
-            padding: const EdgeInsets.all(40),
-            decoration: BoxDecoration(
-              color: Colors.white,
-              borderRadius: BorderRadius.circular(16),
-              boxShadow: [
-                BoxShadow(
-                  color: Colors.black.withValues(alpha: .05),
-                  blurRadius: 20,
-                  spreadRadius: 5,
-                ),
-              ],
-            ),
-            child: Form(
-              key: _formKey,
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  const Icon(
-                    Icons.lock_person_rounded,
-                    size: 50,
-                    color: Colors.blueAccent,
-                  ),
-                  const SizedBox(height: 16),
-                  const Text(
-                    'Workspace Sign In',
-                    style: TextStyle(
-                      fontSize: 24,
-                      fontWeight: FontWeight.bold,
-                      color: Colors.black87,
-                    ),
-                  ),
-                  const SizedBox(height: 6),
-                  const Text(
-                    'Access your institutional administration control console.',
-                    style: TextStyle(fontSize: 14, color: Colors.grey),
-                  ),
-                  const Divider(height: 32),
-
-                  // EMAIL FIELD
-                  TextFormField(
-                    controller: _emailController,
-                    keyboardType: TextInputType.emailAddress,
-                    decoration: const InputDecoration(
-                      labelText: 'Account Email Address',
-                      prefixIcon: Icon(Icons.email_outlined),
-                      filled: true,
-                      fillColor: Color(0xFFF8F9FA),
-                      border: OutlineInputBorder(
-                        borderSide: BorderSide.none,
-                        borderRadius: BorderRadius.all(Radius.circular(8)),
-                      ),
-                    ),
-                    validator: (value) {
-                      if (value == null || value.trim().isEmpty) {
-                        return 'Please enter your email';
-                      }
-                      return null;
-                    },
-                  ),
-                  const SizedBox(height: 20),
-
-                  // PASSWORD FIELD
-                  TextFormField(
-                    controller: _passwordController,
-                    obscureText: _isPasswordHidden,
-                    decoration: InputDecoration(
-                      labelText: 'Workspace Password',
-                      prefixIcon: const Icon(Icons.lock_outlined),
-                      filled: true,
-                      fillColor: const Color(0xFFF8F9FA),
-                      border: const OutlineInputBorder(
-                        borderSide: BorderSide.none,
-                        borderRadius: BorderRadius.all(Radius.circular(8)),
-                      ),
-                      suffixIcon: IconButton(
-                        icon: Icon(
-                          _isPasswordHidden
-                              ? Icons.visibility_off_outlined
-                              : Icons.visibility_outlined,
+          padding: const EdgeInsets.all(24),
+          child: ConstrainedBox(
+            constraints: const BoxConstraints(maxWidth: 430),
+            child: AppCard(
+              padding: const EdgeInsets.all(36),
+              child: Form(
+                key: _formKey,
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [
+                    Center(
+                      child: Container(
+                        height: 56,
+                        width: 56,
+                        decoration: BoxDecoration(
+                          color: AppColors.primary,
+                          borderRadius: BorderRadius.circular(16),
                         ),
-                        onPressed: () {
-                          setState(() {
-                            _isPasswordHidden = !_isPasswordHidden;
-                          });
-                        },
-                      ),
-                    ),
-                    validator: (value) {
-                      if (value == null || value.isEmpty) {
-                        return 'Please enter password';
-                      }
-                      return null;
-                    },
-                  ),
-                  const SizedBox(height: 32),
-
-                  // SUBMIT BUTTON
-                  SizedBox(
-                    width: double.infinity,
-                    height: 52,
-                    child: ElevatedButton(
-                      onPressed: _isLoading ? null : _handleLogin,
-                      style: ElevatedButton.styleFrom(
-                        backgroundColor: Colors.blueAccent,
-                        foregroundColor: Colors.white,
-                        shape: RoundedRectangleBorder(
-                          borderRadius: BorderRadius.circular(8),
-                        ),
-                        disabledBackgroundColor: Colors.blueAccent.withValues(
-                          alpha: 0.6,
+                        child: const Icon(
+                          Icons.shield_rounded,
+                          color: Colors.white,
+                          size: 30,
                         ),
                       ),
-                      child: _isLoading
+                    ),
+                    const SizedBox(height: 22),
+                    const Text(
+                      'Homi Hostel',
+                      textAlign: TextAlign.center,
+                      style: TextStyle(
+                        fontSize: 25,
+                        fontWeight: FontWeight.w800,
+                      ),
+                    ),
+                    const SizedBox(height: 6),
+                    const Text(
+                      'Sign in to your hostel workspace',
+                      textAlign: TextAlign.center,
+                      style: TextStyle(
+                        color: AppColors.textMuted,
+                        fontSize: 14,
+                      ),
+                    ),
+                    const SizedBox(height: 30),
+
+                    if (_error != null) ...[
+                      ErrorBanner(_error!),
+                      const SizedBox(height: 18),
+                    ],
+
+                    TextFormField(
+                      controller: _email,
+                      enabled: !_busy,
+                      keyboardType: TextInputType.emailAddress,
+                      autofillHints: const [AutofillHints.email],
+                      textInputAction: TextInputAction.next,
+                      decoration: const InputDecoration(
+                        labelText: 'Email',
+                        prefixIcon: Icon(Icons.mail_outline_rounded),
+                      ),
+                      validator: (v) {
+                        final s = v?.trim() ?? '';
+                        if (s.isEmpty) return 'Email is required';
+                        if (!RegExp(
+                          r'^[^@\s]+@[^@\s]+\.[^@\s]+$',
+                        ).hasMatch(s)) {
+                          return 'Enter a valid email address';
+                        }
+                        return null;
+                      },
+                    ),
+                    const SizedBox(height: 16),
+                    TextFormField(
+                      controller: _password,
+                      enabled: !_busy,
+                      obscureText: _obscure,
+                      autofillHints: const [AutofillHints.password],
+                      textInputAction: TextInputAction.done,
+                      onFieldSubmitted: (_) => _busy ? null : _submit(),
+                      decoration: InputDecoration(
+                        labelText: 'Password',
+                        prefixIcon: const Icon(Icons.lock_outline_rounded),
+                        suffixIcon: IconButton(
+                          icon: Icon(
+                            _obscure
+                                ? Icons.visibility_off_outlined
+                                : Icons.visibility_outlined,
+                          ),
+                          onPressed: () => setState(() => _obscure = !_obscure),
+                        ),
+                      ),
+                      validator: (v) =>
+                          (v == null || v.isEmpty) ? 'Password is required' : null,
+                    ),
+                    Align(
+                      alignment: Alignment.centerRight,
+                      child: TextButton(
+                        onPressed: _busy ? null : _resetPassword,
+                        child: const Text('Forgot password?'),
+                      ),
+                    ),
+                    const SizedBox(height: 6),
+                    ElevatedButton(
+                      onPressed: _busy ? null : _submit,
+                      child: _busy
                           ? const SizedBox(
-                              width: 24,
-                              height: 24,
+                              height: 20,
+                              width: 20,
                               child: CircularProgressIndicator(
+                                strokeWidth: 2.4,
                                 color: Colors.white,
-                                strokeWidth: 2,
                               ),
                             )
-                          : const Text(
-                              'Enter Console Workspace',
-                              style: TextStyle(
-                                fontSize: 15,
-                                fontWeight: FontWeight.bold,
-                              ),
-                            ),
+                          : const Text('Sign in'),
                     ),
-                  ),
-                ],
+                    const SizedBox(height: 18),
+                    Wrap(
+                      alignment: WrapAlignment.center,
+                      crossAxisAlignment: WrapCrossAlignment.center,
+                      children: [
+                        const Text(
+                          'Setting up a new institution?',
+                          style: TextStyle(
+                            color: AppColors.textMuted,
+                            fontSize: 13.5,
+                          ),
+                        ),
+                        TextButton(
+                          onPressed: _busy
+                              ? null
+                              : () => Navigator.push(
+                                  context,
+                                  MaterialPageRoute(
+                                    builder: (_) =>
+                                        const RegisterCollegeScreen(),
+                                  ),
+                                ),
+                          child: const Text('Register'),
+                        ),
+                      ],
+                    ),
+                  ],
+                ),
               ),
             ),
           ),
@@ -283,4 +223,39 @@ class _LoginScreenState extends State<LoginScreen> {
       ),
     );
   }
+}
+
+class ErrorBanner extends StatelessWidget {
+  final String message;
+  const ErrorBanner(this.message, {super.key});
+
+  @override
+  Widget build(BuildContext context) => Container(
+    padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+    decoration: BoxDecoration(
+      color: AppColors.dangerSoft,
+      borderRadius: BorderRadius.circular(10),
+    ),
+    child: Row(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        const Icon(
+          Icons.error_outline_rounded,
+          color: AppColors.danger,
+          size: 19,
+        ),
+        const SizedBox(width: 10),
+        Expanded(
+          child: Text(
+            message,
+            style: const TextStyle(
+              color: AppColors.danger,
+              fontSize: 13,
+              height: 1.35,
+            ),
+          ),
+        ),
+      ],
+    ),
+  );
 }

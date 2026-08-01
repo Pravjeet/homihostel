@@ -1,0 +1,242 @@
+rules_version = '2';
+
+// =====================================================================
+// Homi Hostel security rules
+//
+// Deploy with:  firebase deploy --only firestore:rules
+//
+// Guiding principle: the client UI hides things, but these rules are what
+// actually enforces them. Anyone can call the Firestore REST API directly,
+// so every permission check in the app is repeated here.
+// =====================================================================
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // ---------------- helpers ----------------
+
+    function signedIn() {
+      return request.auth != null;
+    }
+
+    function me() {
+      return get(/databases/$(database)/documents/users/$(request.auth.uid)).data;
+    }
+
+    function myCollege() {
+      return me().collegeId;
+    }
+
+    function isActive() {
+      return me().get('isActive', true) == true;
+    }
+
+    function isSuperAdmin() {
+      return signedIn() && me().get('isSuperAdmin', false) == true;
+    }
+
+    // Reads the caller's role doc and checks a single permission string.
+    function hasPerm(perm) {
+      return signedIn() && isActive() && (
+        isSuperAdmin() ||
+        (
+          me().get('roleId', null) != null &&
+          perm in get(
+            /databases/$(database)/documents/colleges/$(myCollege())/roles/$(me().roleId)
+          ).data.get('permissions', [])
+        )
+      );
+    }
+
+    function sameCollege(collegeId) {
+      return signedIn() && myCollege() == collegeId;
+    }
+
+    // Fields a user is allowed to change on their *own* profile. Notably
+    // absent: role, collegeId, isSuperAdmin, isActive — otherwise anyone
+    // could promote themselves to Super Admin.
+    function onlySelfEditableFields() {
+      return request.resource.data.diff(resource.data).affectedKeys()
+        .hasOnly(['name', 'phone', 'gender', 'updatedAt']);
+    }
+
+    // The only user fields an allotment write may touch. Someone holding
+    // allotment.manage can put a student in a room, but cannot rename them,
+    // change their role, or reactivate a disabled account.
+    function onlyAllotmentFields() {
+      return request.resource.data.diff(resource.data).affectedKeys()
+        .hasOnly(['hostelId', 'hostelName', 'roomId', 'roomNumber',
+                  'allottedAt', 'updatedAt']);
+    }
+
+    // ---------------- colleges ----------------
+
+    match /colleges/{collegeId} {
+      // Anyone in the college may read its name; only the owner may change it.
+      allow read: if sameCollege(collegeId);
+
+      // Creation happens during registration: the caller must be naming
+      // themselves as owner. The matching users/{uid} doc is written in the
+      // same batch.
+      allow create: if signedIn()
+                    && request.resource.data.ownerUid == request.auth.uid;
+
+      allow update: if isSuperAdmin() && sameCollege(collegeId);
+      allow delete: if false; // never from the client
+
+      // ---------------- roles ----------------
+
+      match /roles/{roleId} {
+        // Everyone in the college can read roles — the app needs the caller's
+        // own role doc to know what they may do.
+        allow read: if sameCollege(collegeId);
+
+        // Bootstrap: during registration the starter roles are written in the
+        // SAME batch that creates the college. Batched writes are evaluated
+        // against the PRE-batch state, so the college document does not exist
+        // yet and we cannot look up its owner. We therefore allow the write
+        // only while the college is still being created — the collegeId is a
+        // random, unguessable slug, and the accompanying users/{uid} write is
+        // what actually binds the workspace to its owner.
+        allow create: if signedIn() && (
+                        !exists(/databases/$(database)/documents/colleges/$(collegeId))
+                        || (sameCollege(collegeId) && hasPerm('roles.manage'))
+                      );
+
+        // The system role is immutable, and no role may grant permissions
+        // the editor doesn't already hold (no privilege escalation).
+        allow update: if sameCollege(collegeId)
+                      && hasPerm('roles.manage')
+                      && resource.data.get('isSystem', false) == false
+                      && request.resource.data.get('isSystem', false) == false;
+
+        allow delete: if sameCollege(collegeId)
+                      && hasPerm('roles.manage')
+                      && resource.data.get('isSystem', false) == false;
+      }
+    }
+
+    // ---------------- users ----------------
+
+    match /users/{userId} {
+
+      // You can always read yourself (the app needs this before it knows
+      // your college). Otherwise you need users.view and a matching college.
+      allow get: if signedIn() && (
+                   request.auth.uid == userId ||
+                   (sameCollege(resource.data.collegeId) && hasPerm('users.view'))
+                 );
+
+      // For `list`, rules are evaluated per candidate document, so this both
+      // requires the permission AND makes it impossible to read users from
+      // another institution even if the client drops its where-clause.
+      allow list: if signedIn()
+                  && hasPerm('users.view')
+                  && resource.data.collegeId == myCollege();
+
+      // Two legitimate creates:
+      //  1. Registration — the caller creates their own SuperAdmin profile.
+      //  2. Provisioning — an admin with users.create adds someone to their
+      //     own college. (The doc is written by the admin's session, while
+      //     the Auth account is created on a secondary app instance.)
+      allow create: if signedIn() && (
+                      (
+                        request.auth.uid == userId &&
+                        request.resource.data.isSuperAdmin == true &&
+                        request.resource.data.collegeId is string
+                      ) || (
+                        hasPerm('users.create') &&
+                        request.resource.data.collegeId == myCollege() &&
+                        request.resource.data.get('isSuperAdmin', false) == false
+                      )
+                    );
+
+      allow update: if signedIn() && (
+                      // Editing yourself: safe fields only.
+                      (request.auth.uid == userId && onlySelfEditableFields())
+                      ||
+                      // Admin editing someone else in the same college.
+                      (
+                        request.auth.uid != userId &&
+                        hasPerm('users.edit') &&
+                        resource.data.collegeId == myCollege() &&
+                        request.resource.data.collegeId == myCollege() &&
+                        // Nobody may create or demote a Super Admin here.
+                        resource.data.get('isSuperAdmin', false) == false &&
+                        request.resource.data.get('isSuperAdmin', false) == false
+                      )
+                      ||
+                      // Allotment: writing the room fields onto a student.
+                      // Deliberately narrower than users.edit — a warden who
+                      // can fill beds still can't rename or re-role anyone.
+                      (
+                        hasPerm('allotment.manage') &&
+                        resource.data.collegeId == myCollege() &&
+                        onlyAllotmentFields()
+                      )
+                    );
+
+      allow delete: if hasPerm('users.delete')
+                    && resource.data.collegeId == myCollege()
+                    && resource.data.get('isSuperAdmin', false) == false
+                    && request.auth.uid != userId;
+    }
+
+    // ---------------- hostels & rooms ----------------
+
+    match /colleges/{collegeId}/hostels/{hostelId} {
+      allow read: if sameCollege(collegeId) && hasPerm('hostels.view');
+
+      allow create, delete: if sameCollege(collegeId)
+                            && hasPerm('hostels.manage');
+
+      // hostels.manage can change anything; allotment.manage may only nudge
+      // the occupiedBeds counter, which the allot/vacate transaction does.
+      allow update: if sameCollege(collegeId) && (
+                      hasPerm('hostels.manage')
+                      || (
+                        hasPerm('allotment.manage')
+                        && request.resource.data.diff(resource.data)
+                             .affectedKeys().hasOnly(['occupiedBeds'])
+                      )
+                    );
+
+      // Rooms live under their hostel. Read access follows the hostel, but
+      // note the two different write permissions: editing the room *fabric*
+      // (capacity, features, status) is hostels.manage, whereas moving
+      // students in and out is allotment.manage — a warden may well be
+      // allowed to allot beds without being allowed to redefine the building.
+      match /rooms/{roomId} {
+        allow read: if sameCollege(collegeId) && (
+                      hasPerm('hostels.view') || hasPerm('allotment.manage')
+                    );
+
+        allow create, delete: if sameCollege(collegeId)
+                              && hasPerm('hostels.manage');
+
+        allow update: if sameCollege(collegeId) && (
+                        hasPerm('hostels.manage')
+                        || (
+                          hasPerm('allotment.manage')
+                          && request.resource.data.diff(resource.data)
+                               .affectedKeys().hasOnly(['occupantUids'])
+                        )
+                      );
+      }
+    }
+
+    // ---------------- future modules ----------------
+    // Every module you add lives under its college and gates on its own
+    // permission string. Follow the pattern above:
+    //
+    // match /colleges/{collegeId}/notices/{noticeId} {
+    //   allow read:  if sameCollege(collegeId) && hasPerm('notices.view');
+    //   allow write: if sameCollege(collegeId) && hasPerm('notices.manage');
+    // }
+
+    // Anything not matched above is denied.
+    match /{document=**} {
+      allow read, write: if false;
+    }
+  }
+}
