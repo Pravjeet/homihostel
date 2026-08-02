@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
 import '../../core/session.dart';
+import '../../core/identity.dart';
 import '../../core/theme.dart';
 import '../../services/auth_service.dart';
 import '../../services/data_service.dart';
@@ -85,7 +86,7 @@ class _ProfilePageState extends State<ProfilePage> {
                       ),
                       const SizedBox(height: 3),
                       Text(
-                        user.email,
+                        Identity.display(user.email),
                         style: const TextStyle(
                           color: AppColors.textMuted,
                           fontSize: 13.5,
@@ -129,7 +130,7 @@ class _ProfilePageState extends State<ProfilePage> {
                   ),
                   const SizedBox(height: 14),
                   TextFormField(
-                    initialValue: user.email,
+                    initialValue: Identity.display(user.email),
                     enabled: false,
                     decoration: const InputDecoration(
                       labelText: 'Email',
@@ -151,7 +152,7 @@ class _ProfilePageState extends State<ProfilePage> {
                             : () async {
                                 final messenger = ScaffoldMessenger.of(context);
                                 await AuthService.instance.sendPasswordReset(
-                                  user.email,
+                                  Identity.display(user.email),
                                 );
                                 messenger.showSnackBar(
                                   const SnackBar(

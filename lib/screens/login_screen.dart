@@ -1,7 +1,9 @@
 import 'package:flutter/material.dart';
 
+import '../core/identity.dart';
 import '../core/theme.dart';
 import '../services/auth_service.dart';
+import '../services/saved_accounts.dart';
 import 'register_college_screen.dart';
 
 /// Single sign-in form for *everyone* — super admin, warden, student.
@@ -16,55 +18,172 @@ class LoginScreen extends StatefulWidget {
 
 class _LoginScreenState extends State<LoginScreen> {
   final _formKey = GlobalKey<FormState>();
-  final _email = TextEditingController();
+  final _identifier = TextEditingController();
   final _password = TextEditingController();
 
   bool _obscure = true;
   bool _busy = false;
   String? _error;
 
+  /// Accounts remembered on this machine. Null while still loading, so the
+  /// form doesn't flash the "no saved accounts" layout for a frame.
+  List<SavedAccount>? _saved;
+
+  /// Ticked = store the password in the OS keychain on a successful sign-in.
+  bool _remember = false;
+
+  /// The card currently signing in, so only that one shows a spinner.
+  String? _signingInAs;
+
+  /// Set once the user chooses "use another account", which hides the cards
+  /// for the rest of this visit to the screen.
+  bool _showForm = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _loadSaved();
+  }
+
   @override
   void dispose() {
-    _email.dispose();
+    _identifier.dispose();
     _password.dispose();
     super.dispose();
   }
 
+  Future<void> _loadSaved() async {
+    final accounts = await SavedAccounts.instance.all();
+    if (!mounted) return;
+    setState(() {
+      _saved = accounts;
+      _showForm = accounts.isEmpty;
+    });
+  }
+
   Future<void> _submit() async {
     if (!_formKey.currentState!.validate()) return;
+    await _signIn(_identifier.text, _password.text);
+  }
+
+  /// The one place a sign-in actually happens, so remembering the account
+  /// can't be forgotten on one of the paths into it.
+  Future<void> _signIn(String identifier, String password) async {
     setState(() {
       _busy = true;
       _error = null;
     });
     try {
       await AuthService.instance.signIn(
-        email: _email.text,
-        password: _password.text,
+        identifier: identifier,
+        password: password,
+      );
+
+      // Fire-and-forget: the profile name makes the card readable, but a
+      // failure to read it must not hold up the sign-in.
+      await SavedAccounts.instance.remember(
+        identifier: identifier.trim(),
+        name: AuthService.instance.currentUser?.displayName,
+        password: (_remember && SavedAccounts.instance.passwordsSupported)
+            ? password
+            : null,
       );
       // No navigation here — AuthGate reacts to the auth state change.
     } catch (e) {
-      if (mounted) setState(() => _error = AuthService.describeError(e));
+      if (mounted) {
+        setState(() {
+          _error = AuthService.describeError(e);
+          // A stored password that no longer works is worse than none: drop
+          // it so the next tap asks for a fresh one instead of failing again.
+          if (_signingInAs != null) {
+            SavedAccounts.instance.remember(identifier: identifier);
+            _showForm = true;
+            _identifier.text = identifier;
+          }
+        });
+        _loadSaved();
+      }
     } finally {
-      if (mounted) setState(() => _busy = false);
+      if (mounted) {
+        setState(() {
+          _busy = false;
+          _signingInAs = null;
+        });
+      }
+    }
+  }
+
+  /// Tapping a saved card: sign straight in when the password is in the
+  /// keychain, otherwise drop into the form with the identifier filled.
+  Future<void> _useAccount(SavedAccount account) async {
+    if (!account.hasPassword) {
+      setState(() {
+        _showForm = true;
+        _identifier.text = account.identifier;
+        _password.clear();
+        _remember = true;
+      });
+      return;
+    }
+
+    setState(() => _signingInAs = account.identifier);
+    final password = await SavedAccounts.instance.passwordFor(
+      account.identifier,
+    );
+    if (!mounted) return;
+    if (password == null) {
+      setState(() {
+        _signingInAs = null;
+        _showForm = true;
+        _identifier.text = account.identifier;
+      });
+      return;
+    }
+    _remember = true;
+    await _signIn(account.identifier, password);
+  }
+
+  Future<void> _forget(SavedAccount account) async {
+    await SavedAccounts.instance.forget(account.identifier);
+    await _loadSaved();
+    if (mounted && (_saved?.isEmpty ?? true)) {
+      setState(() => _showForm = true);
     }
   }
 
   Future<void> _resetPassword() async {
-    final email = _email.text.trim();
-    if (email.isEmpty) {
-      setState(() => _error = 'Enter your email above first, then tap this.');
+    final id = _identifier.text.trim();
+    if (id.isEmpty) {
+      setState(
+        () => _error = 'Enter your email or registration number above first.',
+      );
       return;
     }
     try {
-      await AuthService.instance.sendPasswordReset(email);
+      await AuthService.instance.sendPasswordReset(id);
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Password reset link sent to $email')),
+        SnackBar(content: Text('Password reset link sent to $id')),
       );
     } catch (e) {
       if (mounted) setState(() => _error = AuthService.describeError(e));
     }
   }
+
+  /// One tappable card per remembered sign-in.
+  List<Widget> _savedCards() => [
+    for (final account in _saved ?? const <SavedAccount>[])
+      Padding(
+        padding: const EdgeInsets.only(bottom: 10),
+        child: _AccountCard(
+          account: account,
+          busy: _busy,
+          signingIn: _signingInAs == account.identifier,
+          onTap: () => _useAccount(account),
+          onForget: () => _forget(account),
+        ),
+      ),
+  ];
 
   @override
   Widget build(BuildContext context) {
@@ -108,10 +227,12 @@ class _LoginScreenState extends State<LoginScreen> {
                       ),
                     ),
                     const SizedBox(height: 6),
-                    const Text(
-                      'Sign in to your hostel workspace',
+                    Text(
+                      _showForm
+                          ? 'Sign in to your hostel workspace'
+                          : 'Pick up where you left off',
                       textAlign: TextAlign.center,
-                      style: TextStyle(
+                      style: const TextStyle(
                         color: AppColors.textMuted,
                         fontSize: 14,
                       ),
@@ -123,23 +244,45 @@ class _LoginScreenState extends State<LoginScreen> {
                       const SizedBox(height: 18),
                     ],
 
+                    if (!_showForm) ...[
+                      ..._savedCards(),
+                      const SizedBox(height: 4),
+                      OutlinedButton.icon(
+                        onPressed: _busy
+                            ? null
+                            : () => setState(() {
+                                _showForm = true;
+                                _identifier.clear();
+                                _password.clear();
+                              }),
+                        icon: const Icon(Icons.person_add_alt_rounded, size: 18),
+                        label: const Text('Use another account'),
+                      ),
+                    ] else ...[
                     TextFormField(
-                      controller: _email,
+                      controller: _identifier,
                       enabled: !_busy,
-                      keyboardType: TextInputType.emailAddress,
-                      autofillHints: const [AutofillHints.email],
+                      autofillHints: const [AutofillHints.username],
                       textInputAction: TextInputAction.next,
                       decoration: const InputDecoration(
-                        labelText: 'Email',
-                        prefixIcon: Icon(Icons.mail_outline_rounded),
+                        labelText: 'Email or registration number',
+                        helperText: 'Students: just your registration number',
+                        prefixIcon: Icon(Icons.person_outline_rounded),
                       ),
                       validator: (v) {
                         final s = v?.trim() ?? '';
-                        if (s.isEmpty) return 'Email is required';
-                        if (!RegExp(
-                          r'^[^@\s]+@[^@\s]+\.[^@\s]+$',
-                        ).hasMatch(s)) {
-                          return 'Enter a valid email address';
+                        if (s.isEmpty) {
+                          return 'Enter your email or registration number';
+                        }
+                        if (Identity.looksLikeEmail(s)) {
+                          if (!RegExp(
+                            r'^[^@\s]+@[^@\s]+\.[^@\s]+$',
+                          ).hasMatch(s)) {
+                            return 'That email address doesn\'t look valid';
+                          }
+                        } else if (!Identity.isValidRegistrationNumber(s)) {
+                          return 'Registration numbers use letters, digits, '
+                              '. _ or - only';
                         }
                         return null;
                       },
@@ -167,12 +310,32 @@ class _LoginScreenState extends State<LoginScreen> {
                       validator: (v) =>
                           (v == null || v.isEmpty) ? 'Password is required' : null,
                     ),
-                    Align(
-                      alignment: Alignment.centerRight,
-                      child: TextButton(
-                        onPressed: _busy ? null : _resetPassword,
-                        child: const Text('Forgot password?'),
-                      ),
+                    Row(
+                      children: [
+                        Expanded(
+                          child: SavedAccounts.instance.passwordsSupported
+                              ? CheckboxListTile(
+                                  value: _remember,
+                                  onChanged: _busy
+                                      ? null
+                                      : (v) =>
+                                            setState(() => _remember = v ?? false),
+                                  title: const Text(
+                                    'Keep me signed in on this PC',
+                                    style: TextStyle(fontSize: 13),
+                                  ),
+                                  controlAffinity:
+                                      ListTileControlAffinity.leading,
+                                  contentPadding: EdgeInsets.zero,
+                                  dense: true,
+                                )
+                              : const SizedBox.shrink(),
+                        ),
+                        TextButton(
+                          onPressed: _busy ? null : _resetPassword,
+                          child: const Text('Forgot password?'),
+                        ),
+                      ],
                     ),
                     const SizedBox(height: 6),
                     ElevatedButton(
@@ -188,6 +351,20 @@ class _LoginScreenState extends State<LoginScreen> {
                             )
                           : const Text('Sign in'),
                     ),
+                    if ((_saved?.isNotEmpty ?? false)) ...[
+                      const SizedBox(height: 8),
+                      TextButton.icon(
+                        onPressed: _busy
+                            ? null
+                            : () => setState(() {
+                                _showForm = false;
+                                _error = null;
+                              }),
+                        icon: const Icon(Icons.arrow_back_rounded, size: 17),
+                        label: const Text('Back to saved accounts'),
+                      ),
+                    ],
+                    ],
                     const SizedBox(height: 18),
                     Wrap(
                       alignment: WrapAlignment.center,
@@ -219,6 +396,98 @@ class _LoginScreenState extends State<LoginScreen> {
               ),
             ),
           ),
+        ),
+      ),
+    );
+  }
+}
+
+/// A remembered sign-in, rendered like the account pickers people already
+/// know from Google and Windows: avatar, name, and a hint of what tapping
+/// will do.
+class _AccountCard extends StatelessWidget {
+  final SavedAccount account;
+  final bool busy;
+  final bool signingIn;
+  final VoidCallback onTap;
+  final VoidCallback onForget;
+
+  const _AccountCard({
+    required this.account,
+    required this.busy,
+    required this.signingIn,
+    required this.onTap,
+    required this.onForget,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return InkWell(
+      onTap: busy ? null : onTap,
+      borderRadius: BorderRadius.circular(12),
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+        decoration: BoxDecoration(
+          color: Colors.white,
+          borderRadius: BorderRadius.circular(12),
+          border: Border.all(color: AppColors.border),
+        ),
+        child: Row(
+          children: [
+            CircleAvatar(
+              radius: 20,
+              backgroundColor: AppColors.primarySoft,
+              child: signingIn
+                  ? const SizedBox(
+                      height: 18,
+                      width: 18,
+                      child: CircularProgressIndicator(strokeWidth: 2.2),
+                    )
+                  : Text(
+                      account.initials,
+                      style: const TextStyle(
+                        color: AppColors.primary,
+                        fontWeight: FontWeight.w700,
+                        fontSize: 14,
+                      ),
+                    ),
+            ),
+            const SizedBox(width: 13),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    account.display,
+                    overflow: TextOverflow.ellipsis,
+                    style: const TextStyle(
+                      fontSize: 14.5,
+                      fontWeight: FontWeight.w600,
+                    ),
+                  ),
+                  const SizedBox(height: 2),
+                  Text(
+                    signingIn
+                        ? 'Signing in…'
+                        : account.hasPassword
+                        ? 'Tap to sign in'
+                        : 'Tap to enter your password',
+                    style: const TextStyle(
+                      fontSize: 12,
+                      color: AppColors.textMuted,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            if (!busy)
+              IconButton(
+                onPressed: onForget,
+                icon: const Icon(Icons.close_rounded, size: 18),
+                tooltip: 'Forget this account',
+                color: AppColors.textMuted,
+              ),
+          ],
         ),
       ),
     );

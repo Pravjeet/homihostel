@@ -38,6 +38,15 @@ dependencies:
   firebase_auth: ^4.19.7
   cloud_firestore: ^4.17.5
 
+  # Saved sign-ins. Passwords go to the OS keychain (Windows Credential
+  # Manager / Keychain / Keystore), never to a plain file or SharedPreferences.
+  flutter_secure_storage: ^9.2.2
+
+  # Reading the college's public WordPress feed, and opening the PDFs it
+  # links to in the user's browser.
+  http: ^1.2.0
+  url_launcher: ^6.2.5
+
 dev_dependencies:
   flutter_test:
     sdk: flutter

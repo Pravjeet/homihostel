@@ -3,9 +3,12 @@ import 'package:flutter/material.dart';
 import '../screens/pages/allotment_page.dart';
 import '../screens/pages/coming_soon_page.dart';
 import '../screens/pages/hostels_page.dart';
+import '../screens/pages/mess_page.dart';
 import '../screens/pages/my_room_page.dart';
 import '../screens/pages/overview_page.dart';
 import '../screens/pages/profile_page.dart';
+import '../screens/pages/requests_page.dart';
+import '../screens/pages/notices_page.dart';
 import '../screens/pages/roles_page.dart';
 import '../screens/pages/users_page.dart';
 import 'permissions.dart';
@@ -190,21 +193,10 @@ Widget _profile(BuildContext c) => const ProfilePage();
 // one-line change here — the sidebar, routing and gating already work.
 Widget _hostels(BuildContext c) => const HostelsPage();
 Widget _allotment(BuildContext c) => const AllotmentPage();
-Widget _mess(BuildContext c) => const ComingSoonPage(
-  title: 'Mess',
-  icon: Icons.restaurant_rounded,
-  blurb: 'Weekly menu, mess wallet and transactions.',
-);
-Widget _requests(BuildContext c) => const ComingSoonPage(
-  title: 'Requests',
-  icon: Icons.assignment_turned_in_rounded,
-  blurb: 'Leave, maintenance and other requests with approvals.',
-);
-Widget _notices(BuildContext c) => const ComingSoonPage(
-  title: 'Notices',
-  icon: Icons.campaign_rounded,
-  blurb: 'Announcements broadcast to students and staff.',
-);
+
+Widget _mess(BuildContext c) => const MessPage();
+Widget _requests(BuildContext c) => const RequestsPage();
+Widget _notices(BuildContext c) => const NoticesPage();
 Widget _finance(BuildContext c) => const ComingSoonPage(
   title: 'Finance',
   icon: Icons.payments_rounded,

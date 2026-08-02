@@ -1,13 +1,17 @@
 import 'package:flutter/material.dart';
 
+import '../../core/identity.dart';
 import '../../core/permissions.dart';
 import '../../core/session.dart';
 import '../../core/theme.dart';
 import '../../models/app_role.dart';
 import '../../models/app_user.dart';
+import '../../models/hostel.dart';
 import '../../services/auth_service.dart';
 import '../../services/data_service.dart';
-import 'user_detail_dialog.dart';
+import '../../services/hostel_service.dart';
+import 'import_students_dialog.dart';
+import 'user_detail_view.dart';
 
 class UsersPage extends StatefulWidget {
   const UsersPage({super.key});
@@ -20,12 +24,31 @@ class _UsersPageState extends State<UsersPage> {
   String _query = '';
   String _roleFilter = 'All';
 
+  /// Cached so the import dialog can resolve hostel names to allot rooms.
+  List<Hostel> _hostels = const [];
+
+  /// Set when a row is tapped. Held as state rather than pushed as a route so
+  /// the dashboard sidebar stays visible on the detail screen.
+  AppUser? _openUser;
+
   @override
   Widget build(BuildContext context) {
     final session = Session.of(context);
     final collegeId = session.user.collegeId;
 
-    return StreamBuilder<List<AppRole>>(
+    if (_openUser != null) {
+      return UserDetailView(
+        uid: _openUser!.uid,
+        initial: _openUser!,
+        onBack: () => setState(() => _openUser = null),
+      );
+    }
+
+    return StreamBuilder<List<Hostel>>(
+      stream: HostelService.instance.watchHostels(collegeId),
+      builder: (context, hSnap) {
+        _hostels = hSnap.data ?? const <Hostel>[];
+        return StreamBuilder<List<AppRole>>(
       stream: DataService.instance.watchRoles(collegeId),
       builder: (context, roleSnap) {
         final roles = roleSnap.data ?? const <AppRole>[];
@@ -68,18 +91,43 @@ class _UsersPageState extends State<UsersPage> {
                       SectionHeader(
                         'Users  (${all.length})',
                         trailing: session.can(Perm.usersCreate)
-                            ? ElevatedButton.icon(
-                                onPressed: assignable.isEmpty
-                                    ? null
-                                    : () => _openCreateDialog(assignable),
-                                icon: const Icon(Icons.person_add_alt_1, size: 18),
-                                label: const Text('Add user'),
-                                style: ElevatedButton.styleFrom(
-                                  padding: const EdgeInsets.symmetric(
-                                    horizontal: 18,
-                                    vertical: 14,
+                            ? Row(
+                                mainAxisSize: MainAxisSize.min,
+                                children: [
+                                  OutlinedButton.icon(
+                                    onPressed: assignable.isEmpty
+                                        ? null
+                                        : () => _openImportDialog(all, roles),
+                                    icon: const Icon(
+                                      Icons.upload_file_rounded,
+                                      size: 18,
+                                    ),
+                                    label: const Text('Import CSV'),
+                                    style: OutlinedButton.styleFrom(
+                                      padding: const EdgeInsets.symmetric(
+                                        horizontal: 16,
+                                        vertical: 14,
+                                      ),
+                                    ),
                                   ),
-                                ),
+                                  const SizedBox(width: 10),
+                                  ElevatedButton.icon(
+                                    onPressed: assignable.isEmpty
+                                        ? null
+                                        : () => _openCreateDialog(assignable),
+                                    icon: const Icon(
+                                      Icons.person_add_alt_1,
+                                      size: 18,
+                                    ),
+                                    label: const Text('Add user'),
+                                    style: ElevatedButton.styleFrom(
+                                      padding: const EdgeInsets.symmetric(
+                                        horizontal: 18,
+                                        vertical: 14,
+                                      ),
+                                    ),
+                                  ),
+                                ],
                               )
                             : null,
                       ),
@@ -102,7 +150,7 @@ class _UsersPageState extends State<UsersPage> {
                             child: TextField(
                               onChanged: (v) => setState(() => _query = v),
                               decoration: const InputDecoration(
-                                hintText: 'Search by name or email',
+                                hintText: 'Search by name, registration number or email',
                                 prefixIcon: Icon(Icons.search_rounded),
                                 isDense: true,
                               ),
@@ -164,6 +212,8 @@ class _UsersPageState extends State<UsersPage> {
                             user: filtered[i],
                             roles: assignable,
                             isSelf: filtered[i].uid == session.user.uid,
+                            onOpen: () =>
+                                setState(() => _openUser = filtered[i]),
                           ),
                           if (i != filtered.length - 1)
                             const Divider(
@@ -181,6 +231,23 @@ class _UsersPageState extends State<UsersPage> {
           },
         );
       },
+        );
+      },
+    );
+  }
+
+  Future<void> _openImportDialog(
+    List<AppUser> existing,
+    List<AppRole> roles,
+  ) async {
+    await showDialog(
+      context: context,
+      barrierDismissible: false,
+      builder: (_) => ImportStudentsDialog(
+        existingUsers: existing,
+        roles: roles,
+        hostels: _hostels,
+      ),
     );
   }
 
@@ -205,11 +272,13 @@ class _UserRow extends StatelessWidget {
   final AppUser user;
   final List<AppRole> roles;
   final bool isSelf;
+  final VoidCallback onOpen;
 
   const _UserRow({
     required this.user,
     required this.roles,
     required this.isSelf,
+    required this.onOpen,
   });
 
   @override
@@ -221,10 +290,7 @@ class _UserRow extends StatelessWidget {
         session.can(Perm.usersEdit) && !user.isSuperAdmin && !isSelf;
 
     return InkWell(
-      onTap: () => showDialog(
-        context: context,
-        builder: (_) => UserDetailDialog(user: user),
-      ),
+      onTap: onOpen,
       child: Padding(
       padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 14),
       child: Row(
@@ -272,7 +338,7 @@ class _UserRow extends StatelessWidget {
                 ),
                 const SizedBox(height: 2),
                 Text(
-                  user.email,
+                  Identity.display(user.email),
                   overflow: TextOverflow.ellipsis,
                   style: const TextStyle(
                     color: AppColors.textMuted,
@@ -500,16 +566,17 @@ class _CreateUserDialogState extends State<_CreateUserDialog> {
     try {
       await AuthService.instance.createSubUser(
         name: _name.text,
-        email: _email.text,
+        email: Identity.toAuthEmail(_email.text),
+        // When they typed a registration number, that IS the enrollment no.
+        enrollmentNo: Identity.looksLikeEmail(_email.text.trim())
+            ? (_enrollment.text.trim().isEmpty ? null : _enrollment.text.trim())
+            : _email.text.trim(),
         password: _password.text,
         collegeId: widget.collegeId,
         roleId: _role!.id,
         roleName: _role!.name,
         phone: _phone.text.trim().isEmpty ? null : _phone.text.trim(),
         gender: _gender,
-        enrollmentNo: _enrollment.text.trim().isEmpty
-            ? null
-            : _enrollment.text.trim(),
       );
       if (mounted) Navigator.pop(context, true);
     } catch (e) {
@@ -561,13 +628,25 @@ class _CreateUserDialogState extends State<_CreateUserDialog> {
                 TextFormField(
                   controller: _email,
                   enabled: !_busy,
-                  keyboardType: TextInputType.emailAddress,
-                  decoration: const InputDecoration(labelText: 'Email'),
+                  decoration: const InputDecoration(
+                    labelText: 'Registration number or email',
+                    helperText:
+                        'Students can use just a registration number — no '
+                        'inbox needed.',
+                  ),
                   validator: (v) {
                     final s = v?.trim() ?? '';
-                    if (s.isEmpty) return 'Email is required';
-                    if (!RegExp(r'^[^@\s]+@[^@\s]+\.[^@\s]+$').hasMatch(s)) {
-                      return 'Enter a valid email address';
+                    if (s.isEmpty) {
+                      return 'A registration number or email is required';
+                    }
+                    if (Identity.looksLikeEmail(s)) {
+                      if (!RegExp(
+                        r'^[^@\s]+@[^@\s]+\.[^@\s]+$',
+                      ).hasMatch(s)) {
+                        return 'Enter a valid email address';
+                      }
+                    } else if (!Identity.isValidRegistrationNumber(s)) {
+                      return 'Use letters, digits, . _ or - only';
                     }
                     return null;
                   },

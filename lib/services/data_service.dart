@@ -86,6 +86,20 @@ class DataService {
       .doc(uid)
       .update({...changes, 'updatedAt': FieldValue.serverTimestamp()});
 
+  /// One-shot lookup by email within a college. Used by the CSV importer to
+  /// find an account it just created, since account creation happens on a
+  /// throwaway Firebase instance and doesn't hand back a profile document.
+  Future<AppUser?> findByEmail(String collegeId, String email) async {
+    final snap = await _db
+        .collection('users')
+        .where('collegeId', isEqualTo: collegeId)
+        .where('email', isEqualTo: email.trim().toLowerCase())
+        .limit(1)
+        .get();
+    if (snap.docs.isEmpty) return null;
+    return AppUser.fromMap(snap.docs.first.id, snap.docs.first.data());
+  }
+
   Future<void> setUserRole(String uid, AppRole? role) => updateUser(uid, {
     'roleId': role?.id,
     'roleName': role?.name,

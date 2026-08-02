@@ -2,6 +2,7 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:firebase_core/firebase_core.dart';
 
+import '../core/identity.dart';
 import '../core/permissions.dart';
 import '../models/app_role.dart';
 import '../models/app_user.dart';
@@ -95,17 +96,34 @@ class AuthService {
   // ---------------------------------------------------------------------
   // Login
   // ---------------------------------------------------------------------
-  Future<void> signIn({required String email, required String password}) async {
+  /// [identifier] may be a real email address or a registration number —
+  /// see [Identity]. The number is mapped to a synthetic address before it
+  /// reaches Firebase.
+  Future<void> signIn({
+    required String identifier,
+    required String password,
+  }) async {
     await _auth.signInWithEmailAndPassword(
-      email: email.trim(),
+      email: Identity.toAuthEmail(identifier),
       password: password,
     );
   }
 
   Future<void> signOut() => _auth.signOut();
 
-  Future<void> sendPasswordReset(String email) =>
-      _auth.sendPasswordResetEmail(email: email.trim());
+  /// Only meaningful for real addresses. A synthetic one has no inbox, so we
+  /// refuse rather than silently pretending to send.
+  Future<void> sendPasswordReset(String identifier) async {
+    final email = Identity.toAuthEmail(identifier);
+    if (Identity.isSynthetic(email)) {
+      throw AuthFailure(
+        'Accounts that sign in with a registration number have no email '
+        'inbox, so a reset link can\'t be sent. Ask your hostel administrator '
+        'to set a new password for you.',
+      );
+    }
+    await _auth.sendPasswordResetEmail(email: email);
+  }
 
   // ---------------------------------------------------------------------
   // Session loading
@@ -145,6 +163,26 @@ class AuthService {
   // production-grade answer is a Cloud Function using the Admin SDK; move to
   // that when you can, because it also lets you delete Auth accounts.
   // ---------------------------------------------------------------------
+  /// Spins up an isolated FirebaseApp for provisioning accounts.
+  ///
+  /// Creating one of these is expensive — on web it bootstraps a whole JS SDK
+  /// app. A bulk import should open **one** and pass it to every
+  /// [createSubUser] call, then [closeProvisioningApp] at the end. Doing it
+  /// per row is what made a 30-row import take minutes.
+  Future<FirebaseApp> openProvisioningApp() => Firebase.initializeApp(
+    name: 'user-provisioning-${DateTime.now().microsecondsSinceEpoch}',
+    options: Firebase.app().options,
+  );
+
+  Future<void> closeProvisioningApp(FirebaseApp app) async {
+    try {
+      await FirebaseAuth.instanceFor(app: app).signOut();
+    } catch (_) {
+      // Nothing signed in; nothing to do.
+    }
+    await app.delete();
+  }
+
   Future<AppUser> createSubUser({
     required String name,
     required String email,
@@ -155,13 +193,19 @@ class AuthService {
     String? phone,
     String? gender,
     String? enrollmentNo,
+
+    /// Extra profile fields written in the *same* document write, so a bulk
+    /// import doesn't need a second round trip per student.
+    Map<String, dynamic>? extra,
+
+    /// Reuse an app from [openProvisioningApp]. When supplied it is NOT
+    /// deleted here — the caller owns its lifetime.
+    FirebaseApp? app,
   }) async {
-    FirebaseApp? temp;
+    final owned = app == null;
+    FirebaseApp? temp = app;
     try {
-      temp = await Firebase.initializeApp(
-        name: 'user-provisioning-${DateTime.now().microsecondsSinceEpoch}',
-        options: Firebase.app().options,
-      );
+      temp ??= await openProvisioningApp();
       final cred = await FirebaseAuth.instanceFor(app: temp)
           .createUserWithEmailAndPassword(
             email: email.trim(),
@@ -184,6 +228,7 @@ class AuthService {
 
       await _db.collection('users').doc(uid).set({
         ...profile.toMap(),
+        ...?extra,
         'createdAt': FieldValue.serverTimestamp(),
       });
 
@@ -192,7 +237,8 @@ class AuthService {
     } on FirebaseAuthException catch (e) {
       throw AuthFailure(_friendly(e));
     } finally {
-      await temp?.delete();
+      // Only tear down an app we created ourselves.
+      if (owned) await temp?.delete();
     }
   }
 

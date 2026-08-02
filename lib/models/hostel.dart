@@ -243,6 +243,7 @@ class Room {
     int? capacity,
     List<String>? features,
     RoomStatus? status,
+    List<String>? occupantUids,
     num? rentPerBed,
     String? note,
   }) => Room(
@@ -252,7 +253,7 @@ class Room {
     capacity: capacity ?? this.capacity,
     features: features ?? this.features,
     status: status ?? this.status,
-    occupantUids: occupantUids,
+    occupantUids: occupantUids ?? this.occupantUids,
     rentPerBed: rentPerBed ?? this.rentPerBed,
     note: note ?? this.note,
   );

@@ -225,6 +225,90 @@ service cloud.firestore {
       }
     }
 
+    // ---------------- mess ----------------
+    //
+    // Two fixed documents: `menu` and `config`. Everyone in the college who
+    // can see the mess may read both — the student fee calculator needs the
+    // rate, so it is deliberately not manager-only. Writes need mess.manage.
+
+    match /colleges/{collegeId}/mess/{docId} {
+      allow read: if sameCollege(collegeId) && hasPerm('mess.view');
+      allow write: if sameCollege(collegeId) && hasPerm('mess.manage');
+    }
+
+    // ---------------- requests ----------------
+
+    match /colleges/{collegeId}/requests/{requestId} {
+
+      // A single request: yours, or anyone's if you triage them.
+      allow get: if sameCollege(collegeId) && (
+                   resource.data.raisedByUid == request.auth.uid
+                   || hasPerm('requests.viewAll')
+                 );
+
+      // For list, rules run per candidate document. Someone with only
+      // viewOwn therefore cannot widen their query to read other people's
+      // complaints, even by dropping the where-clause client-side.
+      allow list: if sameCollege(collegeId) && (
+                    hasPerm('requests.viewAll')
+                    || (
+                      hasPerm('requests.viewOwn')
+                      && resource.data.raisedByUid == request.auth.uid
+                    )
+                  );
+
+      // You may only raise a request in your own name, and it must start
+      // pending — nobody self-approves.
+      allow create: if sameCollege(collegeId)
+                    && hasPerm('requests.create')
+                    && request.resource.data.raisedByUid == request.auth.uid
+                    && request.resource.data.status == 'pending';
+
+      // Deciding a request. The author is deliberately NOT allowed here:
+      // approving your own leave would be the whole point of the module
+      // defeated.
+      allow update: if sameCollege(collegeId)
+                    && hasPerm('requests.approve')
+                    && request.resource.data.raisedByUid
+                       == resource.data.raisedByUid
+                    && request.resource.data.status != 'pending';
+
+      // Withdrawing your own, but only while untouched.
+      allow delete: if sameCollege(collegeId)
+                    && resource.data.raisedByUid == request.auth.uid
+                    && resource.data.status == 'pending';
+    }
+
+    // ---------------- notices ----------------
+
+    match /colleges/{collegeId}/notices/{noticeId} {
+
+      // Anyone with notices.view can read any notice. Expired notices stay
+      // visible (they're just marked as archived client-side) so staff can
+      // see old announcements without querying a separate archive collection.
+      allow read: if sameCollege(collegeId)
+                     && hasPerm('notices.view');
+
+      // Only people with notices.manage can post a notice, and only in their
+      // own name — the author can't be spoofed.
+      allow create: if sameCollege(collegeId)
+                    && hasPerm('notices.manage')
+                    && request.resource.data.postedByUid
+                       == request.auth.uid;
+
+      // Only the creator or a Super Admin can delete.
+      allow delete: if sameCollege(collegeId)
+                    && (
+                      isSuperAdmin()
+                      || (
+                        hasPerm('notices.manage')
+                        && resource.data.postedByUid == request.auth.uid
+                      )
+                    );
+
+      // No updates — if you post wrong, delete and repost.
+    }
+
     // ---------------- future modules ----------------
     // Every module you add lives under its college and gates on its own
     // permission string. Follow the pattern above:

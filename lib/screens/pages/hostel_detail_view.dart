@@ -7,6 +7,7 @@ import '../../models/hostel.dart';
 import '../../services/auth_service.dart';
 import '../../services/hostel_service.dart';
 import '../../widgets/selectable_chips.dart';
+import 'hostel_editor_dialog.dart';
 
 /// Rooms inside one hostel, grouped by floor.
 class HostelDetailView extends StatelessWidget {
@@ -76,6 +77,7 @@ class HostelDetailView extends StatelessWidget {
                   onBack: onBack,
                   onAddRoom: () => _addRoom(context, hostel),
                   onAddFloor: () => _addFloor(context, hostel, floors),
+                  onEditDetails: () => _editHostel(context, hostel),
                   onRecalculate: () => _recalculate(context),
                 ),
                 const SizedBox(height: 18),
@@ -157,6 +159,15 @@ class HostelDetailView extends StatelessWidget {
     );
   }
 
+  /// Opens the same editor used at creation, so every field captured when the
+  /// hostel was set up can be changed here.
+  Future<void> _editHostel(BuildContext context, Hostel hostel) async {
+    await showDialog(
+      context: context,
+      builder: (_) => HostelEditorDialog(collegeId: collegeId, hostel: hostel),
+    );
+  }
+
   Future<void> _recalculate(BuildContext context) async {
     final messenger = ScaffoldMessenger.of(context);
     try {
@@ -178,6 +189,7 @@ class _Header extends StatelessWidget {
   final VoidCallback onBack;
   final VoidCallback onAddRoom;
   final VoidCallback onAddFloor;
+  final VoidCallback onEditDetails;
   final VoidCallback onRecalculate;
 
   const _Header({
@@ -186,6 +198,7 @@ class _Header extends StatelessWidget {
     required this.onBack,
     required this.onAddRoom,
     required this.onAddFloor,
+    required this.onEditDetails,
     required this.onRecalculate,
   });
 
@@ -229,6 +242,18 @@ class _Header extends StatelessWidget {
               ),
               if (canManage) ...[
                 OutlinedButton.icon(
+                  onPressed: onEditDetails,
+                  icon: const Icon(Icons.edit_outlined, size: 17),
+                  label: const Text('Edit details'),
+                  style: OutlinedButton.styleFrom(
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 14,
+                      vertical: 13,
+                    ),
+                  ),
+                ),
+                const SizedBox(width: 10),
+                OutlinedButton.icon(
                   onPressed: onAddFloor,
                   icon: const Icon(Icons.layers_rounded, size: 17),
                   label: const Text('Add floor'),
@@ -264,6 +289,28 @@ class _Header extends StatelessWidget {
               ],
             ],
           ),
+          if (hostel.address != null && hostel.address!.trim().isNotEmpty) ...[
+            const SizedBox(height: 14),
+            Row(
+              children: [
+                const Icon(
+                  Icons.place_outlined,
+                  size: 15,
+                  color: AppColors.textMuted,
+                ),
+                const SizedBox(width: 6),
+                Expanded(
+                  child: Text(
+                    hostel.address!,
+                    style: const TextStyle(
+                      color: AppColors.textMuted,
+                      fontSize: 13,
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ],
           if (hostel.amenities.isNotEmpty) ...[
             const SizedBox(height: 16),
             const Text(

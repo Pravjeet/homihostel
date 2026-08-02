@@ -9,8 +9,8 @@ import '../../services/allotment_service.dart';
 import '../../services/auth_service.dart';
 import '../../services/data_service.dart';
 import '../../services/hostel_service.dart';
-import 'allot_room_dialog.dart';
-import 'user_detail_dialog.dart';
+import 'allot_room_view.dart';
+import 'user_detail_view.dart';
 
 /// Room Allotment: who has a bed, who doesn't, and the actions to fix that.
 class AllotmentPage extends StatefulWidget {
@@ -24,11 +24,36 @@ class _AllotmentPageState extends State<AllotmentPage> {
   String _query = '';
   _Filter _filter = _Filter.pending;
 
+  /// Set when a person is opened from the worklist. Held as state rather than
+  /// pushed as a route so the dashboard sidebar stays visible.
+  AppUser? _openUser;
+
+  /// Set while the room picker is showing in place of the worklist.
+  AppUser? _allotUser;
+  bool _allotIsMove = false;
+
   @override
   Widget build(BuildContext context) {
     final session = Session.of(context);
     final collegeId = session.user.collegeId;
     final canAllot = session.can(Perm.allotmentManage);
+
+    if (_allotUser != null) {
+      return AllotRoomView(
+        student: _allotUser!,
+        isMove: _allotIsMove,
+        onBack: _closeAllot,
+        onDone: _closeAllot,
+      );
+    }
+
+    if (_openUser != null) {
+      return UserDetailView(
+        uid: _openUser!.uid,
+        initial: _openUser!,
+        onBack: () => setState(() => _openUser = null),
+      );
+    }
 
     return StreamBuilder<List<Hostel>>(
       stream: HostelService.instance.watchHostels(collegeId),
@@ -215,15 +240,17 @@ class _AllotmentPageState extends State<AllotmentPage> {
     );
   }
 
-  Future<void> _openDetail(AppUser u) => showDialog(
-    context: context,
-    builder: (_) => UserDetailDialog(user: u),
-  );
+  void _openDetail(AppUser u) => setState(() => _openUser = u);
 
-  Future<void> _openAllot(AppUser u, {required bool move}) => showDialog(
-    context: context,
-    builder: (_) => AllotRoomDialog(student: u, isMove: move),
-  );
+  void _openAllot(AppUser u, {required bool move}) => setState(() {
+    _allotUser = u;
+    _allotIsMove = move;
+  });
+
+  void _closeAllot() => setState(() {
+    _allotUser = null;
+    _allotIsMove = false;
+  });
 
   Future<void> _vacate(AppUser u) async {
     final messenger = ScaffoldMessenger.of(context);
