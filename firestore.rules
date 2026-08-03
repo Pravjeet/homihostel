@@ -309,6 +309,19 @@ service cloud.firestore {
       // No updates — if you post wrong, delete and repost.
     }
 
+    // ---------------- settings ----------------
+    //
+    // One document, `config`. Everyone in the college may read it — the
+    // sidebar needs the institution name, the impose-fine form needs the
+    // category list, the shell needs the accent colour. Only settings.manage
+    // may write, and a workspace that has never saved simply has no document,
+    // which the client reads as "use the defaults".
+
+    match /colleges/{collegeId}/settings/{docId} {
+      allow read: if sameCollege(collegeId);
+      allow write: if sameCollege(collegeId) && hasPerm('settings.manage');
+    }
+
     // ---------------- fines ----------------
 
     match /colleges/{collegeId}/fines/{fineId} {

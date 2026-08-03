@@ -4,6 +4,7 @@ import '../../core/identity.dart';
 import '../../core/session.dart';
 import '../../core/theme.dart';
 import '../../models/app_user.dart';
+import '../../models/college_settings.dart';
 import '../../models/fine.dart';
 import '../../services/auth_service.dart';
 import '../../services/data_service.dart';
@@ -40,7 +41,10 @@ class _ImposeFineViewState extends State<ImposeFineView> {
   final _search = TextEditingController();
 
   AppUser? _student;
-  String _category = kFineCategories.first;
+
+  /// Null until the first build reads the workspace's configured categories —
+  /// Session isn't available from initState.
+  String? _category;
   bool _busy = false;
   String? _error;
 
@@ -48,6 +52,18 @@ class _ImposeFineViewState extends State<ImposeFineView> {
   void initState() {
     super.initState();
     _student = widget.student;
+  }
+
+  /// Pre-fills the amount when the chosen category has a configured default,
+  /// but never overwrites something already typed.
+  void _applyDefault(List<FineCategory> configured, String category) {
+    if (_amount.text.trim().isNotEmpty) return;
+    for (final c in configured) {
+      if (c.name == category && c.defaultAmount != null) {
+        _amount.text = '${c.defaultAmount}';
+        return;
+      }
+    }
   }
 
   @override
@@ -79,7 +95,7 @@ class _ImposeFineViewState extends State<ImposeFineView> {
         student: _student!,
         imposedBy: session.user,
         amount: num.parse(_amount.text.trim()),
-        category: _category,
+        category: _category ?? kFineCategories.first,
         reason: _reason.text,
         officeOrderNo: _officeOrderNo.text,
       );
@@ -96,7 +112,14 @@ class _ImposeFineViewState extends State<ImposeFineView> {
 
   @override
   Widget build(BuildContext context) {
-    final collegeId = Session.of(context).user.collegeId;
+    final session = Session.of(context);
+    final collegeId = session.user.collegeId;
+
+    // Categories come from System Settings, falling back to the built-in list
+    // when nobody has configured any.
+    final categories = session.settings.categoryNames;
+    _category ??= categories.first;
+    if (!categories.contains(_category)) _category = categories.first;
 
     return ConstrainedBox(
       constraints: const BoxConstraints(maxWidth: 760),
@@ -230,10 +253,11 @@ class _ImposeFineViewState extends State<ImposeFineView> {
                         flex: 2,
                         child: DropdownButtonFormField<String>(
                           initialValue: _category,
+                          isExpanded: true,
                           decoration: const InputDecoration(
                             labelText: 'Reason category',
                           ),
-                          items: kFineCategories
+                          items: categories
                               .map(
                                 (c) =>
                                     DropdownMenuItem(value: c, child: Text(c)),
@@ -241,9 +265,13 @@ class _ImposeFineViewState extends State<ImposeFineView> {
                               .toList(),
                           onChanged: _busy
                               ? null
-                              : (v) => setState(
-                                  () => _category = v ?? kFineCategories.first,
-                                ),
+                              : (v) => setState(() {
+                                  _category = v ?? categories.first;
+                                  _applyDefault(
+                                    session.settings.fineCategories,
+                                    _category!,
+                                  );
+                                }),
                         ),
                       ),
                     ],

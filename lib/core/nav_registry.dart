@@ -1,7 +1,6 @@
 import 'package:flutter/material.dart';
 
 import '../screens/pages/allotment_page.dart';
-import '../screens/pages/coming_soon_page.dart';
 import '../screens/pages/fines_page.dart';
 import '../screens/pages/hostels_page.dart';
 import '../screens/pages/mess_page.dart';
@@ -12,6 +11,7 @@ import '../screens/pages/profile_page.dart';
 import '../screens/pages/requests_page.dart';
 import '../screens/pages/notices_page.dart';
 import '../screens/pages/roles_page.dart';
+import '../screens/pages/settings_page.dart';
 import '../screens/pages/users_page.dart';
 import 'permissions.dart';
 import 'session.dart';
@@ -214,8 +214,4 @@ Widget _requests(BuildContext c) => const RequestsPage();
 Widget _notices(BuildContext c) => const NoticesPage();
 Widget _fines(BuildContext c) => const FinesPage();
 Widget _officeOrders(BuildContext c) => const OfficeOrdersPage();
-Widget _settings(BuildContext c) => const ComingSoonPage(
-  title: 'System Settings',
-  icon: Icons.settings_rounded,
-  blurb: 'Institution profile, branding and preferences.',
-);
+Widget _settings(BuildContext c) => const SettingsPage();

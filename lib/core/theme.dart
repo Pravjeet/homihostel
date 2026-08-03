@@ -22,12 +22,20 @@ class AppColors {
   static const infoSoft = Color(0xFFE0F2FE);
 }
 
-ThemeData buildAppTheme() {
+/// Builds the app theme.
+///
+/// [seed] comes from the workspace's Appearance setting. It drives every
+/// Material-themed surface — buttons, inputs, dialogs, progress indicators,
+/// selection colours. Widgets that reference an [AppColors] constant directly
+/// are compile-time `const` and do NOT follow it; migrating those is a known
+/// follow-up.
+ThemeData buildAppTheme({Color? seed}) {
+  final accent = seed ?? AppColors.primary;
   final base = ThemeData(
     useMaterial3: true,
     colorScheme: ColorScheme.fromSeed(
-      seedColor: AppColors.primary,
-      primary: AppColors.primary,
+      seedColor: accent,
+      primary: accent,
     ),
     scaffoldBackgroundColor: AppColors.canvas,
   );
@@ -56,7 +64,7 @@ ThemeData buildAppTheme() {
       ),
       focusedBorder: OutlineInputBorder(
         borderRadius: BorderRadius.circular(10),
-        borderSide: const BorderSide(color: AppColors.primary, width: 1.6),
+        borderSide: BorderSide(color: accent, width: 1.6),
       ),
       errorBorder: OutlineInputBorder(
         borderRadius: BorderRadius.circular(10),
@@ -65,7 +73,7 @@ ThemeData buildAppTheme() {
     ),
     elevatedButtonTheme: ElevatedButtonThemeData(
       style: ElevatedButton.styleFrom(
-        backgroundColor: AppColors.primary,
+        backgroundColor: accent,
         foregroundColor: Colors.white,
         elevation: 0,
         padding: const EdgeInsets.symmetric(horizontal: 22, vertical: 18),
@@ -75,7 +83,7 @@ ThemeData buildAppTheme() {
     ),
     outlinedButtonTheme: OutlinedButtonThemeData(
       style: OutlinedButton.styleFrom(
-        foregroundColor: AppColors.primary,
+        foregroundColor: accent,
         padding: const EdgeInsets.symmetric(horizontal: 22, vertical: 18),
         side: const BorderSide(color: AppColors.border),
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),

@@ -2,6 +2,7 @@ import 'package:flutter/widgets.dart';
 
 import '../models/app_role.dart';
 import '../models/app_user.dart';
+import '../models/college_settings.dart';
 
 /// Everything the UI needs to know about "who is looking at this screen".
 ///
@@ -14,7 +15,17 @@ class Session {
   final AppRole? role;
   final String collegeName;
 
-  const Session({required this.user, this.role, required this.collegeName});
+  /// Workspace configuration. Defaults so any screen can read it without a
+  /// null check, and so a workspace that has never opened System Settings
+  /// behaves exactly like one that has.
+  final CollegeSettings settings;
+
+  const Session({
+    required this.user,
+    this.role,
+    required this.collegeName,
+    this.settings = const CollegeSettings(),
+  });
 
   /// SuperAdmin short-circuits every check — they own the workspace.
   bool can(String permission) =>
@@ -63,7 +74,9 @@ class SessionScope extends InheritedWidget {
   bool updateShouldNotify(SessionScope oldWidget) =>
       oldWidget.session.user.uid != session.user.uid ||
       oldWidget.session.role?.permissions != session.role?.permissions ||
-      oldWidget.session.user.name != session.user.name;
+      oldWidget.session.user.name != session.user.name ||
+      oldWidget.session.collegeName != session.collegeName ||
+      oldWidget.session.settings.updatedAt != session.settings.updatedAt;
 }
 
 /// Convenience for reading permissions inline in build methods.

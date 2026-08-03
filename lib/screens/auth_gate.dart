@@ -5,7 +5,9 @@ import '../core/session.dart';
 import '../core/theme.dart';
 import '../models/app_role.dart';
 import '../models/app_user.dart';
+import '../models/college_settings.dart';
 import '../services/auth_service.dart';
+import '../services/settings_service.dart';
 import 'dashboard_shell.dart';
 import 'login_screen.dart';
 
@@ -91,16 +93,30 @@ class _SessionLoader extends StatelessWidget {
               return _NoAccess(name: profile.name);
             }
 
-            return FutureBuilder<String>(
-              future: AuthService.instance.collegeName(profile.collegeId),
+            return StreamBuilder<String>(
+              stream: AuthService.instance.watchCollegeName(profile.collegeId),
               builder: (context, nameSnap) {
-                return SessionScope(
-                  session: Session(
-                    user: profile,
-                    role: role,
-                    collegeName: nameSnap.data ?? 'Institution',
-                  ),
-                  child: const DashboardShell(),
+                return StreamBuilder<CollegeSettings>(
+                  stream: SettingsService.instance.watch(profile.collegeId),
+                  builder: (context, settingsSnap) {
+                    final settings =
+                        settingsSnap.data ?? const CollegeSettings();
+                    return SessionScope(
+                      session: Session(
+                        user: profile,
+                        role: role,
+                        collegeName: nameSnap.data ?? 'Institution',
+                        settings: settings,
+                      ),
+                      // Re-themed here rather than at MaterialApp, because the
+                      // accent lives in the workspace's settings and there is
+                      // no workspace until someone has signed in.
+                      child: Theme(
+                        data: buildAppTheme(seed: settings.theming.seed),
+                        child: const DashboardShell(),
+                      ),
+                    );
+                  },
                 );
               },
             );

@@ -151,6 +151,14 @@ class AuthService {
     return doc.data()?['name'] as String? ?? 'Institution';
   }
 
+  /// Live college name, so renaming the institution in System Settings shows
+  /// up in the sidebar immediately rather than after a re-login.
+  Stream<String> watchCollegeName(String collegeId) => _db
+      .collection('colleges')
+      .doc(collegeId)
+      .snapshots()
+      .map((d) => d.data()?['name'] as String? ?? 'Institution');
+
   // ---------------------------------------------------------------------
   // Creating a sub-user without kicking the admin out of their own session.
   //
