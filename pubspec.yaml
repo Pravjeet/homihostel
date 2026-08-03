@@ -47,6 +47,9 @@ dependencies:
   http: ^1.2.0
   url_launcher: ^6.2.5
 
+  # Bar charts for the fines mini-dashboard.
+  fl_chart: ^0.69.0
+
 dev_dependencies:
   flutter_test:
     sdk: flutter

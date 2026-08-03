@@ -46,3 +46,17 @@ app.*.map.json
 
 # Records which firestore.rules version this machine last deployed
 .rules-deployed
+
+# ---------------------------------------------------------------------
+# Admin tooling (tools/)
+#
+# NEVER commit a service-account key. It is the master credential for the
+# whole Firebase project — anyone holding it can read, write or delete
+# every account and every document, with no password. If one is ever
+# committed by accident, revoke it in the Firebase console immediately;
+# removing the file from a later commit is NOT enough, it stays in history.
+# ---------------------------------------------------------------------
+serviceAccountKey.json
+**/serviceAccountKey.json
+*-firebase-adminsdk-*.json
+tools/node_modules/

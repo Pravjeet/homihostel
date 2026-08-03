@@ -27,11 +27,26 @@ class Session {
   bool get hasNoAccess =>
       !user.isSuperAdmin && (role == null || role!.permissions.isEmpty);
 
+  /// The session for this part of the tree.
+  ///
+  /// Throws if there is no [SessionScope] above [context]. The usual cause is
+  /// calling this from inside a `showDialog` builder: a dialog is pushed onto
+  /// the root Navigator, so its context is a *sibling* of the dashboard rather
+  /// than a descendant, and SessionScope sits below that Navigator. Read the
+  /// session in the page that opens the dialog and pass what you need in.
   static Session of(BuildContext context) {
     final scope = context
         .dependOnInheritedWidgetOfExactType<SessionScope>();
-    assert(scope != null, 'No SessionScope found above this widget.');
-    return scope!.session;
+    if (scope == null) {
+      throw FlutterError(
+        'Session.of() found no SessionScope above this widget.\n'
+        'If this is inside a showDialog/showModalBottomSheet builder, that is '
+        'expected — the dialog is a separate route and cannot see the '
+        'dashboard\'s SessionScope. Read Session.of(context) in the calling '
+        'page and pass the value into the dialog as a constructor argument.',
+      );
+    }
+    return scope.session;
   }
 }
 

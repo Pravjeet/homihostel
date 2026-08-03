@@ -30,6 +30,32 @@ class AppUser {
   // user's detail screen, which is why every one of them is nullable.
   final String? course;
   final String? year;
+
+  // --- Trade / Batch / Sem ---
+  //
+  // Separate from course/year: trade is a controlled list (see [kTrades]),
+  // batch is the admission-year range ("2023-24"), and sem is numeric so the
+  // fines dashboard can sort/bucket by it. course/year stay as free text for
+  // whatever a given college already uses them for.
+  final String? trade;
+  final String? batch;
+  final int? sem;
+
+  /// Home state, canonicalised against [kIndianStates].
+  ///
+  /// Kept as its own field rather than parsed out of [address] on demand,
+  /// because the dashboard groups by it — and "UP" and "Uttar Pradesh" typed
+  /// into a free-text address would chart as two different places.
+  final String? state;
+
+  /// Where a staff member sits — "Admin Block, Room 12".
+  ///
+  /// Deliberately plain text and separate from the [roomId] allotment fields:
+  /// an office is not a bed. It has no occupancy limit, no gender rule and no
+  /// transaction, so putting it through the allotment machinery would mean
+  /// inventing a fake hostel to hold offices in.
+  final String? officeRoom;
+
   final String? dateOfBirth;
   final String? bloodGroup;
   final String? address;
@@ -65,6 +91,11 @@ class AppUser {
     this.createdAt,
     this.course,
     this.year,
+    this.trade,
+    this.batch,
+    this.sem,
+    this.state,
+    this.officeRoom,
     this.dateOfBirth,
     this.bloodGroup,
     this.address,
@@ -97,6 +128,11 @@ class AppUser {
       createdAt: (m['createdAt'] as Timestamp?)?.toDate(),
       course: m['course'] as String?,
       year: m['year'] as String?,
+      trade: m['trade'] as String?,
+      batch: m['batch'] as String?,
+      sem: (m['sem'] as num?)?.toInt(),
+      state: m['state'] as String?,
+      officeRoom: m['officeRoom'] as String?,
       dateOfBirth: m['dateOfBirth'] as String?,
       bloodGroup: m['bloodGroup'] as String?,
       address: m['address'] as String?,
@@ -126,6 +162,11 @@ class AppUser {
     'enrollmentNo': enrollmentNo,
     'course': course,
     'year': year,
+    'trade': trade,
+    'batch': batch,
+    'sem': sem,
+    'state': state,
+    'officeRoom': officeRoom,
     'dateOfBirth': dateOfBirth,
     'bloodGroup': bloodGroup,
     'address': address,
@@ -154,4 +195,143 @@ class AppUser {
   /// "Block A · Room 101", or null when not allotted.
   String? get roomLabel =>
       isAllotted ? '$hostelName · Room $roomNumber' : null;
+}
+
+/// SLIET trade/branch codes, as they appear on the institute's own sheets.
+///
+/// A plain list rather than an enum so adding next year's programme is a
+/// one-line edit. Grouped by level: D* = Diploma (ICD), G* = Degree (B.E.),
+/// PG* = postgraduate. An unrecognised code isn't rejected on import — it is
+/// saved as typed and flagged, because a sheet inventing a code is far more
+/// likely than a student not existing.
+const List<String> kTrades = [
+  // Diploma
+  'DCE-CBM',
+  'DEC-CSME',
+  'DEE-CEN',
+  'DFT-CFP',
+  'DME-CAF',
+  'DME-CFF',
+  'DME-CTD',
+  'DCS-CDF',
+  'DCE-CTV',
+  'DCE-CEP',
+  // Degree
+  'GCS',
+  'GCT',
+  'GEC',
+  'GEE',
+  'GIN',
+  'GME',
+  'GCC',
+  'GEB',
+  // Postgraduate
+  'PGMATH',
+  'PGWLF',
+  'PGFET',
+  'PGWD',
+];
+
+/// States and union territories, as the dashboard should label them.
+const List<String> kIndianStates = [
+  'Andhra Pradesh', 'Arunachal Pradesh', 'Assam', 'Bihar', 'Chhattisgarh',
+  'Delhi', 'Goa', 'Gujarat', 'Haryana', 'Himachal Pradesh',
+  'Jammu and Kashmir', 'Jharkhand', 'Karnataka', 'Kerala', 'Ladakh',
+  'Madhya Pradesh', 'Maharashtra', 'Manipur', 'Meghalaya', 'Mizoram',
+  'Nagaland', 'Odisha', 'Puducherry', 'Punjab', 'Rajasthan', 'Sikkim',
+  'Tamil Nadu', 'Telangana', 'Tripura', 'Uttar Pradesh', 'Uttarakhand',
+  'West Bengal', 'Andaman and Nicobar Islands', 'Chandigarh',
+  'Dadra and Nagar Haveli and Daman and Diu', 'Lakshadweep',
+];
+
+/// What people actually type. Without this, "UP" and "Uttar Pradesh" become
+/// two separate bars on the by-state chart and the totals stop meaning
+/// anything.
+const Map<String, String> _stateAliases = {
+  'up': 'Uttar Pradesh',
+  'uttarpradesh': 'Uttar Pradesh',
+  'mp': 'Madhya Pradesh',
+  'madhyapradesh': 'Madhya Pradesh',
+  'hp': 'Himachal Pradesh',
+  'himachal': 'Himachal Pradesh',
+  'ap': 'Andhra Pradesh',
+  'tn': 'Tamil Nadu',
+  'tamilnadu': 'Tamil Nadu',
+  'wb': 'West Bengal',
+  'westbengal': 'West Bengal',
+  'jk': 'Jammu and Kashmir',
+  'jandk': 'Jammu and Kashmir',
+  'jammukashmir': 'Jammu and Kashmir',
+  'uk': 'Uttarakhand',
+  'ua': 'Uttarakhand',
+  'uttaranchal': 'Uttarakhand',
+  'orissa': 'Odisha',
+  'pondicherry': 'Puducherry',
+  'newdelhi': 'Delhi',
+  'nct': 'Delhi',
+  'chattisgarh': 'Chhattisgarh',
+  'pb': 'Punjab',
+  'hr': 'Haryana',
+  'br': 'Bihar',
+  'jh': 'Jharkhand',
+  'rj': 'Rajasthan',
+  'mh': 'Maharashtra',
+  'ka': 'Karnataka',
+  'kl': 'Kerala',
+  'gj': 'Gujarat',
+  'ts': 'Telangana',
+  'ch': 'Chandigarh',
+};
+
+String _stateKey(String s) =>
+    s.toLowerCase().replaceAll(RegExp(r'[^a-z]'), '');
+
+/// Canonicalises a state name someone typed. Returns null if it isn't one.
+String? normaliseState(String? raw) {
+  final v = raw?.trim() ?? '';
+  if (v.isEmpty) return null;
+  final key = _stateKey(v);
+  if (key.isEmpty) return null;
+
+  for (final s in kIndianStates) {
+    if (_stateKey(s) == key) return s;
+  }
+  return _stateAliases[key];
+}
+
+/// Pulls the state out of a free-text address.
+///
+/// Addresses in the college sheets are "City, State" — so the last
+/// comma-separated part is the candidate. Falls back to scanning every
+/// segment, because a three-part address ("Village, District, Punjab") is
+/// just as common. Returns null rather than guessing when nothing matches, so
+/// the chart shows an honest "Not set" bucket instead of an invented state.
+String? stateFromAddress(String? address) {
+  final v = address?.trim() ?? '';
+  if (v.isEmpty) return null;
+
+  final parts = v.split(',').map((p) => p.trim()).where((p) => p.isNotEmpty);
+  for (final part in parts.toList().reversed) {
+    final hit = normaliseState(part);
+    if (hit != null) return hit;
+  }
+  return null;
+}
+
+/// Turns a registration number into the admission batch it belongs to.
+///
+/// SLIET registration numbers start with the two-digit admission year —
+/// `2110910` was admitted in 2021, so their batch is "2021-22". Deriving it
+/// means the batch column is optional on an import: a sheet that only has
+/// registration numbers still populates the dashboard's batch breakdown.
+String? batchFromRegistrationNo(String? regNo) {
+  final v = regNo?.trim() ?? '';
+  if (v.length < 2) return null;
+  final yy = int.tryParse(v.substring(0, 2));
+  if (yy == null || yy < 0 || yy > 99) return null;
+  final start = 2000 + yy;
+  // Guard against a stray number producing a batch decades away.
+  final thisYear = DateTime.now().year;
+  if (start < 2000 || start > thisYear + 1) return null;
+  return '$start-${(start + 1) % 100 == 0 ? '00' : ((start + 1) % 100).toString().padLeft(2, '0')}';
 }

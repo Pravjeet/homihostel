@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 
+import '../core/logo.dart';
 import '../core/nav_registry.dart';
 import '../core/session.dart';
 import '../core/theme.dart';
@@ -121,19 +122,7 @@ class _Sidebar extends StatelessWidget {
             padding: const EdgeInsets.symmetric(horizontal: 18),
             child: Row(
               children: [
-                Container(
-                  height: 40,
-                  width: 40,
-                  decoration: BoxDecoration(
-                    color: AppColors.primary,
-                    borderRadius: BorderRadius.circular(11),
-                  ),
-                  child: const Icon(
-                    Icons.shield_rounded,
-                    color: Colors.white,
-                    size: 22,
-                  ),
-                ),
+                const HomiLogo(size: 40),
                 if (expanded) ...[
                   const SizedBox(width: 12),
                   Expanded(

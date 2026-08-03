@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
 import '../core/identity.dart';
+import '../core/logo.dart';
 import '../core/theme.dart';
 import '../services/auth_service.dart';
 import '../services/saved_accounts.dart';
@@ -202,21 +203,7 @@ class _LoginScreenState extends State<LoginScreen> {
                   mainAxisSize: MainAxisSize.min,
                   crossAxisAlignment: CrossAxisAlignment.stretch,
                   children: [
-                    Center(
-                      child: Container(
-                        height: 56,
-                        width: 56,
-                        decoration: BoxDecoration(
-                          color: AppColors.primary,
-                          borderRadius: BorderRadius.circular(16),
-                        ),
-                        child: const Icon(
-                          Icons.shield_rounded,
-                          color: Colors.white,
-                          size: 30,
-                        ),
-                      ),
-                    ),
+                    const Center(child: HomiLogo(size: 62)),
                     const SizedBox(height: 22),
                     const Text(
                       'Homi Hostel',

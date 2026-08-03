@@ -52,6 +52,24 @@ class HostelService {
         return rooms;
       });
 
+  /// One-shot read of a hostel's rooms.
+  ///
+  /// The bulk importer needs this rather than `watchRooms(...).first`: taking
+  /// `.first` off a snapshot stream opens a live listener that is never
+  /// cancelled, and if the stream never emits (offline, or a rules change mid
+  /// import) the await hangs with no timeout — which is exactly what a stuck
+  /// "Importing…" looks like.
+  Future<List<Room>> roomsOnce(String collegeId, String hostelId) async {
+    final snap = await _rooms(collegeId, hostelId).get();
+    final rooms = snap.docs.map((d) => Room.fromMap(d.id, d.data())).toList();
+    rooms.sort((a, b) {
+      final byFloor = a.floor.compareTo(b.floor);
+      if (byFloor != 0) return byFloor;
+      return _numericCompare(a.number, b.number);
+    });
+    return rooms;
+  }
+
   /// Compares room numbers numerically where possible, so "9" sorts before
   /// "10" instead of after it.
   static int _numericCompare(String a, String b) {

@@ -2,9 +2,11 @@ import 'package:flutter/material.dart';
 
 import '../screens/pages/allotment_page.dart';
 import '../screens/pages/coming_soon_page.dart';
+import '../screens/pages/fines_page.dart';
 import '../screens/pages/hostels_page.dart';
 import '../screens/pages/mess_page.dart';
 import '../screens/pages/my_room_page.dart';
+import '../screens/pages/office_orders_page.dart';
 import '../screens/pages/overview_page.dart';
 import '../screens/pages/profile_page.dart';
 import '../screens/pages/requests_page.dart';
@@ -23,6 +25,16 @@ class NavItem {
   /// Shown only if the session holds at least one of these. Empty = always.
   final List<String> requires;
 
+  /// Hidden if the session holds any of these, even when [requires] matched.
+  ///
+  /// For self-service entries that make no sense to the people who manage the
+  /// thing. "My Room" is the case that forced this: `Session.can` short-
+  /// circuits to true for a Super Admin, so a `requires: [selfRoom]` entry
+  /// showed the workspace owner a room they will never be allotted. Anyone
+  /// holding `allotment.manage` sees Room Allotment instead, which is the
+  /// staff-facing version of the same information.
+  final List<String> excludes;
+
   final WidgetBuilder builder;
 
   const NavItem({
@@ -30,6 +42,7 @@ class NavItem {
     required this.label,
     required this.icon,
     this.requires = const [],
+    this.excludes = const [],
     required this.builder,
   });
 }
@@ -98,6 +111,7 @@ const List<NavSection> _allSections = [
         label: 'My Room',
         icon: Icons.meeting_room_rounded,
         requires: [Perm.selfRoom],
+        excludes: [Perm.allotmentManage],
         builder: _myRoom,
       ),
     ],
@@ -131,11 +145,18 @@ const List<NavSection> _allSections = [
         builder: _notices,
       ),
       NavItem(
-        id: 'finance',
-        label: 'Finance',
-        icon: Icons.payments_rounded,
-        requires: [Perm.financeView],
-        builder: _finance,
+        id: 'fines',
+        label: 'Fines',
+        icon: Icons.gavel_rounded,
+        requires: [Perm.finesViewAll, Perm.finesViewOwn],
+        builder: _fines,
+      ),
+      NavItem(
+        id: 'office-orders',
+        label: 'Office Orders',
+        icon: Icons.description_rounded,
+        requires: [Perm.officeOrdersView],
+        builder: _officeOrders,
       ),
     ],
   ),
@@ -155,13 +176,6 @@ const List<NavSection> _allSections = [
         requires: [Perm.settingsManage],
         builder: _settings,
       ),
-      NavItem(
-        id: 'audit',
-        label: 'Audit Logs',
-        icon: Icons.receipt_long_rounded,
-        requires: [Perm.auditView],
-        builder: _audit,
-      ),
     ],
   ),
 ];
@@ -172,6 +186,7 @@ List<NavSection> navigationFor(Session session) {
   for (final section in _allSections) {
     final visible = section.items
         .where((i) => i.requires.isEmpty || session.canAny(i.requires))
+        .where((i) => i.excludes.isEmpty || !session.canAny(i.excludes))
         .toList();
     if (visible.isNotEmpty) {
       result.add(NavSection(title: section.title, items: visible));
@@ -197,18 +212,10 @@ Widget _allotment(BuildContext c) => const AllotmentPage();
 Widget _mess(BuildContext c) => const MessPage();
 Widget _requests(BuildContext c) => const RequestsPage();
 Widget _notices(BuildContext c) => const NoticesPage();
-Widget _finance(BuildContext c) => const ComingSoonPage(
-  title: 'Finance',
-  icon: Icons.payments_rounded,
-  blurb: 'Payments, dues tracking and revenue reports.',
-);
+Widget _fines(BuildContext c) => const FinesPage();
+Widget _officeOrders(BuildContext c) => const OfficeOrdersPage();
 Widget _settings(BuildContext c) => const ComingSoonPage(
   title: 'System Settings',
   icon: Icons.settings_rounded,
   blurb: 'Institution profile, branding and preferences.',
-);
-Widget _audit(BuildContext c) => const ComingSoonPage(
-  title: 'Audit Logs',
-  icon: Icons.receipt_long_rounded,
-  blurb: 'A record of who changed what, and when.',
 );

@@ -5,10 +5,14 @@ import '../../core/permissions.dart';
 import '../../core/session.dart';
 import '../../core/theme.dart';
 import '../../models/app_user.dart';
+import '../../models/fine.dart';
 import '../../services/allotment_service.dart';
 import '../../services/auth_service.dart';
 import '../../services/data_service.dart';
+import '../../services/fine_service.dart';
 import 'allot_room_view.dart';
+import 'fines_shared.dart' show FineRow, compactAmount;
+import 'impose_fine_view.dart';
 
 /// The full record for one person: everything that wasn't asked for at
 /// account creation, plus their room.
@@ -39,6 +43,9 @@ class UserDetailView extends StatefulWidget {
 class _UserDetailViewState extends State<UserDetailView> {
   /// Non-null while the allot/move picker is showing in place of the details.
   bool? _allotIsMove;
+
+  /// True while the impose-fine form is showing in place of the details.
+  bool _imposingFine = false;
 
   @override
   Widget build(BuildContext context) {
@@ -74,6 +81,14 @@ class _UserDetailViewState extends State<UserDetailView> {
           );
         }
 
+        if (_imposingFine) {
+          return ImposeFineView(
+            student: user,
+            onBack: () => setState(() => _imposingFine = false),
+            onDone: () => setState(() => _imposingFine = false),
+          );
+        }
+
         return Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
@@ -82,6 +97,11 @@ class _UserDetailViewState extends State<UserDetailView> {
             _RoomSection(
               user: user,
               onAllot: (move) => setState(() => _allotIsMove = move),
+            ),
+            const SizedBox(height: 18),
+            _FinesSection(
+              user: user,
+              onImpose: () => setState(() => _imposingFine = true),
             ),
             const SizedBox(height: 18),
             // Keyed on uid so switching users rebuilds the controllers with
@@ -163,6 +183,161 @@ class _Header extends StatelessWidget {
   }
 }
 
+// -------------------------------- fines --------------------------------
+
+/// This student's fine history, on their own record.
+///
+/// Shown to anyone who can see all fines (staff triaging a student) and to the
+/// student themselves. Reuses [FineRow] from the fines page so a fine looks
+/// and behaves identically wherever it appears.
+class _FinesSection extends StatelessWidget {
+  final AppUser user;
+  final VoidCallback onImpose;
+
+  const _FinesSection({required this.user, required this.onImpose});
+
+  @override
+  Widget build(BuildContext context) {
+    final session = Session.of(context);
+    final collegeId = session.user.collegeId;
+    final canManage = session.can(Perm.finesManage);
+    final isSelf = session.user.uid == user.uid;
+
+    if (!session.can(Perm.finesViewAll) && !isSelf) {
+      return const SizedBox.shrink();
+    }
+
+    return StreamBuilder<List<Fine>>(
+      stream: FineService.instance.watchMine(collegeId, user.uid),
+      builder: (context, snap) {
+        if (snap.hasError) {
+          return AppCard(child: Text(AuthService.describeError(snap.error!)));
+        }
+
+        final fines = snap.data ?? const <Fine>[];
+        final summary = FineSummary(fines);
+
+        return AppCard(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              SectionHeader(
+                'Fines',
+                trailing: canManage
+                    ? OutlinedButton.icon(
+                        onPressed: onImpose,
+                        icon: const Icon(Icons.gavel_rounded, size: 17),
+                        label: const Text('Impose fine'),
+                        style: OutlinedButton.styleFrom(
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: 16,
+                            vertical: 13,
+                          ),
+                        ),
+                      )
+                    : null,
+              ),
+              const SizedBox(height: 14),
+              if (!snap.hasData)
+                const Padding(
+                  padding: EdgeInsets.symmetric(vertical: 24),
+                  child: Center(child: CircularProgressIndicator()),
+                )
+              else if (fines.isEmpty)
+                Padding(
+                  padding: const EdgeInsets.symmetric(vertical: 18),
+                  child: Text(
+                    isSelf
+                        ? 'You have no fines.'
+                        : '${user.name.split(' ').first} has no fines.',
+                    style: const TextStyle(
+                      color: AppColors.textMuted,
+                      fontSize: 13.5,
+                    ),
+                  ),
+                )
+              else ...[
+                Wrap(
+                  spacing: 30,
+                  runSpacing: 12,
+                  children: [
+                    _FineStat(
+                      'Still owed',
+                      '₹${compactAmount(summary.outstanding)}',
+                      summary.outstanding == 0
+                          ? AppColors.success
+                          : AppColors.danger,
+                    ),
+                    _FineStat(
+                      'Total imposed',
+                      '₹${compactAmount(summary.total)}',
+                      AppColors.textStrong,
+                    ),
+                    _FineStat(
+                      'Paid',
+                      '₹${compactAmount(summary.collected)}',
+                      AppColors.success,
+                    ),
+                    _FineStat('Count', '${summary.count}', AppColors.primary),
+                  ],
+                ),
+                const SizedBox(height: 8),
+                for (var i = 0; i < fines.length; i++) ...[
+                  if (i != 0)
+                    const Divider(height: 1, color: AppColors.border),
+                  Padding(
+                    // FineRow brings its own horizontal padding, which would
+                    // double up inside a card that already has some.
+                    padding: const EdgeInsets.symmetric(horizontal: 0),
+                    child: FineRow(
+                      fine: fines[i],
+                      showWho: false,
+                      canManage: canManage,
+                      collegeId: collegeId,
+                    ),
+                  ),
+                ],
+              ],
+            ],
+          ),
+        );
+      },
+    );
+  }
+}
+
+class _FineStat extends StatelessWidget {
+  final String label;
+  final String value;
+  final Color color;
+  const _FineStat(this.label, this.value, this.color);
+
+  @override
+  Widget build(BuildContext context) => Column(
+    mainAxisSize: MainAxisSize.min,
+    crossAxisAlignment: CrossAxisAlignment.start,
+    children: [
+      Text(
+        label,
+        style: const TextStyle(
+          fontSize: 11.5,
+          fontWeight: FontWeight.w700,
+          color: AppColors.textMuted,
+        ),
+      ),
+      const SizedBox(height: 2),
+      Text(
+        value,
+        style: TextStyle(
+          fontSize: 20,
+          fontWeight: FontWeight.w800,
+          color: color,
+        ),
+      ),
+    ],
+  );
+}
+
 // --------------------------------- form ---------------------------------
 
 class _DetailForm extends StatefulWidget {
@@ -180,6 +355,9 @@ class _DetailFormState extends State<_DetailForm> {
 
   String? _gender;
   String? _bloodGroup;
+  String? _trade;
+  int? _sem;
+  String? _state;
   bool _busy = false;
   String? _error;
 
@@ -193,6 +371,8 @@ class _DetailFormState extends State<_DetailForm> {
       'enrollmentNo': TextEditingController(text: u.enrollmentNo ?? ''),
       'course': TextEditingController(text: u.course ?? ''),
       'year': TextEditingController(text: u.year ?? ''),
+      'batch': TextEditingController(text: u.batch ?? ''),
+      'officeRoom': TextEditingController(text: u.officeRoom ?? ''),
       'dateOfBirth': TextEditingController(text: u.dateOfBirth ?? ''),
       'address': TextEditingController(text: u.address ?? ''),
       'guardianName': TextEditingController(text: u.guardianName ?? ''),
@@ -202,6 +382,11 @@ class _DetailFormState extends State<_DetailForm> {
     };
     _gender = u.gender;
     _bloodGroup = u.bloodGroup;
+    _trade = u.trade;
+    _sem = u.sem;
+    // Fall back to whatever the address already says, so an existing student
+    // shows their state without anyone re-entering it.
+    _state = u.state ?? stateFromAddress(u.address);
   }
 
   @override
@@ -232,6 +417,11 @@ class _DetailFormState extends State<_DetailForm> {
         'enrollmentNo': _val('enrollmentNo'),
         'course': _val('course'),
         'year': _val('year'),
+        'trade': _trade,
+        'batch': _val('batch'),
+        'sem': _sem,
+        'state': _state,
+        'officeRoom': _val('officeRoom'),
         'dateOfBirth': _val('dateOfBirth'),
         'bloodGroup': _bloodGroup,
         'address': _val('address'),
@@ -373,6 +563,67 @@ class _DetailFormState extends State<_DetailForm> {
                 ),
               ],
             ),
+            Row(
+              children: [
+                Expanded(
+                  child: Padding(
+                    padding: const EdgeInsets.only(bottom: 14),
+                    child: DropdownButtonFormField<String>(
+                      initialValue: kTrades.contains(_trade) ? _trade : null,
+                      isExpanded: true,
+                      decoration: const InputDecoration(labelText: 'Trade'),
+                      items: kTrades
+                          .map((t) => DropdownMenuItem(value: t, child: Text(t)))
+                          .toList(),
+                      onChanged: on ? (v) => setState(() => _trade = v) : null,
+                    ),
+                  ),
+                ),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: _Field(
+                    _c['batch']!,
+                    'Batch',
+                    hint: '2023-24',
+                    enabled: on,
+                  ),
+                ),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: Padding(
+                    padding: const EdgeInsets.only(bottom: 14),
+                    child: DropdownButtonFormField<int>(
+                      initialValue: _sem,
+                      decoration: const InputDecoration(labelText: 'Semester'),
+                      items: List.generate(8, (i) => i + 1)
+                          .map(
+                            (s) => DropdownMenuItem(value: s, child: Text('$s')),
+                          )
+                          .toList(),
+                      onChanged: on ? (v) => setState(() => _sem = v) : null,
+                    ),
+                  ),
+                ),
+              ],
+            ),
+            // Staff sit in an office, not a hostel bed — this is the
+            // equivalent of the room a resident gets allotted.
+            Row(
+              children: [
+                Expanded(
+                  child: _Field(
+                    _c['officeRoom']!,
+                    'Office / staff room',
+                    hint: 'Admin Block, Room 12',
+                    enabled: on,
+                  ),
+                ),
+                const SizedBox(width: 12),
+                const Expanded(child: SizedBox.shrink()),
+                const SizedBox(width: 12),
+                const Expanded(child: SizedBox.shrink()),
+              ],
+            ),
 
             const SizedBox(height: 8),
             const _SectionLabel('Guardian & emergency contact'),
@@ -410,11 +661,40 @@ class _DetailFormState extends State<_DetailForm> {
 
             const SizedBox(height: 8),
             const _SectionLabel('Other'),
-            _Field(
-              _c['address']!,
-              'Permanent address',
-              enabled: on,
-              lines: 2,
+            Row(
+              children: [
+                Expanded(
+                  flex: 2,
+                  child: _Field(
+                    _c['address']!,
+                    'Permanent address',
+                    enabled: on,
+                    lines: 2,
+                  ),
+                ),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: Padding(
+                    padding: const EdgeInsets.only(bottom: 14),
+                    child: DropdownButtonFormField<String>(
+                      initialValue: kIndianStates.contains(_state)
+                          ? _state
+                          : null,
+                      isExpanded: true,
+                      decoration: const InputDecoration(
+                        labelText: 'Home state',
+                        helperText: 'Used by the fines dashboard',
+                      ),
+                      items: kIndianStates
+                          .map(
+                            (s) => DropdownMenuItem(value: s, child: Text(s)),
+                          )
+                          .toList(),
+                      onChanged: on ? (v) => setState(() => _state = v) : null,
+                    ),
+                  ),
+                ),
+              ],
             ),
             _Field(
               _c['notes']!,

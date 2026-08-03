@@ -1,7 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
-import '../../core/session.dart';
 import '../../core/theme.dart';
 import '../../models/app_role.dart';
 import '../../models/app_user.dart';
@@ -15,12 +14,23 @@ import '../../services/csv_import.dart';
 /// will happen. Imports get run twice by accident constantly, so the preview
 /// isn't a nicety — it's the safety mechanism.
 class ImportStudentsDialog extends StatefulWidget {
+  /// Passed in rather than read from the context.
+  ///
+  /// `showDialog` pushes a route onto the *root* Navigator, so this widget's
+  /// context is a sibling of the dashboard's — not a descendant. `SessionScope`
+  /// lives below that Navigator (see `auth_gate.dart`), which means
+  /// `Session.of(context)` inside a dialog finds nothing and throws. The caller
+  /// reads the session from the page's own context and hands us the one value
+  /// we actually need.
+  final String collegeId;
+
   final List<AppUser> existingUsers;
   final List<AppRole> roles;
   final List<Hostel> hostels;
 
   const ImportStudentsDialog({
     super.key,
+    required this.collegeId,
     required this.existingUsers,
     required this.roles,
     this.hostels = const [],
@@ -100,8 +110,14 @@ class _ImportStudentsDialogState extends State<ImportStudentsDialog> {
 
   Future<void> _run() async {
     final plan = _plan!;
-    final collegeId = Session.of(context).user.collegeId;
+    final collegeId = widget.collegeId;
 
+    // Move to the progress step FIRST, and put every subsequent statement
+    // inside the try. Anything thrown before this point would land in a
+    // Future that `onPressed` discards — an unhandled async error that shows
+    // up only as an engine stack trace in the browser console, with the
+    // dialog sitting there looking fine. This is how the Session lookup that
+    // used to live here stayed invisible.
     setState(() {
       _step = 2;
       _running = true;

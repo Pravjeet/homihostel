@@ -10,6 +10,7 @@ import '../../models/hostel.dart';
 import '../../services/auth_service.dart';
 import '../../services/data_service.dart';
 import '../../services/hostel_service.dart';
+import 'bulk_delete_users_dialog.dart';
 import 'import_students_dialog.dart';
 import 'user_detail_view.dart';
 
@@ -18,6 +19,45 @@ class UsersPage extends StatefulWidget {
 
   @override
   State<UsersPage> createState() => _UsersPageState();
+}
+
+/// Deletes everyone the current filter is showing.
+///
+/// Scoped to the filtered list rather than "all students" on purpose: roles
+/// are user-created data, so hard-coding a role name here would break the
+/// moment someone renames Student or invents a second resident role. Filter
+/// the list to what you want gone, then delete what you can see.
+class _BulkDeleteButton extends StatelessWidget {
+  final List<AppUser> targets;
+  final String scopeLabel;
+  final ValueChanged<List<AppUser>> onConfirm;
+
+  const _BulkDeleteButton({
+    required this.targets,
+    required this.scopeLabel,
+    required this.onConfirm,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final n = targets.length;
+    return Tooltip(
+      message: n == 0
+          ? 'Nothing to delete in the current filter'
+          : 'Deletes the $n user(s) currently listed ($scopeLabel).\n'
+                'Super Admins and your own account are never included.',
+      child: OutlinedButton.icon(
+        onPressed: n == 0 ? null : () => onConfirm(targets),
+        icon: const Icon(Icons.delete_sweep_rounded, size: 18),
+        label: Text('Delete $n shown'),
+        style: OutlinedButton.styleFrom(
+          foregroundColor: AppColors.danger,
+          side: const BorderSide(color: AppColors.dangerSoft),
+          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+        ),
+      ),
+    );
+  }
 }
 
 class _UsersPageState extends State<UsersPage> {
@@ -90,43 +130,64 @@ class _UsersPageState extends State<UsersPage> {
                     children: [
                       SectionHeader(
                         'Users  (${all.length})',
-                        trailing: session.can(Perm.usersCreate)
+                        trailing: (session.can(Perm.usersCreate) ||
+                                session.can(Perm.usersDelete))
                             ? Row(
                                 mainAxisSize: MainAxisSize.min,
                                 children: [
-                                  OutlinedButton.icon(
-                                    onPressed: assignable.isEmpty
-                                        ? null
-                                        : () => _openImportDialog(all, roles),
-                                    icon: const Icon(
-                                      Icons.upload_file_rounded,
-                                      size: 18,
+                                  if (session.can(Perm.usersDelete)) ...[
+                                    _BulkDeleteButton(
+                                      // Anything the current filter is
+                                      // showing, minus the people who must
+                                      // never be swept up in a bulk action.
+                                      targets: filtered
+                                          .where((u) => !u.isSuperAdmin)
+                                          .where(
+                                            (u) => u.uid != session.user.uid,
+                                          )
+                                          .toList(),
+                                      scopeLabel: _scopeLabel,
+                                      onConfirm: _openBulkDelete,
                                     ),
-                                    label: const Text('Import CSV'),
-                                    style: OutlinedButton.styleFrom(
-                                      padding: const EdgeInsets.symmetric(
-                                        horizontal: 16,
-                                        vertical: 14,
+                                    const SizedBox(width: 10),
+                                  ],
+                                  if (session.can(Perm.usersCreate)) ...[
+                                    OutlinedButton.icon(
+                                      onPressed: assignable.isEmpty
+                                          ? null
+                                          : () =>
+                                                _openImportDialog(all, roles),
+                                      icon: const Icon(
+                                        Icons.upload_file_rounded,
+                                        size: 18,
+                                      ),
+                                      label: const Text('Import CSV'),
+                                      style: OutlinedButton.styleFrom(
+                                        padding: const EdgeInsets.symmetric(
+                                          horizontal: 16,
+                                          vertical: 14,
+                                        ),
                                       ),
                                     ),
-                                  ),
-                                  const SizedBox(width: 10),
-                                  ElevatedButton.icon(
-                                    onPressed: assignable.isEmpty
-                                        ? null
-                                        : () => _openCreateDialog(assignable),
-                                    icon: const Icon(
-                                      Icons.person_add_alt_1,
-                                      size: 18,
-                                    ),
-                                    label: const Text('Add user'),
-                                    style: ElevatedButton.styleFrom(
-                                      padding: const EdgeInsets.symmetric(
-                                        horizontal: 18,
-                                        vertical: 14,
+                                    const SizedBox(width: 10),
+                                    ElevatedButton.icon(
+                                      onPressed: assignable.isEmpty
+                                          ? null
+                                          : () =>
+                                                _openCreateDialog(assignable),
+                                      icon: const Icon(
+                                        Icons.person_add_alt_1,
+                                        size: 18,
+                                      ),
+                                      label: const Text('Add user'),
+                                      style: ElevatedButton.styleFrom(
+                                        padding: const EdgeInsets.symmetric(
+                                          horizontal: 18,
+                                          vertical: 14,
+                                        ),
                                       ),
                                     ),
-                                  ),
+                                  ],
                                 ],
                               )
                             : null,
@@ -236,14 +297,50 @@ class _UsersPageState extends State<UsersPage> {
     );
   }
 
+  /// Human description of what the list is currently filtered to, echoed in
+  /// the delete confirmation so you can see whether this is the batch you
+  /// meant before you wipe it.
+  String get _scopeLabel {
+    final parts = <String>[
+      if (_roleFilter != 'All') 'role "$_roleFilter"' else 'all roles',
+      if (_query.trim().isNotEmpty) 'search "${_query.trim()}"',
+    ];
+    return parts.join(' · ');
+  }
+
+  Future<void> _openBulkDelete(List<AppUser> targets) async {
+    final collegeId = Session.of(context).user.collegeId;
+    final messenger = ScaffoldMessenger.of(context);
+
+    final done = await showDialog<bool>(
+      context: context,
+      barrierDismissible: false,
+      builder: (_) => BulkDeleteUsersDialog(
+        collegeId: collegeId,
+        users: targets,
+        scopeLabel: _scopeLabel,
+      ),
+    );
+
+    if (done == true) {
+      messenger.showSnackBar(
+        const SnackBar(content: Text('Users deleted')),
+      );
+    }
+  }
+
   Future<void> _openImportDialog(
     List<AppUser> existing,
     List<AppRole> roles,
   ) async {
+    // Read the session HERE, from the page's context — inside the builder the
+    // context belongs to the dialog's route, which sits above SessionScope.
+    final collegeId = Session.of(context).user.collegeId;
     await showDialog(
       context: context,
       barrierDismissible: false,
       builder: (_) => ImportStudentsDialog(
+        collegeId: collegeId,
         existingUsers: existing,
         roles: roles,
         hostels: _hostels,

@@ -2,6 +2,7 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 
 import '../models/app_role.dart';
 import '../models/app_user.dart';
+import 'allotment_service.dart';
 
 /// Firestore reads/writes for roles and users.
 class DataService {
@@ -113,4 +114,80 @@ class DataService {
   /// therefore the safer default, and what the UI offers first.
   Future<void> deleteUserProfile(String uid) =>
       _db.collection('users').doc(uid).delete();
+
+  /// Bulk-removes profiles, freeing any rooms they held first.
+  ///
+  /// Vacating before deleting is not optional: dropping the user document
+  /// while their uid is still in a room's `occupantUids` leaves the room
+  /// showing a resident who no longer exists and the hostel's `occupiedBeds`
+  /// permanently overcounted. That drift is invisible until someone wonders
+  /// why a half-empty block reports itself full.
+  ///
+  /// Deliberately sequential and best-effort: one student whose room was
+  /// deleted out from under them must not abort the other twenty-nine.
+  ///
+  /// As with [deleteUserProfile], the Firebase Auth accounts survive. See
+  /// `tools/delete-students.js` for a wipe that removes those too.
+  Future<BulkDeleteOutcome> deleteUserProfiles({
+    required String collegeId,
+    required List<AppUser> users,
+    void Function(int done, int total)? onProgress,
+  }) async {
+    final failures = <String>[];
+    var deleted = 0;
+    var vacated = 0;
+    var done = 0;
+
+    for (final user in users) {
+      if (user.isSuperAdmin) {
+        failures.add('${user.name}: Super Admin accounts are never deleted');
+        done++;
+        onProgress?.call(done, users.length);
+        continue;
+      }
+
+      if (user.isAllotted) {
+        try {
+          await AllotmentService.instance.vacate(
+            collegeId: collegeId,
+            student: user,
+          );
+          vacated++;
+        } catch (e) {
+          // Recorded, not fatal — better a stale room than a stranded profile.
+          failures.add(
+            '${user.name}: room not freed '
+            '(${e is AllotmentFailure ? e.message : e})',
+          );
+        }
+      }
+
+      try {
+        await deleteUserProfile(user.uid);
+        deleted++;
+      } catch (e) {
+        failures.add('${user.name}: ${e is FirebaseException ? e.code : e}');
+      }
+
+      done++;
+      onProgress?.call(done, users.length);
+    }
+
+    return BulkDeleteOutcome(
+      deleted: deleted,
+      vacated: vacated,
+      failures: failures,
+    );
+  }
+}
+
+class BulkDeleteOutcome {
+  final int deleted;
+  final int vacated;
+  final List<String> failures;
+  const BulkDeleteOutcome({
+    required this.deleted,
+    required this.vacated,
+    required this.failures,
+  });
 }

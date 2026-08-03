@@ -1,3 +1,6 @@
+import 'dart:async';
+
+import 'package:firebase_auth/firebase_auth.dart';
 import 'package:firebase_core/firebase_core.dart';
 
 import '../core/identity.dart';
@@ -28,6 +31,10 @@ const List<String> kImportColumns = [
   'phone',
   'course',
   'year',
+  'trade',
+  'batch',
+  'sem',
+  'state',
   'hostel',
   'room',
   'dateOfBirth',
@@ -49,6 +56,7 @@ String templateHeaderRow({String delimiter = ','}) =>
 String templateWithExample() =>
     '${kImportColumns.join(',')}\n'
     'Aarav Sharma,2040353,,Student,Male,9876543210,B.Tech CSE,2nd,'
+    'DCE-CBM,2023-24,3,'
     'BH-01,101,14/03/2004,O+,"Ludhiana, Punjab",Rajesh Sharma,Father,'
     '9812345678,';
 
@@ -153,12 +161,11 @@ String _normaliseHeader(String raw) {
     'contact': 'phone',
     'contactno': 'phone',
     'studentscontactnumber': 'phone',
-    'branch': 'course',
-    'trade': 'course',
+    'branch': 'trade',
     'programme': 'course',
-    'sem': 'year',
-    'semester': 'year',
-    'batch': 'year',
+    'semester': 'sem',
+    'homestate': 'state',
+    'domicile': 'state',
     'hostelnumber': 'hostel',
     'hostelname': 'hostel',
     'block': 'hostel',
@@ -330,6 +337,32 @@ ImportPlan analyseImport({
       }
     }
 
+    // Trade: match the catalogue case-insensitively so "dce-cbm" lands on the
+    // same value the dropdown writes, otherwise the dashboard would show two
+    // separate bars for the same programme.
+    final rawTrade = values['trade'];
+    if (rawTrade != null) {
+      final match = kTrades.firstWhere(
+        (t) => t.toLowerCase() == rawTrade.trim().toLowerCase(),
+        orElse: () => '',
+      );
+      if (match.isEmpty) {
+        warnings.add('Trade "$rawTrade" isn\'t a known code — saved as typed');
+      } else {
+        values['trade'] = match;
+      }
+    }
+
+    final rawSem = values['sem'];
+    if (rawSem != null && parseSem(rawSem) == null) {
+      warnings.add('Semester "$rawSem" isn\'t a usable number — skipped');
+    }
+
+    final rawState = values['state'];
+    if (rawState != null && normaliseState(rawState) == null) {
+      warnings.add('State "$rawState" isn\'t recognised — will try the address');
+    }
+
     // Resolve the role by name. An unrecognised name is NOT fatal — we fall
     // back to the role chosen on the paste screen and warn. Killing all 30
     // rows because a sheet says "Student" and the workspace says "Students"
@@ -445,6 +478,33 @@ class ImportOutcome {
   );
 }
 
+/// How long one account creation may take before we give up on that row.
+///
+/// Every step here is a network call, and a call with no deadline is what turns
+/// one bad row into an import that sits on "Importing…" forever. Generous
+/// enough that a slow connection still succeeds; short enough that a wedged row
+/// is reported rather than waited on.
+const Duration kRowTimeout = Duration(seconds: 30);
+const Duration kAllotTimeout = Duration(seconds: 20);
+
+/// Firebase throttles rapid account creation from a browser. When it does, the
+/// row is not broken — it just needs a moment. Backing off and retrying
+/// recovers rows that would otherwise be reported as failures.
+const List<Duration> kThrottleBackoff = [
+  Duration(seconds: 3),
+  Duration(seconds: 8),
+  Duration(seconds: 20),
+];
+
+bool _isThrottle(Object e) {
+  final code = e is FirebaseAuthException ? e.code : '';
+  if (code == 'too-many-requests') return true;
+  final text = e.toString().toLowerCase();
+  return text.contains('too-many-requests') ||
+      text.contains('too many attempts') ||
+      text.contains('quota');
+}
+
 /// Runs the plan. Account creation is sequential because Firebase throttles it
 /// from a browser. A failure on one row is recorded and the run continues — an
 /// import that aborts halfway leaves you worse off than one that tells you
@@ -483,38 +543,70 @@ Future<ImportOutcome> runImport({
         if (row.action == RowAction.create) {
           // Detail fields ride along in the same document write — no second
           // round trip, and no re-query to find the uid we were just handed.
-          person = await AuthService.instance.createSubUser(
-            name: row.values['name']!,
-            email: row.authEmail,
-            password: Identity.derivedPassword(
-              row.registrationNo.isNotEmpty
-                  ? row.registrationNo
-                  : row.authEmail,
-            ),
-            collegeId: collegeId,
-            roleId: row.role!.id,
-            roleName: row.role!.name,
-            phone: row.values['phone'],
-            gender: row.values['gender'],
-            enrollmentNo: row.registrationNo.isEmpty
-                ? null
-                : row.registrationNo,
-            extra: _detailFields(row),
-            app: provisioning,
-          );
+          // Retried on throttling only: a duplicate email or a bad password is
+          // not going to fix itself by waiting.
+          for (var attempt = 0; ; attempt++) {
+            try {
+              person = await AuthService.instance
+                  .createSubUser(
+                    name: row.values['name']!,
+                    email: row.authEmail,
+                    password: Identity.derivedPassword(
+                      row.registrationNo.isNotEmpty
+                          ? row.registrationNo
+                          : row.authEmail,
+                    ),
+                    collegeId: collegeId,
+                    roleId: row.role!.id,
+                    roleName: row.role!.name,
+                    phone: row.values['phone'],
+                    gender: row.values['gender'],
+                    enrollmentNo: row.registrationNo.isEmpty
+                        ? null
+                        : row.registrationNo,
+                    extra: _detailFields(row),
+                    app: provisioning,
+                  )
+                  .timeout(kRowTimeout);
+              break;
+            } catch (e) {
+              if (attempt >= kThrottleBackoff.length || !_isThrottle(e)) {
+                rethrow;
+              }
+              final wait = kThrottleBackoff[attempt];
+              onProgress(
+                done,
+                work.length,
+                'Firebase is throttling — waiting ${wait.inSeconds}s, then '
+                'retrying ${row.name}',
+              );
+              await Future<void>.delayed(wait);
+            }
+          }
           created++;
         } else {
-          await DataService.instance.updateUser(row.existing!.uid, {
-            'name': row.values['name']!,
-            if (row.values['phone'] != null) 'phone': row.values['phone'],
-            if (row.values['gender'] != null) 'gender': row.values['gender'],
-            if (row.registrationNo.isNotEmpty)
-              'enrollmentNo': row.registrationNo,
-            ..._detailFields(row),
-          });
+          await DataService.instance
+              .updateUser(row.existing!.uid, {
+                'name': row.values['name']!,
+                if (row.values['phone'] != null) 'phone': row.values['phone'],
+                if (row.values['gender'] != null)
+                  'gender': row.values['gender'],
+                if (row.registrationNo.isNotEmpty)
+                  'enrollmentNo': row.registrationNo,
+                ..._detailFields(row),
+              })
+              .timeout(kRowTimeout);
           person = row.existing;
           updated++;
         }
+      } on TimeoutException {
+        failures.add(
+          'Row ${row.lineNumber} (${row.loginLabel}): timed out after '
+          '${kRowTimeout.inSeconds}s. Re-running the import is safe.',
+        );
+        done++;
+        onProgress(done, work.length, row.name);
+        continue;
       } catch (e) {
         failures.add(
           'Row ${row.lineNumber} (${row.loginLabel}): '
@@ -530,8 +622,8 @@ Future<ImportOutcome> runImport({
         try {
           final h = row.hostel!;
           final rooms = roomCache[h.id] ??= await HostelService.instance
-              .watchRooms(collegeId, h.id)
-              .first;
+              .roomsOnce(collegeId, h.id)
+              .timeout(kAllotTimeout);
           Room? target;
           var targetIndex = -1;
           for (var i = 0; i < rooms.length; i++) {
@@ -551,12 +643,14 @@ Future<ImportOutcome> runImport({
               '${person.roomLabel}',
             );
           } else {
-            await AllotmentService.instance.allot(
-              collegeId: collegeId,
-              student: person,
-              hostel: h,
-              room: target,
-            );
+            await AllotmentService.instance
+                .allot(
+                  collegeId: collegeId,
+                  student: person,
+                  hostel: h,
+                  room: target,
+                )
+                .timeout(kAllotTimeout);
             allotted++;
             // Patch the cached room rather than dropping the whole hostel's
             // room list and re-reading it on the next student.
@@ -588,6 +682,8 @@ Map<String, dynamic> _detailFields(ImportRow row) {
   const keys = [
     'course',
     'year',
+    'trade',
+    'batch',
     'dateOfBirth',
     'bloodGroup',
     'address',
@@ -601,5 +697,43 @@ Map<String, dynamic> _detailFields(ImportRow row) {
     final v = row.values[k];
     if (v != null && v.isNotEmpty) out[k] = v;
   }
+  // Sem is numeric so the fines dashboard can bucket by it.
+  final sem = parseSem(row.values['sem']);
+  if (sem != null) out['sem'] = sem;
+
+  // Batch falls back to the admission year encoded in the registration
+  // number, so a sheet without the column still fills the dashboard.
+  if (out['batch'] == null) {
+    final derived = batchFromRegistrationNo(row.registrationNo);
+    if (derived != null) out['batch'] = derived;
+  }
+
+  // State is canonicalised, and derived from the address when the column is
+  // absent — every college sheet already has "City, State" in the address,
+  // so the by-state chart works without anyone re-typing anything.
+  final state =
+      normaliseState(row.values['state']) ??
+      stateFromAddress(row.values['address']);
+  if (state != null) out['state'] = state;
+
   return out;
+}
+
+/// Pulls a semester number out of whatever a college sheet actually contains.
+/// Real files say "Sem 5", "5th", "V Sem" or just "5" — accepting only a bare
+/// integer would silently drop the column on most of them.
+int? parseSem(String? raw) {
+  if (raw == null) return null;
+  final digits = RegExp(r'\d+').firstMatch(raw);
+  if (digits != null) {
+    final n = int.tryParse(digits.group(0)!);
+    return (n != null && n >= 1 && n <= 12) ? n : null;
+  }
+  // Roman numerals, which a few departments still use on their sheets.
+  const roman = {
+    'i': 1, 'ii': 2, 'iii': 3, 'iv': 4, 'v': 5, 'vi': 6,
+    'vii': 7, 'viii': 8,
+  };
+  final key = raw.toLowerCase().replaceAll(RegExp(r'[^ivx]'), '');
+  return roman[key];
 }

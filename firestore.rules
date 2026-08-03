@@ -309,6 +309,70 @@ service cloud.firestore {
       // No updates — if you post wrong, delete and repost.
     }
 
+    // ---------------- fines ----------------
+
+    match /colleges/{collegeId}/fines/{fineId} {
+
+      // Your own fine, or anyone's if you run the register.
+      allow get: if sameCollege(collegeId) && (
+                   resource.data.studentUid == request.auth.uid
+                   || hasPerm('fines.viewAll')
+                 );
+
+      // Rules run per candidate document on a list, so someone holding only
+      // viewOwn cannot widen the query to read what everyone else owes.
+      allow list: if sameCollege(collegeId) && (
+                    hasPerm('fines.viewAll')
+                    || (
+                      hasPerm('fines.viewOwn')
+                      && resource.data.studentUid == request.auth.uid
+                    )
+                  );
+
+      // Imposing. Must be in your own name and must start unpaid — nobody
+      // files a fine as already settled.
+      allow create: if sameCollege(collegeId)
+                    && hasPerm('fines.manage')
+                    && request.resource.data.imposedByUid == request.auth.uid
+                    && request.resource.data.status == 'pending';
+
+      // Settling. The amount and who it is against are immutable — marking a
+      // fine paid must not be a back door to editing what was owed.
+      allow update: if sameCollege(collegeId)
+                    && hasPerm('fines.manage')
+                    && request.resource.data.studentUid
+                       == resource.data.studentUid
+                    && request.resource.data.amount == resource.data.amount
+                    && request.resource.data.status != 'pending';
+
+      // Undoing a fine raised in error, only while nothing has been settled.
+      allow delete: if sameCollege(collegeId)
+                    && hasPerm('fines.manage')
+                    && resource.data.status == 'pending';
+    }
+
+    // ---------------- office orders ----------------
+
+    match /colleges/{collegeId}/officeOrders/{orderId} {
+      allow read: if sameCollege(collegeId) && hasPerm('officeOrders.view');
+
+      // Published in your own name only — the issuer can't be spoofed.
+      allow create: if sameCollege(collegeId)
+                    && hasPerm('officeOrders.manage')
+                    && request.resource.data.postedByUid == request.auth.uid;
+
+      // No updates: an office order printed wrong is deleted and re-published,
+      // same as a notice.
+      allow delete: if sameCollege(collegeId)
+                    && (
+                      isSuperAdmin()
+                      || (
+                        hasPerm('officeOrders.manage')
+                        && resource.data.postedByUid == request.auth.uid
+                      )
+                    );
+    }
+
     // ---------------- future modules ----------------
     // Every module you add lives under its college and gates on its own
     // permission string. Follow the pattern above:

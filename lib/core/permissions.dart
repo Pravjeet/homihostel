@@ -33,9 +33,14 @@ class Perm {
   static const requestsApprove = 'requests.approve';
   static const requestsCreate = 'requests.create';
 
-  // Finance
-  static const financeView = 'finance.view';
-  static const financeManage = 'finance.manage';
+  // Fines
+  static const finesViewOwn = 'fines.viewOwn';
+  static const finesViewAll = 'fines.viewAll';
+  static const finesManage = 'fines.manage';
+
+  // Office orders
+  static const officeOrdersView = 'officeOrders.view';
+  static const officeOrdersManage = 'officeOrders.manage';
 
   // Notices
   static const noticesView = 'notices.view';
@@ -44,9 +49,8 @@ class Perm {
   // Student self-service
   static const selfRoom = 'self.room';
 
-  // Settings / audit
+  // Settings
   static const settingsManage = 'settings.manage';
-  static const auditView = 'audit.view';
 
   /// Grouped for the permission-picker UI.
   static const Map<String, List<PermissionDef>> catalogue = {
@@ -75,9 +79,14 @@ class Perm {
       PermissionDef(requestsViewAll, 'View all requests', 'See everyone\'s'),
       PermissionDef(requestsApprove, 'Approve requests', 'Approve or reject'),
     ],
-    'Finance': [
-      PermissionDef(financeView, 'View finance', 'Payments, dues, reports'),
-      PermissionDef(financeManage, 'Manage finance', 'Record payments'),
+    'Fines': [
+      PermissionDef(finesViewOwn, 'View own fines', 'See fines raised on you'),
+      PermissionDef(finesViewAll, 'View all fines', 'Fines dashboard and roster'),
+      PermissionDef(finesManage, 'Manage fines', 'Impose, waive and mark paid'),
+    ],
+    'Office Orders': [
+      PermissionDef(officeOrdersView, 'View office orders', 'Read issued orders'),
+      PermissionDef(officeOrdersManage, 'Manage office orders', 'Publish orders'),
     ],
     'Notices': [
       PermissionDef(noticesView, 'View notices', 'Read announcements'),
@@ -88,7 +97,6 @@ class Perm {
     ],
     'System': [
       PermissionDef(settingsManage, 'System settings', 'Institution settings'),
-      PermissionDef(auditView, 'Audit logs', 'View the activity log'),
     ],
   };
 
@@ -117,7 +125,10 @@ const Map<String, List<String>> kRoleTemplates = {
     Perm.messManage,
     Perm.requestsViewAll,
     Perm.requestsApprove,
-    Perm.financeView,
+    Perm.finesViewAll,
+    Perm.finesManage,
+    Perm.officeOrdersView,
+    Perm.officeOrdersManage,
     Perm.noticesView,
     Perm.noticesManage,
   ],
@@ -128,6 +139,9 @@ const Map<String, List<String>> kRoleTemplates = {
     Perm.messView,
     Perm.requestsViewAll,
     Perm.requestsApprove,
+    Perm.finesViewAll,
+    Perm.finesManage,
+    Perm.officeOrdersView,
     Perm.noticesView,
   ],
   'Hostel Manager': [
@@ -137,8 +151,10 @@ const Map<String, List<String>> kRoleTemplates = {
     Perm.messView,
     Perm.messManage,
     Perm.requestsViewAll,
-    Perm.financeView,
-    Perm.financeManage,
+    Perm.finesViewAll,
+    Perm.finesManage,
+    Perm.officeOrdersView,
+    Perm.officeOrdersManage,
     Perm.noticesView,
   ],
   'Student': [
@@ -147,5 +163,7 @@ const Map<String, List<String>> kRoleTemplates = {
     Perm.noticesView,
     Perm.requestsCreate,
     Perm.requestsViewOwn,
+    Perm.finesViewOwn,
+    Perm.officeOrdersView,
   ],
 };

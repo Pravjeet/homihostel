@@ -1,22 +1,38 @@
-// This is a basic Flutter widget test.
-//
-// To perform an interaction with a widget in your test, use the WidgetTester
-// utility in the flutter_test package. For example, you can send tap and scroll
-// gestures. You can also use WidgetTester to find child widgets in the widget
-// tree, read text, and verify that the values of widget properties are correct.
-//fiebase auth service dart file
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 import 'package:hostel_app/main.dart';
 
+/// The startup-error path, which is the only part of [HostelApp] that can be
+/// pumped without a live Firebase connection.
+///
+/// The happy path renders [AuthGate], which immediately subscribes to
+/// FirebaseAuth — pumping that in a unit test throws before the first frame.
+/// Testing the guard is still worth doing: it is the difference between a
+/// misconfigured `firebase_options.dart` showing a readable message and
+/// showing a blank white screen, and a blank screen is the single most
+/// confusing failure a new install can produce.
 void main() {
-  testWidgets('App starts with Splash Screen', (WidgetTester tester) async {
-    // Build our app and trigger a frame.
-    await tester.pumpWidget(const HostelAdminApp());
+  testWidgets('a startup failure explains itself instead of going blank', (
+    tester,
+  ) async {
+    await tester.pumpWidget(
+      const HostelApp(startupError: 'no internet connection'),
+    );
 
-    // Verify that our splash screen text and icon are present.
-    expect(find.text('HomiHostel'), findsOneWidget);
-    expect(find.byIcon(Icons.home_work), findsOneWidget);
+    expect(find.text('Could not connect to Firebase'), findsOneWidget);
+    expect(find.byIcon(Icons.cloud_off_rounded), findsOneWidget);
+
+    // The underlying cause is shown, not swallowed — without it the message
+    // is useless for actually fixing the problem.
+    expect(find.text('no internet connection'), findsOneWidget);
   });
+
+  // There is deliberately no "happy path renders AuthGate" test here.
+  // AuthGate reads FirebaseAuth.instance during its very first build, so
+  // pumping it without a live Firebase throws [core/no-app] before a frame
+  // exists. Testing that would need a mocked firebase_core platform channel,
+  // which is a lot of scaffolding to assert one widget appeared.
+  // The permission filtering that decides what a signed-in user actually
+  // sees is covered by nav_registry_test.dart, with no Firebase involved.
 }

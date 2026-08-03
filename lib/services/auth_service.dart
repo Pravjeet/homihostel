@@ -212,7 +212,11 @@ class AuthService {
             password: password,
           );
       final uid = cred.user!.uid;
-      await cred.user!.updateDisplayName(name.trim());
+
+      // Deliberately NOT calling updateDisplayName: it is a whole extra network
+      // round trip per account, and nothing in this app ever reads
+      // User.displayName — every screen renders from the Firestore profile
+      // below. On a 30-row import that alone was 30 wasted round trips.
 
       final profile = AppUser(
         uid: uid,
@@ -232,7 +236,13 @@ class AuthService {
         'createdAt': FieldValue.serverTimestamp(),
       });
 
-      await FirebaseAuth.instanceFor(app: temp).signOut();
+      // No signOut here when the caller owns the app. The next
+      // createUserWithEmailAndPassword replaces the session on this isolated
+      // instance anyway, and the Firestore write above went through the
+      // *default* app (the admin's credentials), so who is signed in on the
+      // provisioning instance never affects permissions.
+      // closeProvisioningApp() signs out once at the end of the run.
+      if (owned) await FirebaseAuth.instanceFor(app: temp).signOut();
       return profile;
     } on FirebaseAuthException catch (e) {
       throw AuthFailure(_friendly(e));
