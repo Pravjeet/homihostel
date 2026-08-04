@@ -2,9 +2,12 @@ import 'package:flutter/material.dart';
 
 import '../core/logo.dart';
 import '../core/nav_registry.dart';
+import '../core/permissions.dart';
 import '../core/session.dart';
 import '../core/theme.dart';
+import '../models/hostel_request.dart';
 import '../services/auth_service.dart';
+import '../services/request_service.dart';
 
 /// The one and only dashboard chrome: sidebar + header + content area.
 ///
@@ -157,7 +160,10 @@ class _Sidebar extends StatelessWidget {
             padding: EdgeInsets.symmetric(horizontal: 18),
             child: Row(
               children: [
-                const HomiLogo(size: 40),
+                WorkspaceLogo(
+                  logoBase64: session.settings.institution.logoBase64,
+                  size: 40,
+                ),
                 if (expanded) ...[
                   const SizedBox(width: 12),
                   Expanded(
@@ -396,9 +402,26 @@ class _TopBar extends StatelessWidget {
   Widget build(BuildContext context) {
     final session = Session.of(context);
     final now = DateTime.now();
+    final institution = session.settings.institution;
+
+    // The page name carries the institution under it rather than a greeting.
+    // On a screen someone stares at all day, "which college am I looking at"
+    // is a useful fact; "Welcome back, Pravjeet" stops being one after the
+    // first login.
+    final subtitle = [
+      session.collegeName,
+      if (institution.tagline != null)
+        institution.tagline!
+      else
+        'overall system status',
+    ].join(' · ');
 
     return Container(
-      padding: const EdgeInsets.fromLTRB(24, 20, 24, 16),
+      decoration: BoxDecoration(
+        color: AppColors.canvas,
+        border: Border(bottom: BorderSide(color: AppColors.border)),
+      ),
+      padding: const EdgeInsets.fromLTRB(24, 13, 24, 13),
       child: Row(
         children: [
           if (showMenuButton)
@@ -406,46 +429,99 @@ class _TopBar extends StatelessWidget {
               icon: const Icon(Icons.menu_rounded),
               onPressed: () => Scaffold.of(context).openDrawer(),
             ),
-          Expanded(
+          Flexible(
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
+              mainAxisSize: MainAxisSize.min,
               children: [
                 Text(
                   title,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
                   style: const TextStyle(
-                    fontSize: 25,
+                    fontSize: 19,
                     fontWeight: FontWeight.w700,
+                    letterSpacing: -0.4,
+                    height: 1.2,
                   ),
                 ),
-                const SizedBox(height: 3),
+                const SizedBox(height: 1),
                 Text(
-                  'Welcome back, ${session.user.name.split(' ').first}',
+                  subtitle,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
                   style: TextStyle(
                     color: AppColors.textMuted,
-                    fontSize: 13.5,
+                    fontSize: 12.5,
                   ),
                 ),
               ],
             ),
           ),
-          Text(
-            '${now.day} ${_month(now.month)} ${now.year}',
-            style: TextStyle(
-              color: AppColors.textMuted,
-              fontSize: 13,
-              fontWeight: FontWeight.w600,
+          const Spacer(),
+          if (MediaQuery.sizeOf(context).width > 1150) ...[
+            _Pill(
+              icon: Icons.apartment_rounded,
+              label: institution.shortName ?? session.collegeName,
             ),
-          ),
-          const SizedBox(width: 16),
-          CircleAvatar(
-            radius: 20,
-            backgroundColor: AppColors.primarySoft,
-            child: Text(
-              session.user.initials,
-              style: TextStyle(
-                color: AppColors.primary,
-                fontWeight: FontWeight.w700,
-              ),
+            const SizedBox(width: 10),
+          ],
+          if (MediaQuery.sizeOf(context).width > 760) ...[
+            _Pill(
+              icon: Icons.calendar_today_rounded,
+              label: '${now.day} ${_month(now.month)} ${now.year}',
+              dim: 'Today',
+            ),
+            const SizedBox(width: 10),
+          ],
+          const _Bell(),
+          const SizedBox(width: 12),
+          Container(
+            padding: const EdgeInsets.only(left: 12),
+            decoration: BoxDecoration(
+              border: Border(left: BorderSide(color: AppColors.border)),
+            ),
+            child: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                CircleAvatar(
+                  radius: 16,
+                  backgroundColor: AppColors.primarySoft,
+                  child: Text(
+                    session.user.initials,
+                    style: TextStyle(
+                      color: AppColors.primary,
+                      fontWeight: FontWeight.w700,
+                      fontSize: 12,
+                    ),
+                  ),
+                ),
+                if (MediaQuery.sizeOf(context).width > 620) ...[
+                  const SizedBox(width: 9),
+                  Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Text(
+                        session.user.name,
+                        style: const TextStyle(
+                          fontSize: 12.5,
+                          fontWeight: FontWeight.w600,
+                          height: 1.25,
+                        ),
+                      ),
+                      Text(
+                        session.user.displayRole,
+                        style: TextStyle(
+                          fontSize: 11,
+                          color: AppColors.textMuted,
+                          height: 1.25,
+                        ),
+                      ),
+                    ],
+                  ),
+                ],
+              ],
             ),
           ),
         ],
@@ -454,17 +530,132 @@ class _TopBar extends StatelessWidget {
   }
 
   static String _month(int m) => const [
-    'Jan',
-    'Feb',
-    'Mar',
-    'Apr',
-    'May',
-    'Jun',
-    'Jul',
-    'Aug',
-    'Sep',
-    'Oct',
-    'Nov',
-    'Dec',
+    'Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun',
+    'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec',
   ][m - 1];
+}
+
+/// A bordered chip in the top bar — institution, date.
+class _Pill extends StatelessWidget {
+  final IconData icon;
+  final String label;
+  final String? dim;
+
+  const _Pill({required this.icon, required this.label, this.dim});
+
+  @override
+  Widget build(BuildContext context) => Container(
+    height: 34,
+    padding: const EdgeInsets.symmetric(horizontal: 11),
+    decoration: BoxDecoration(
+      color: AppColors.card,
+      borderRadius: BorderRadius.circular(8),
+      border: Border.all(color: AppColors.border),
+    ),
+    child: Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        Icon(icon, size: 14, color: AppColors.textMuted),
+        const SizedBox(width: 8),
+        ConstrainedBox(
+          constraints: const BoxConstraints(maxWidth: 220),
+          child: Text(
+            label,
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+            style: TextStyle(
+              fontSize: 12.5,
+              fontWeight: FontWeight.w500,
+              color: AppColors.textStrong,
+            ),
+          ),
+        ),
+        if (dim != null) ...[
+          const SizedBox(width: 5),
+          Text(
+            '· $dim',
+            style: TextStyle(fontSize: 12.5, color: AppColors.textMuted),
+          ),
+        ],
+      ],
+    ),
+  );
+}
+
+/// Notification bell, counting what actually needs a decision.
+///
+/// Wired to open requests rather than a generic "notifications" collection
+/// that does not exist — a badge showing a number nobody can act on is worse
+/// than no badge.
+class _Bell extends StatelessWidget {
+  const _Bell();
+
+  @override
+  Widget build(BuildContext context) {
+    final session = Session.of(context);
+    final nav = DashboardNav.maybeOf(context);
+
+    if (!session.can(Perm.requestsViewAll)) return const SizedBox.shrink();
+
+    return StreamBuilder<List<HostelRequest>>(
+      stream: RequestService.instance.watchAll(session.user.collegeId),
+      builder: (context, snap) {
+        final open = (snap.data ?? const <HostelRequest>[])
+            .where((r) => r.status.isOpen)
+            .length;
+
+        return InkWell(
+          onTap: (nav?.canReach('requests') ?? false)
+              ? () => nav!.goTo('requests')
+              : null,
+          borderRadius: BorderRadius.circular(8),
+          child: Stack(
+            clipBehavior: Clip.none,
+            children: [
+              Container(
+                height: 34,
+                width: 34,
+                alignment: Alignment.center,
+                decoration: BoxDecoration(
+                  color: AppColors.card,
+                  borderRadius: BorderRadius.circular(8),
+                  border: Border.all(color: AppColors.border),
+                ),
+                child: Icon(
+                  Icons.notifications_none_rounded,
+                  size: 17,
+                  color: AppColors.textStrong,
+                ),
+              ),
+              if (open > 0)
+                Positioned(
+                  top: -5,
+                  right: -5,
+                  child: Container(
+                    constraints: const BoxConstraints(minWidth: 17),
+                    height: 17,
+                    padding: const EdgeInsets.symmetric(horizontal: 4),
+                    alignment: Alignment.center,
+                    decoration: BoxDecoration(
+                      color: AppColors.danger,
+                      borderRadius: BorderRadius.circular(9),
+                      border: Border.all(color: AppColors.canvas, width: 2),
+                    ),
+                    child: Text(
+                      open > 99 ? '99+' : '$open',
+                      style: const TextStyle(
+                        color: Colors.white,
+                        fontSize: 10,
+                        fontWeight: FontWeight.w700,
+                        height: 1,
+                      ),
+                    ),
+                  ),
+                ),
+            ],
+          ),
+        );
+      },
+    );
+  }
 }

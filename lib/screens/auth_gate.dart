@@ -1,12 +1,14 @@
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
 
+import '../core/identity.dart';
 import '../core/session.dart';
 import '../core/theme.dart';
 import '../models/app_role.dart';
 import '../models/app_user.dart';
 import '../models/college_settings.dart';
 import '../services/auth_service.dart';
+import '../services/data_service.dart';
 import '../services/settings_service.dart';
 import 'dashboard_shell.dart';
 import 'login_screen.dart';
@@ -31,7 +33,7 @@ class AuthGate extends StatelessWidget {
         }
         final user = snapshot.data;
         if (user == null) return const LoginScreen();
-        return _SessionLoader(uid: user.uid);
+        return _SessionLoader(authUser: user);
       },
     );
   }
@@ -39,13 +41,27 @@ class AuthGate extends StatelessWidget {
 
 /// Loads profile → role → college name, then hands a [Session] to the shell.
 class _SessionLoader extends StatelessWidget {
-  final String uid;
-  const _SessionLoader({required this.uid});
+  final User authUser;
+  const _SessionLoader({required this.authUser});
+
+  /// Catches up the Firestore profile after a sign-in email change.
+  ///
+  /// `verifyBeforeUpdateEmail` only takes effect once the confirmation link
+  /// is clicked, at which point the *next* sign-in carries the new address on
+  /// [authUser] while the Firestore profile still has the old one. This
+  /// reconciles them rather than leaving the profile permanently stale.
+  void _syncEmail(AppUser profile) {
+    final authEmail = authUser.email;
+    if (authEmail == null || authEmail.isEmpty) return;
+    if (authEmail == profile.email) return;
+    if (Identity.isSynthetic(profile.email)) return;
+    DataService.instance.updateUser(profile.uid, {'email': authEmail});
+  }
 
   @override
   Widget build(BuildContext context) {
     return StreamBuilder<AppUser?>(
-      stream: AuthService.instance.watchProfile(uid),
+      stream: AuthService.instance.watchProfile(authUser.uid),
       builder: (context, profileSnap) {
         if (profileSnap.hasError) {
           return _Failure(
@@ -65,6 +81,7 @@ class _SessionLoader extends StatelessWidget {
                 'Ask your administrator to add you again.',
           );
         }
+        _syncEmail(profile);
         if (!profile.isActive) {
           return const _Failure(
             message:

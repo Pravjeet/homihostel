@@ -1,3 +1,6 @@
+import 'dart:typed_data';
+
+import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
 
 import '../../core/session.dart';
@@ -5,9 +8,14 @@ import '../../core/theme.dart';
 import '../../services/auth_service.dart';
 import '../../services/office_order_service.dart';
 
+/// Largest photo accepted, in bytes. Base64 adds ~33% on top of this, and a
+/// Firestore document tops out around 1 MB, so this leaves headroom for the
+/// other fields on the order.
+const int _maxImageBytes = 700 * 1024;
+
 /// Form for staff to add an office order to the register.
 ///
-/// The PDF is referenced by link rather than uploaded — see [OfficeOrder].
+/// The photo is stored inline in the document — see [OfficeOrder].
 class PublishOfficeOrderView extends StatefulWidget {
   final VoidCallback onBack;
   final VoidCallback onDone;
@@ -27,20 +35,57 @@ class _PublishOfficeOrderViewState extends State<PublishOfficeOrderView> {
   final _formKey = GlobalKey<FormState>();
   final _orderNo = TextEditingController();
   final _title = TextEditingController();
-  final _pdfUrl = TextEditingController();
   final _description = TextEditingController();
 
   DateTime _orderDate = DateTime.now();
   bool _busy = false;
   String? _error;
 
+  Uint8List? _imageBytes;
+  String? _imageMimeType;
+  String? _imageName;
+
   @override
   void dispose() {
     _orderNo.dispose();
     _title.dispose();
-    _pdfUrl.dispose();
     _description.dispose();
     super.dispose();
+  }
+
+  static const _mimeByExt = {
+    'jpg': 'image/jpeg',
+    'jpeg': 'image/jpeg',
+    'png': 'image/png',
+    'webp': 'image/webp',
+  };
+
+  Future<void> _pickImage() async {
+    final result = await FilePicker.platform.pickFiles(
+      type: FileType.custom,
+      allowedExtensions: ['jpg', 'jpeg', 'png', 'webp'],
+      withData: true,
+    );
+    final file = result?.files.single;
+    if (file == null || file.bytes == null) return;
+
+    if (file.bytes!.lengthInBytes > _maxImageBytes) {
+      setState(() {
+        _error = 'That photo is too large '
+            '(${(file.bytes!.lengthInBytes / 1024).round()} KB). Please '
+            'keep it under ${_maxImageBytes ~/ 1024} KB — a phone camera '
+            'shot usually compresses well below that.';
+      });
+      return;
+    }
+
+    final ext = file.extension?.toLowerCase() ?? '';
+    setState(() {
+      _error = null;
+      _imageBytes = file.bytes;
+      _imageMimeType = _mimeByExt[ext] ?? 'image/jpeg';
+      _imageName = file.name;
+    });
   }
 
   Future<void> _pickDate() async {
@@ -57,6 +102,10 @@ class _PublishOfficeOrderViewState extends State<PublishOfficeOrderView> {
 
   Future<void> _submit() async {
     if (!_formKey.currentState!.validate()) return;
+    if (_imageBytes == null) {
+      setState(() => _error = 'Add a photo of the order before submitting');
+      return;
+    }
 
     setState(() {
       _busy = true;
@@ -71,7 +120,8 @@ class _PublishOfficeOrderViewState extends State<PublishOfficeOrderView> {
         author: session.user,
         orderNo: _orderNo.text,
         title: _title.text,
-        pdfUrl: _pdfUrl.text,
+        imageBytes: _imageBytes!,
+        imageMimeType: _imageMimeType!,
         description: _description.text,
         orderDate: _orderDate,
       );
@@ -203,26 +253,68 @@ class _PublishOfficeOrderViewState extends State<PublishOfficeOrderView> {
                         : null,
                   ),
                   const SizedBox(height: 18),
-                  TextFormField(
-                    controller: _pdfUrl,
-                    enabled: !_busy,
-                    decoration: const InputDecoration(
-                      labelText: 'PDF link',
-                      hintText: 'https://…',
-                      helperText: 'Paste the shareable link to the signed PDF',
+                  Text(
+                    'Photo of the order',
+                    style: TextStyle(
+                      fontSize: 12.5,
+                      fontWeight: FontWeight.w600,
+                      color: AppColors.textMuted,
                     ),
-                    validator: (v) {
-                      final t = v?.trim() ?? '';
-                      if (t.isEmpty) return 'A link to the PDF is required';
-                      final uri = Uri.tryParse(t);
-                      if (uri == null ||
-                          !uri.hasScheme ||
-                          !(uri.isScheme('http') || uri.isScheme('https'))) {
-                        return 'Enter a full link starting with https://';
-                      }
-                      return null;
-                    },
                   ),
+                  const SizedBox(height: 8),
+                  if (_imageBytes != null)
+                    Row(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        ClipRRect(
+                          borderRadius: BorderRadius.circular(10),
+                          child: Image.memory(
+                            _imageBytes!,
+                            height: 120,
+                            width: 120,
+                            fit: BoxFit.cover,
+                          ),
+                        ),
+                        const SizedBox(width: 14),
+                        Expanded(
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Text(
+                                _imageName ?? 'Photo selected',
+                                overflow: TextOverflow.ellipsis,
+                                style: const TextStyle(
+                                  fontSize: 13.5,
+                                  fontWeight: FontWeight.w600,
+                                ),
+                              ),
+                              Text(
+                                '${(_imageBytes!.lengthInBytes / 1024).round()} KB',
+                                style: TextStyle(
+                                  fontSize: 12.5,
+                                  color: AppColors.textMuted,
+                                ),
+                              ),
+                              const SizedBox(height: 8),
+                              OutlinedButton.icon(
+                                onPressed: _busy ? null : _pickImage,
+                                icon: const Icon(
+                                  Icons.image_outlined,
+                                  size: 16,
+                                ),
+                                label: const Text('Choose a different photo'),
+                              ),
+                            ],
+                          ),
+                        ),
+                      ],
+                    )
+                  else
+                    OutlinedButton.icon(
+                      onPressed: _busy ? null : _pickImage,
+                      icon: const Icon(Icons.add_photo_alternate_outlined),
+                      label: const Text('Choose a photo (JPG/PNG, under 700 KB)'),
+                    ),
                   const SizedBox(height: 18),
                   TextFormField(
                     controller: _description,

@@ -1,8 +1,12 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:firebase_core/firebase_core.dart';
 
+import '../core/identity.dart';
 import '../models/app_role.dart';
 import '../models/app_user.dart';
 import 'allotment_service.dart';
+import 'audit_service.dart';
+import 'auth_service.dart';
 
 /// Firestore reads/writes for roles and users.
 class DataService {
@@ -101,19 +105,148 @@ class DataService {
     return AppUser.fromMap(snap.docs.first.id, snap.docs.first.data());
   }
 
-  Future<void> setUserRole(String uid, AppRole? role) => updateUser(uid, {
-    'roleId': role?.id,
-    'roleName': role?.name,
-  });
+  /// Changes an edit-in-place on a user, recording the prior document so the
+  /// audit log can put it back.
+  ///
+  /// Shared by role changes and activation because both are one-field edits
+  /// with the same undo shape — snapshot, write, log.
+  Future<void> _auditedUpdate({
+    required String uid,
+    required Map<String, dynamic> changes,
+    required String collegeId,
+    required AppUser? actor,
+    required String action,
+    required String Function(AppUser user) summary,
+  }) async {
+    if (actor == null) {
+      await updateUser(uid, changes);
+      return;
+    }
 
-  Future<void> setUserActive(String uid, bool active) =>
-      updateUser(uid, {'isActive': active});
+    final snap = await _db.collection('users').doc(uid).get();
+    final before = snap.data();
+    await updateUser(uid, changes);
 
-  /// Removes the profile document. The Firebase Auth account survives — only
-  /// the Admin SDK (a Cloud Function) can delete that. Deactivating is
-  /// therefore the safer default, and what the UI offers first.
+    if (before != null) {
+      final user = AppUser.fromMap(uid, before);
+      await AuditService.instance.record(
+        collegeId: collegeId,
+        actor: actor,
+        action: action,
+        summary: summary(user),
+        targetLabel: user.name,
+        path: 'users/$uid',
+        before: before,
+        reversible: true,
+      );
+    }
+  }
+
+  Future<void> setUserRole(
+    String uid,
+    AppRole? role, {
+    String? collegeId,
+    AppUser? actor,
+  }) => _auditedUpdate(
+    uid: uid,
+    changes: {'roleId': role?.id, 'roleName': role?.name},
+    collegeId: collegeId ?? actor?.collegeId ?? '',
+    actor: collegeId == null ? null : actor,
+    action: 'user.role',
+    summary: (u) =>
+        'Changed ${u.name} from ${u.displayRole} to ${role?.name ?? 'no role'}',
+  );
+
+  Future<void> setUserActive(
+    String uid,
+    bool active, {
+    String? collegeId,
+    AppUser? actor,
+  }) => _auditedUpdate(
+    uid: uid,
+    changes: {'isActive': active},
+    collegeId: collegeId ?? actor?.collegeId ?? '',
+    actor: collegeId == null ? null : actor,
+    action: active ? 'user.activate' : 'user.deactivate',
+    summary: (u) => '${active ? 'Reactivated' : 'Deactivated'} ${u.name}',
+  );
+
+  /// Removes the profile document only.
   Future<void> deleteUserProfile(String uid) =>
       _db.collection('users').doc(uid).delete();
+
+  /// Removes a user completely: the Firestore profile, their room, and — where
+  /// possible — the Firebase Auth account too.
+  ///
+  /// Order matters. The Auth account goes first: if it fails we still have the
+  /// profile to show who is left over. Deleting the profile first and then
+  /// failing would leave an orphaned login with no record of whose it was.
+  Future<UserDeleteOutcome> deleteUserCompletely({
+    required String collegeId,
+    required AppUser user,
+    FirebaseApp? provisioningApp,
+
+    /// When supplied, the deletion is written to the audit log with a
+    /// snapshot, so it can be undone.
+    AppUser? actor,
+  }) async {
+    if (user.isSuperAdmin) {
+      throw StateError('Super Admin accounts cannot be deleted.');
+    }
+
+    // Captured BEFORE anything is removed — this is what undo restores.
+    final snapshot = await _db.collection('users').doc(user.uid).get();
+    final before = snapshot.data();
+
+    // Only the derived password is ever tried — the app has no store of real
+    // ones and must not pretend otherwise.
+    final candidates = <String>{
+      if ((user.enrollmentNo ?? '').trim().isNotEmpty)
+        Identity.derivedPassword(user.enrollmentNo!.trim()),
+      if (Identity.isSynthetic(user.email))
+        Identity.derivedPassword(Identity.display(user.email)),
+    }.toList();
+
+    final auth = await AuthService.instance.deleteAuthAccount(
+      email: user.email,
+      candidatePasswords: candidates,
+      app: provisioningApp,
+    );
+
+    var vacated = false;
+    if (user.isAllotted) {
+      try {
+        await AllotmentService.instance.vacate(collegeId: collegeId, student: user);
+        vacated = true;
+      } catch (_) {
+        // Recorded by the caller through [vacated]; a stale room must not
+        // block removing the person.
+      }
+    }
+
+    await deleteUserProfile(user.uid);
+
+    if (actor != null && before != null) {
+      await AuditService.instance.record(
+        collegeId: collegeId,
+        actor: actor,
+        action: 'user.delete',
+        summary: 'Deleted ${user.name}'
+            '${user.enrollmentNo == null ? '' : ' (${user.enrollmentNo})'}',
+        targetLabel: user.name,
+        path: 'users/${user.uid}',
+        before: before,
+        reversible: true,
+        undoCaveat: auth == AuthDeleteResult.deleted
+            ? 'Restores the profile only — the sign-in account was deleted '
+                  'and cannot be recreated. They will need a new account to '
+                  'log in.'
+            : (vacated ? 'Restores the profile, but not their room.' : null),
+      );
+    }
+
+    return UserDeleteOutcome(auth: auth, vacated: vacated);
+  }
 
   /// Bulk-removes profiles, freeing any rooms they held first.
   ///
@@ -134,60 +267,87 @@ class DataService {
     void Function(int done, int total)? onProgress,
   }) async {
     final failures = <String>[];
+    final authLeftBehind = <String>[];
     var deleted = 0;
     var vacated = 0;
+    var authDeleted = 0;
     var done = 0;
 
-    for (final user in users) {
-      if (user.isSuperAdmin) {
-        failures.add('${user.name}: Super Admin accounts are never deleted');
+    // ONE provisioning app for the whole run — creating one per user is what
+    // made bulk import crawl, and this does the same work.
+    FirebaseApp? provisioning;
+
+    try {
+      provisioning = await AuthService.instance.openProvisioningApp();
+
+      for (final user in users) {
+        if (user.isSuperAdmin) {
+          failures.add('${user.name}: Super Admin accounts are never deleted');
+          done++;
+          onProgress?.call(done, users.length);
+          continue;
+        }
+
+        try {
+          final outcome = await deleteUserCompletely(
+            collegeId: collegeId,
+            user: user,
+            provisioningApp: provisioning,
+          );
+          deleted++;
+          if (outcome.vacated) vacated++;
+          if (outcome.auth == AuthDeleteResult.deleted) {
+            authDeleted++;
+          } else if (!outcome.auth.isGone) {
+            authLeftBehind.add('${user.name}: ${outcome.auth.explanation}');
+          }
+        } catch (e) {
+          failures.add('${user.name}: ${e is FirebaseException ? e.code : e}');
+        }
+
         done++;
         onProgress?.call(done, users.length);
-        continue;
       }
-
-      if (user.isAllotted) {
-        try {
-          await AllotmentService.instance.vacate(
-            collegeId: collegeId,
-            student: user,
-          );
-          vacated++;
-        } catch (e) {
-          // Recorded, not fatal — better a stale room than a stranded profile.
-          failures.add(
-            '${user.name}: room not freed '
-            '(${e is AllotmentFailure ? e.message : e})',
-          );
-        }
+    } finally {
+      if (provisioning != null) {
+        await AuthService.instance.closeProvisioningApp(provisioning);
       }
-
-      try {
-        await deleteUserProfile(user.uid);
-        deleted++;
-      } catch (e) {
-        failures.add('${user.name}: ${e is FirebaseException ? e.code : e}');
-      }
-
-      done++;
-      onProgress?.call(done, users.length);
     }
 
     return BulkDeleteOutcome(
       deleted: deleted,
       vacated: vacated,
+      authDeleted: authDeleted,
+      authLeftBehind: authLeftBehind,
       failures: failures,
     );
   }
 }
 
+class UserDeleteOutcome {
+  final AuthDeleteResult auth;
+  final bool vacated;
+  const UserDeleteOutcome({required this.auth, required this.vacated});
+}
+
 class BulkDeleteOutcome {
   final int deleted;
   final int vacated;
+
+  /// Sign-in accounts actually removed. Can be lower than [deleted] — see
+  /// [authLeftBehind].
+  final int authDeleted;
+
+  /// Profiles removed whose sign-in account survived, each with the reason.
+  final List<String> authLeftBehind;
+
   final List<String> failures;
+
   const BulkDeleteOutcome({
     required this.deleted,
     required this.vacated,
+    this.authDeleted = 0,
+    this.authLeftBehind = const [],
     required this.failures,
   });
 }

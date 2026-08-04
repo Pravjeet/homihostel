@@ -32,12 +32,17 @@ const args = parseArgs(process.argv.slice(2));
 const commit = args.commit === true;
 const fromCsv = typeof args['from-csv'] === 'string' ? args['from-csv'] : null;
 const allStudents = args['all-students'] === true;
+const orphans = args.orphans === true;
 
-if (!fromCsv && !allStudents) {
+if (!fromCsv && !allStudents && !orphans) {
   console.error(
     'Usage:\n' +
     '  node delete-students.js --from-csv <file.csv> [--commit]\n' +
-    '  node delete-students.js --all-students --i-mean-it [--commit]\n\n' +
+    '  node delete-students.js --all-students --i-mean-it [--commit]\n' +
+    '  node delete-students.js --orphans [--commit]\n\n' +
+    '--orphans removes sign-in accounts that have no profile document —\n' +
+    'the leftovers from deleting someone whose password the app could not\n' +
+    'reconstruct. Those are what cause "email already in use" on re-import.\n\n' +
     'Without --commit it prints what WOULD be deleted and changes nothing.'
   );
   process.exit(1);
@@ -56,6 +61,58 @@ const college = await resolveCollege(db, args.college);
 console.log(`\nProject : ${projectId}`);
 console.log(`College : ${college.id}  (${college.name})`);
 console.log(commit ? 'Mode    : COMMIT — this will delete\n' : 'Mode    : DRY RUN — nothing will be deleted\n');
+
+// --- orphaned sign-in accounts -------------------------------------------
+//
+// An Auth account with no `users/{uid}` document behind it. Created whenever
+// a profile is deleted but the Auth side could not be — which the app cannot
+// always do, because deleting from a browser needs the account's password and
+// only derived ones are reconstructible.
+//
+// Deliberately scoped to accounts with NO profile anywhere, not "no profile in
+// this college": a uid belonging to another workspace is not ours to remove.
+
+if (orphans) {
+  const profiles = await db.collection('users').get();
+  const known = new Set(profiles.docs.map((d) => d.id));
+
+  const found = [];
+  let pageToken;
+  do {
+    const page = await auth.listUsers(1000, pageToken);
+    for (const u of page.users) {
+      if (!known.has(u.uid)) {
+        found.push({ uid: u.uid, email: u.email ?? '(no email)', created: u.metadata.creationTime });
+      }
+    }
+    pageToken = page.pageToken;
+  } while (pageToken);
+
+  if (!found.length) {
+    console.log('No orphaned sign-in accounts. Nothing to do.\n');
+    process.exit(0);
+  }
+
+  found.forEach((u) => console.log(`  ${u.email.padEnd(38)} created ${u.created}`));
+  console.log(`\n${found.length} orphaned sign-in account(s).`);
+
+  if (!commit) {
+    console.log('\nDry run — nothing deleted. Re-run with --commit.\n');
+    process.exit(0);
+  }
+
+  let removed = 0;
+  const problems = [];
+  for (const group of chunk(found.map((u) => u.uid), 1000)) {
+    const res = await auth.deleteUsers(group);
+    removed += res.successCount;
+    res.errors.forEach((e) => problems.push(`${group[e.index]}: ${e.error.message}`));
+  }
+  console.log(`Deleted ${removed} orphaned account(s).`);
+  problems.forEach((p) => console.log(`  ! ${p}`));
+  console.log('');
+  process.exit(problems.length ? 1 : 0);
+}
 
 // --- work out who ---------------------------------------------------------
 

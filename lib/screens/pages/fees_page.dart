@@ -606,6 +606,7 @@ class _StandingRow extends StatelessWidget {
           collegeId: collegeId,
           period: period,
           studentUid: standing.studentUid,
+          actor: session.user,
         );
         messenger.showSnackBar(
           SnackBar(content: Text('${standing.studentName} marked unpaid')),

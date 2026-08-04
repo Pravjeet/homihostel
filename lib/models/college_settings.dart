@@ -98,6 +98,15 @@ class InstitutionProfile {
   /// Line printed under the title on the fines dashboard and reports.
   final String? tagline;
 
+  /// The college's own mark, base64-encoded straight into the settings
+  /// document — same trade-off as an office order's photo: there's no
+  /// Firebase Storage on the free plan, and a logo is small enough that it
+  /// doesn't matter. Null falls back to the drawn [HomiLogo].
+  final String? logoBase64;
+
+  /// MIME type of [logoBase64], e.g. `image/png`.
+  final String? logoMimeType;
+
   const InstitutionProfile({
     this.shortName,
     this.address,
@@ -105,6 +114,8 @@ class InstitutionProfile {
     this.contactPhone,
     this.website,
     this.tagline,
+    this.logoBase64,
+    this.logoMimeType,
   });
 
   factory InstitutionProfile.fromMap(Map<String, dynamic> m) =>
@@ -115,6 +126,8 @@ class InstitutionProfile {
         contactPhone: m['contactPhone'] as String?,
         website: m['website'] as String?,
         tagline: m['tagline'] as String?,
+        logoBase64: m['logoBase64'] as String?,
+        logoMimeType: m['logoMimeType'] as String?,
       );
 
   Map<String, dynamic> toMap() => {
@@ -124,7 +137,11 @@ class InstitutionProfile {
     'contactPhone': contactPhone,
     'website': website,
     'tagline': tagline,
+    'logoBase64': logoBase64,
+    'logoMimeType': logoMimeType,
   };
+
+  bool get hasLogo => logoBase64 != null && logoBase64!.isNotEmpty;
 }
 
 // =====================================================================
@@ -153,6 +170,7 @@ const List<ThemePreset> kThemePresets = [
   ThemePreset('rose', 'Rose', Color(0xFFE11D48)),
   ThemePreset('amber', 'Amber', Color(0xFFB45309)),
   ThemePreset('slate', 'Slate', Color(0xFF334155)),
+  ThemePreset('steel', 'Steel', Color(0xFF58799F)),
 ];
 
 /// Light, dark, or follow the device.

@@ -175,6 +175,7 @@ class _NoticesPageState extends State<NoticesPage> {
                       canDelete: canCreate ||
                           shown[i].postedByUid == session.user.uid,
                       onDelete: () async {
+                        final messenger = ScaffoldMessenger.of(context);
                         final ok = await showDialog<bool>(
                           context: context,
                           builder: (c) => AlertDialog(
@@ -200,22 +201,17 @@ class _NoticesPageState extends State<NoticesPage> {
                             collegeId: collegeId,
                             noticeId: shown[i].id,
                           );
-                          if (mounted) {
-                            ScaffoldMessenger.of(context).showSnackBar(
-                              const SnackBar(
-                                content: Text('Notice deleted'),
-                              ),
-                            );
-                          }
+                          messenger.showSnackBar(
+                            const SnackBar(
+                              content: Text('Notice deleted'),
+                            ),
+                          );
                         } catch (e) {
-                          if (mounted) {
-                            ScaffoldMessenger.of(context).showSnackBar(
-                              SnackBar(
-                                content:
-                                    Text(AuthService.describeError(e)),
-                              ),
-                            );
-                          }
+                          messenger.showSnackBar(
+                            SnackBar(
+                              content: Text(AuthService.describeError(e)),
+                            ),
+                          );
                         }
                       },
                     ),

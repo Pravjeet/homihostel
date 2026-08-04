@@ -69,6 +69,7 @@ class _RequestDetailViewState extends State<RequestDetailView> {
 
   Future<void> _withdraw(HostelRequest request) async {
     final messenger = ScaffoldMessenger.of(context);
+    final collegeId = Session.of(context).user.collegeId;
     final ok = await showDialog<bool>(
       context: context,
       builder: (c) => AlertDialog(
@@ -93,7 +94,7 @@ class _RequestDetailViewState extends State<RequestDetailView> {
 
     try {
       await RequestService.instance.withdraw(
-        collegeId: Session.of(context).user.collegeId,
+        collegeId: collegeId,
         request: request,
       );
       messenger.showSnackBar(

@@ -126,6 +126,47 @@ class AuthService {
   }
 
   // ---------------------------------------------------------------------
+  // Changing your own sign-in email.
+  //
+  // The client SDK can only ever touch the *currently signed-in* account —
+  // there's no "change someone else's email" call, by design. That's fine
+  // here: this is a self-service action, not an admin one.
+  //
+  // Firebase requires a recent sign-in for a security-sensitive change like
+  // this, so we reauthenticate with the current password first rather than
+  // surface a confusing "requires-recent-login" error. And rather than
+  // swapping the address outright, `verifyBeforeUpdateEmail` sends a
+  // confirmation link to the *new* address — the Auth email only actually
+  // changes once that link is clicked, which is what stops someone from
+  // locking the real owner out by mistyping an address they don't control.
+  // ---------------------------------------------------------------------
+
+  /// Sends a confirmation link to [newEmail]. The signed-in account's email
+  /// does not change until that link is clicked.
+  Future<void> changeOwnEmail({
+    required String currentPassword,
+    required String newEmail,
+  }) async {
+    final user = _auth.currentUser;
+    final currentEmail = user?.email;
+    if (user == null || currentEmail == null) {
+      throw AuthFailure('You need to be signed in to do that.');
+    }
+
+    try {
+      await user.reauthenticateWithCredential(
+        EmailAuthProvider.credential(
+          email: currentEmail,
+          password: currentPassword,
+        ),
+      );
+      await user.verifyBeforeUpdateEmail(newEmail.trim());
+    } on FirebaseAuthException catch (e) {
+      throw AuthFailure(_friendly(e));
+    }
+  }
+
+  // ---------------------------------------------------------------------
   // Session loading
   // ---------------------------------------------------------------------
 
@@ -189,6 +230,84 @@ class AuthService {
       // Nothing signed in; nothing to do.
     }
     await app.delete();
+  }
+
+  // ---------------------------------------------------------------------
+  // Deleting an Auth account from a browser
+  //
+  // Firebase's client SDK can only delete the user who is *currently signed
+  // in* — there is no "delete that other account" call, by design. The
+  // Admin SDK has one, but it needs a trusted environment: a Cloud Function
+  // (Blaze plan) or a machine holding a service-account key.
+  //
+  // The trick that works on the free plan: sign in AS the account on an
+  // isolated FirebaseApp, then call delete() on it. That is legitimate here
+  // only because student passwords are *derived* from the registration
+  // number, so the app can reconstruct them without storing anything.
+  //
+  // Which is also the honest limitation: the moment a student changes their
+  // password we can no longer do this, and staff with real passwords were
+  // never deletable this way. Those cases fall back to
+  // `tools/delete-students.js`, which uses the Admin SDK properly.
+  // ---------------------------------------------------------------------
+
+  /// Attempts to remove a Firebase Auth account.
+  ///
+  /// [candidatePasswords] are tried in order — normally just the one derived
+  /// from the registration number. Never logs or stores them.
+  Future<AuthDeleteResult> deleteAuthAccount({
+    required String email,
+    required List<String> candidatePasswords,
+    FirebaseApp? app,
+  }) async {
+    if (candidatePasswords.isEmpty) {
+      return AuthDeleteResult.noCredential;
+    }
+
+    final owned = app == null;
+    FirebaseApp? temp = app;
+    try {
+      temp ??= await openProvisioningApp();
+      final auth = FirebaseAuth.instanceFor(app: temp);
+
+      for (final password in candidatePasswords) {
+        try {
+          final cred = await auth.signInWithEmailAndPassword(
+            email: email.trim(),
+            password: password,
+          );
+          await cred.user!.delete();
+          return AuthDeleteResult.deleted;
+        } on FirebaseAuthException catch (e) {
+          switch (e.code) {
+            case 'user-not-found':
+              // Already gone — the outcome the caller wanted either way.
+              return AuthDeleteResult.alreadyGone;
+            case 'wrong-password':
+            case 'invalid-credential':
+              continue; // try the next candidate
+            case 'too-many-requests':
+              return AuthDeleteResult.throttled;
+            case 'requires-recent-login':
+              // Cannot happen on a session we just created, but if Firebase
+              // ever decides otherwise, say so rather than lying.
+              return AuthDeleteResult.failed;
+            default:
+              return AuthDeleteResult.failed;
+          }
+        }
+      }
+      return AuthDeleteResult.wrongPassword;
+    } catch (_) {
+      return AuthDeleteResult.failed;
+    } finally {
+      try {
+        await FirebaseAuth.instanceFor(app: temp!).signOut();
+      } catch (_) {
+        // Deleting the user already ended the session.
+      }
+      if (owned) await temp?.delete();
+    }
   }
 
   Future<AppUser> createSubUser({
@@ -294,6 +413,49 @@ class AuthService {
     }
     return 'Something went wrong. Please try again.';
   }
+}
+
+/// What happened when we tried to remove a Firebase Auth account.
+enum AuthDeleteResult {
+  deleted,
+
+  /// No account existed — the desired end state anyway.
+  alreadyGone,
+
+  /// The account exists but its password is no longer the derived one, so a
+  /// browser cannot sign in as it. Needs the Admin SDK script.
+  wrongPassword,
+
+  /// Nothing to try — a staff member with a real password, for instance.
+  noCredential,
+
+  /// Firebase rate-limited the sign-in attempts.
+  throttled,
+
+  failed,
+}
+
+extension AuthDeleteResultX on AuthDeleteResult {
+  bool get isGone =>
+      this == AuthDeleteResult.deleted || this == AuthDeleteResult.alreadyGone;
+
+  String get explanation => switch (this) {
+    AuthDeleteResult.deleted => 'sign-in account removed',
+    AuthDeleteResult.alreadyGone => 'no sign-in account existed',
+    AuthDeleteResult.wrongPassword =>
+      'sign-in account KEPT — its password is not the registration number, '
+          'so re-adding this person will say "email already in use". '
+          'Run: node delete-students.js --orphans --commit',
+    AuthDeleteResult.noCredential =>
+      'sign-in account KEPT — no derivable password. '
+          'Run: node delete-students.js --orphans --commit',
+    AuthDeleteResult.throttled =>
+      'sign-in account KEPT — Firebase throttled the request. Try again in a '
+          'minute, or run: node delete-students.js --orphans --commit',
+    AuthDeleteResult.failed =>
+      'sign-in account KEPT — removal failed. '
+          'Run: node delete-students.js --orphans --commit',
+  };
 }
 
 class AuthFailure implements Exception {

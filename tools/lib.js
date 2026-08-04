@@ -152,7 +152,7 @@ export const TRADES = [
 export const IMPORT_COLUMNS = [
   'name', 'registrationNo', 'email', 'role', 'gender', 'phone',
   'course', 'year', 'trade', 'batch', 'sem', 'state',
-  'hostel', 'room', 'dateOfBirth', 'bloodGroup', 'address',
+  'hostel', 'room', 'officeRoom', 'dateOfBirth', 'bloodGroup', 'address',
   'guardianName', 'guardianRelation', 'guardianPhone', 'notes',
 ];
 

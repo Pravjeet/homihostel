@@ -263,58 +263,115 @@ class Room {
 // Room generation
 // =====================================================================
 
-/// The blueprint the "add hostel" form fills in. Kept as a plain value object
-/// so the preview in the UI and the actual write use the exact same maths —
-/// what you see in the preview is literally what gets created.
-class RoomPlan {
-  final int floors;
+/// One uniform slab of rooms: some number of rooms, of one capacity, on a
+/// span of floors. A real building is described as a *list* of these — a
+/// girls' hostel with 60 three-seater rooms and 61 singles in the same block
+/// is two [RoomBlock]s, and a building where every floor is laid out
+/// differently is one block per floor. The common case (identical floors)
+/// is still just one block, so the simple hostel isn't punished for the
+/// flexibility.
+class RoomBlock {
+  final int fromFloor;
+  final int toFloor;
   final int roomsPerFloor;
   final int capacity;
   final List<String> features;
 
-  /// Floor-prefixed numbering: floor 1 -> 101, 102...; floor 2 -> 201...
-  /// Floors are numbered from 1 (ground floor is floor 1 here).
-  const RoomPlan({
-    required this.floors,
+  const RoomBlock({
+    required this.fromFloor,
+    required this.toFloor,
     required this.roomsPerFloor,
     required this.capacity,
     this.features = const [],
   });
 
-  int get totalRooms => floors * roomsPerFloor;
+  int get floorCount => (toFloor - fromFloor + 1).clamp(0, 1 << 20);
+  int get totalRooms => floorCount * roomsPerFloor;
   int get totalBeds => totalRooms * capacity;
 
-  /// Generates every room this plan describes, in order.
+  RoomBlock copyWith({
+    int? fromFloor,
+    int? toFloor,
+    int? roomsPerFloor,
+    int? capacity,
+    List<String>? features,
+  }) => RoomBlock(
+    fromFloor: fromFloor ?? this.fromFloor,
+    toFloor: toFloor ?? this.toFloor,
+    roomsPerFloor: roomsPerFloor ?? this.roomsPerFloor,
+    capacity: capacity ?? this.capacity,
+    features: features ?? this.features,
+  );
+}
+
+/// The blueprint the "add hostel" form fills in. Kept as a plain value object
+/// so the preview in the UI and the actual write use the exact same maths —
+/// what you see in the preview is literally what gets created.
+class RoomPlan {
+  final List<RoomBlock> blocks;
+
+  const RoomPlan({this.blocks = const []});
+
+  int get floors => blocks.isEmpty
+      ? 0
+      : blocks.map((b) => b.toFloor).reduce((a, b) => a > b ? a : b);
+
+  int get totalRooms => blocks.fold(0, (acc, b) => acc + b.totalRooms);
+  int get totalBeds => blocks.fold(0, (acc, b) => acc + b.totalBeds);
+
+  /// Generates every room every block describes, in order.
+  ///
+  /// Floor-prefixed numbering: floor 1 -> 101, 102...; floor 2 -> 201... A
+  /// running counter is kept *per floor* rather than per block, so a second
+  /// block that lands on a floor an earlier block already touched (the mixed
+  /// 3-seater/single case) continues the numbering instead of colliding with
+  /// it.
   List<Room> build() {
+    final nextOnFloor = <int, int>{};
     final rooms = <Room>[];
-    for (var floor = 1; floor <= floors; floor++) {
-      for (var i = 1; i <= roomsPerFloor; i++) {
-        final number = '${floor * 100 + i}';
-        rooms.add(
-          Room(
-            id: number,
-            number: number,
-            floor: floor,
-            capacity: capacity,
-            features: features,
-          ),
-        );
+    for (final block in blocks) {
+      for (var floor = block.fromFloor; floor <= block.toFloor; floor++) {
+        var i = nextOnFloor[floor] ?? 0;
+        for (var k = 0; k < block.roomsPerFloor; k++) {
+          i++;
+          final number = '${floor * 100 + i}';
+          rooms.add(
+            Room(
+              id: number,
+              number: number,
+              floor: floor,
+              capacity: block.capacity,
+              features: block.features,
+            ),
+          );
+        }
+        nextOnFloor[floor] = i;
       }
     }
     return rooms;
   }
 
   /// Human summary for the confirmation line, e.g.
-  /// "101–125, 201–225, 301–325".
+  /// "101–130 (3 Seater), 131–145 (Single), 201–230 (3 Seater)".
   String get rangeSummary {
-    if (floors <= 0 || roomsPerFloor <= 0) return '—';
+    final nextOnFloor = <int, int>{};
     final parts = <String>[];
-    for (var floor = 1; floor <= floors && floor <= 4; floor++) {
-      final first = floor * 100 + 1;
-      final last = floor * 100 + roomsPerFloor;
-      parts.add('$first–$last');
+    var truncated = false;
+    for (final block in blocks) {
+      if (block.roomsPerFloor <= 0 || block.floorCount <= 0) continue;
+      for (var floor = block.fromFloor; floor <= block.toFloor; floor++) {
+        final start = (nextOnFloor[floor] ?? 0) + 1;
+        final end = start + block.roomsPerFloor - 1;
+        nextOnFloor[floor] = end;
+        if (parts.length >= 6) {
+          truncated = true;
+          continue;
+        }
+        final label = block.capacity == 1 ? 'Single' : '${block.capacity} Seater';
+        parts.add('${floor * 100 + start}–${floor * 100 + end} ($label)');
+      }
     }
-    if (floors > 4) parts.add('…');
-    return parts.join(', ');
+    if (parts.isEmpty) return '—';
+    return truncated ? '${parts.join(', ')}, …' : parts.join(', ');
   }
 }

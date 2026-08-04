@@ -18,7 +18,7 @@ class HostelEditorDialog extends StatefulWidget {
   /// already exist and are managed from the hostel's own page.
   final Hostel? hostel;
 
-  const HostelEditorDialog({required this.collegeId, this.hostel});
+  const HostelEditorDialog({super.key, required this.collegeId, this.hostel});
 
   @override
   State<HostelEditorDialog> createState() => HostelEditorDialogState();
@@ -30,13 +30,15 @@ class HostelEditorDialogState extends State<HostelEditorDialog> {
   late final TextEditingController _code;
   late final TextEditingController _address;
 
-  final _floors = TextEditingController(text: '4');
-  final _roomsPerFloor = TextEditingController(text: '25');
+  /// One row per [RoomBlock] — a span of floors sharing a room count and
+  /// capacity. Starts as a single block matching the old defaults, so a
+  /// uniform hostel is still just one row; a mixed building (different
+  /// capacities, or a floor laid out differently) is more rows.
+  final List<_BlockDraft> _blocks = [];
 
   late HostelGender _gender;
   late Set<String> _amenities;
   Set<String> _roomFeatures = {'Ceiling Fan', 'Study Table'};
-  int _capacity = 2;
 
   bool _busy = false;
   String? _error;
@@ -52,21 +54,54 @@ class HostelEditorDialogState extends State<HostelEditorDialog> {
     _address = TextEditingController(text: h?.address ?? '');
     _gender = h?.gender ?? HostelGender.boys;
     _amenities = {...?h?.amenities};
+    if (!_isEditing) {
+      _blocks.add(
+        _BlockDraft(fromFloor: 1, toFloor: 4, roomsPerFloor: 25, capacity: 2),
+      );
+    }
   }
 
   @override
   void dispose() {
-    for (final c in [_name, _code, _address, _floors, _roomsPerFloor]) {
+    for (final c in [_name, _code, _address]) {
       c.dispose();
+    }
+    for (final b in _blocks) {
+      b.dispose();
     }
     super.dispose();
   }
 
+  void _addBlock() => setState(() {
+    final lastTo = _blocks.isEmpty
+        ? 0
+        : (int.tryParse(_blocks.last.toFloor.text) ?? 0);
+    _blocks.add(
+      _BlockDraft(
+        fromFloor: lastTo + 1,
+        toFloor: lastTo + 1,
+        roomsPerFloor: 25,
+        capacity: 2,
+      ),
+    );
+  });
+
+  void _removeBlock(int i) => setState(() {
+    _blocks.removeAt(i).dispose();
+  });
+
   RoomPlan get _plan => RoomPlan(
-    floors: int.tryParse(_floors.text) ?? 0,
-    roomsPerFloor: int.tryParse(_roomsPerFloor.text) ?? 0,
-    capacity: _capacity,
-    features: _roomFeatures.toList(),
+    blocks: _blocks
+        .map(
+          (d) => RoomBlock(
+            fromFloor: int.tryParse(d.fromFloor.text) ?? 0,
+            toFloor: int.tryParse(d.toFloor.text) ?? 0,
+            roomsPerFloor: int.tryParse(d.roomsPerFloor.text) ?? 0,
+            capacity: d.capacity,
+            features: _roomFeatures.toList(),
+          ),
+        )
+        .toList(),
   );
 
   Future<void> _save() async {
@@ -141,8 +176,8 @@ class HostelEditorDialogState extends State<HostelEditorDialog> {
     return AlertDialog(
       title: Text(_isEditing ? 'Edit ${widget.hostel!.name}' : 'Add a hostel'),
       content: SizedBox(
-        width: 580,
-        height: 560,
+        width: 660,
+        height: 620,
         child: Form(
           key: _formKey,
           child: SingleChildScrollView(
@@ -260,8 +295,10 @@ class HostelEditorDialogState extends State<HostelEditorDialog> {
                   ),
                   const SizedBox(height: 4),
                   Text(
-                    'Describe the layout and every room is created for you. '
-                    'You can add, edit or remove individual rooms afterwards.',
+                    'Each row is a span of floors sharing the same room count '
+                    'and capacity. Add another row for a floor laid out '
+                    'differently, or to mix room sizes in the same building — '
+                    'e.g. 60 three-seaters and 61 singles.',
                     style: TextStyle(
                       color: AppColors.textMuted,
                       fontSize: 12.5,
@@ -269,66 +306,23 @@ class HostelEditorDialogState extends State<HostelEditorDialog> {
                     ),
                   ),
                   const SizedBox(height: 14),
-                  Row(
-                    children: [
-                      Expanded(
-                        child: TextFormField(
-                          controller: _floors,
-                          enabled: !_busy,
-                          keyboardType: TextInputType.number,
-                          onChanged: (_) => setState(() {}),
-                          decoration: const InputDecoration(
-                            labelText: 'Floors',
-                          ),
-                          validator: (v) {
-                            final n = int.tryParse(v ?? '');
-                            if (n == null || n < 1) return 'Min 1';
-                            if (n > 20) return 'Max 20';
-                            return null;
-                          },
-                        ),
-                      ),
-                      const SizedBox(width: 12),
-                      Expanded(
-                        child: TextFormField(
-                          controller: _roomsPerFloor,
-                          enabled: !_busy,
-                          keyboardType: TextInputType.number,
-                          onChanged: (_) => setState(() {}),
-                          decoration: const InputDecoration(
-                            labelText: 'Rooms per floor',
-                          ),
-                          validator: (v) {
-                            final n = int.tryParse(v ?? '');
-                            if (n == null || n < 1) return 'Min 1';
-                            if (n > 99) return 'Max 99';
-                            return null;
-                          },
-                        ),
-                      ),
-                      const SizedBox(width: 12),
-                      Expanded(
-                        child: DropdownButtonFormField<int>(
-                          initialValue: _capacity,
-                          decoration: const InputDecoration(
-                            labelText: 'Capacity',
-                          ),
-                          items: const [1, 2, 3, 4, 5, 6]
-                              .map(
-                                (n) => DropdownMenuItem(
-                                  value: n,
-                                  child: Text(
-                                    n == 1 ? 'Single' : '$n seater',
-                                  ),
-                                ),
-                              )
-                              .toList(),
-                          onChanged: _busy
-                              ? null
-                              : (v) => setState(() => _capacity = v ?? 2),
-                        ),
-                      ),
-                    ],
+                  for (var i = 0; i < _blocks.length; i++) ...[
+                    _RoomBlockRow(
+                      draft: _blocks[i],
+                      enabled: !_busy,
+                      canRemove: _blocks.length > 1,
+                      onChanged: () => setState(() {}),
+                      onRemove: () => _removeBlock(i),
+                    ),
+                    const SizedBox(height: 10),
+                  ],
+                  Align(
+                    alignment: Alignment.centerLeft,
+                    child: TextButton.icon(
+                      onPressed: _busy ? null : _addBlock,
+                      icon: const Icon(Icons.add_rounded, size: 17),
+                      label: const Text('Add a row for another floor layout'),
+                    ),
                   ),
                   const SizedBox(height: 16),
                   const Text(
@@ -403,4 +397,155 @@ class HostelEditorDialogState extends State<HostelEditorDialog> {
       ],
     );
   }
+}
+
+/// Mutable editing state for one [RoomBlock] row. A plain holder rather than
+/// an immutable value so each row keeps its own [TextEditingController]s —
+/// rebuilding them on every keystroke would drop focus and cursor position.
+class _BlockDraft {
+  final TextEditingController fromFloor;
+  final TextEditingController toFloor;
+  final TextEditingController roomsPerFloor;
+  int capacity;
+
+  _BlockDraft({
+    required int fromFloor,
+    required int toFloor,
+    required int roomsPerFloor,
+    required this.capacity,
+  }) : fromFloor = TextEditingController(text: '$fromFloor'),
+       toFloor = TextEditingController(text: '$toFloor'),
+       roomsPerFloor = TextEditingController(text: '$roomsPerFloor');
+
+  void dispose() {
+    fromFloor.dispose();
+    toFloor.dispose();
+    roomsPerFloor.dispose();
+  }
+}
+
+class _RoomBlockRow extends StatelessWidget {
+  final _BlockDraft draft;
+  final bool enabled;
+  final bool canRemove;
+  final VoidCallback onChanged;
+  final VoidCallback onRemove;
+
+  const _RoomBlockRow({
+    required this.draft,
+    required this.enabled,
+    required this.canRemove,
+    required this.onChanged,
+    required this.onRemove,
+  });
+
+  @override
+  Widget build(BuildContext context) => Container(
+    padding: const EdgeInsets.all(12),
+    decoration: BoxDecoration(
+      color: AppColors.canvas,
+      borderRadius: BorderRadius.circular(10),
+      border: Border.all(color: AppColors.border),
+    ),
+    child: Row(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        SizedBox(
+          width: 70,
+          child: TextFormField(
+            controller: draft.fromFloor,
+            enabled: enabled,
+            keyboardType: TextInputType.number,
+            onChanged: (_) => onChanged(),
+            decoration: const InputDecoration(
+              labelText: 'From floor',
+              isDense: true,
+            ),
+            validator: (v) {
+              final n = int.tryParse(v ?? '');
+              if (n == null || n < 1) return 'Min 1';
+              if (n > 20) return 'Max 20';
+              return null;
+            },
+          ),
+        ),
+        Padding(
+          padding: const EdgeInsets.only(top: 16, left: 8, right: 8),
+          child: Text('to', style: TextStyle(color: AppColors.textMuted)),
+        ),
+        SizedBox(
+          width: 70,
+          child: TextFormField(
+            controller: draft.toFloor,
+            enabled: enabled,
+            keyboardType: TextInputType.number,
+            onChanged: (_) => onChanged(),
+            decoration: const InputDecoration(
+              labelText: 'To floor',
+              isDense: true,
+            ),
+            validator: (v) {
+              final n = int.tryParse(v ?? '');
+              final from = int.tryParse(draft.fromFloor.text);
+              if (n == null || n < 1) return 'Min 1';
+              if (n > 20) return 'Max 20';
+              if (from != null && n < from) return '< from';
+              return null;
+            },
+          ),
+        ),
+        const SizedBox(width: 12),
+        SizedBox(
+          width: 110,
+          child: TextFormField(
+            controller: draft.roomsPerFloor,
+            enabled: enabled,
+            keyboardType: TextInputType.number,
+            onChanged: (_) => onChanged(),
+            decoration: const InputDecoration(
+              labelText: 'Rooms / floor',
+              isDense: true,
+            ),
+            validator: (v) {
+              final n = int.tryParse(v ?? '');
+              if (n == null || n < 1) return 'Min 1';
+              if (n > 99) return 'Max 99';
+              return null;
+            },
+          ),
+        ),
+        const SizedBox(width: 12),
+        SizedBox(
+          width: 120,
+          child: DropdownButtonFormField<int>(
+            initialValue: draft.capacity,
+            decoration: const InputDecoration(
+              labelText: 'Capacity',
+              isDense: true,
+            ),
+            items: const [1, 2, 3, 4, 5, 6]
+                .map(
+                  (n) => DropdownMenuItem(
+                    value: n,
+                    child: Text(n == 1 ? 'Single' : '$n seater'),
+                  ),
+                )
+                .toList(),
+            onChanged: enabled
+                ? (v) {
+                    draft.capacity = v ?? draft.capacity;
+                    onChanged();
+                  }
+                : null,
+          ),
+        ),
+        const Spacer(),
+        IconButton(
+          onPressed: enabled && canRemove ? onRemove : null,
+          icon: const Icon(Icons.close_rounded, size: 18),
+          tooltip: 'Remove this row',
+        ),
+      ],
+    ),
+  );
 }

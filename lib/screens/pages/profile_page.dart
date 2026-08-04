@@ -45,6 +45,36 @@ class _ProfilePageState extends State<ProfilePage> {
     }
   }
 
+  Future<void> _changeEmail(BuildContext context) async {
+    final messenger = ScaffoldMessenger.of(context);
+    final result = await showDialog<_EmailChangeRequest>(
+      context: context,
+      builder: (_) => const _ChangeEmailDialog(),
+    );
+    if (result == null) return;
+
+    try {
+      await AuthService.instance.changeOwnEmail(
+        currentPassword: result.password,
+        newEmail: result.newEmail,
+      );
+      messenger.showSnackBar(
+        SnackBar(
+          content: Text(
+            'Confirmation link sent to ${result.newEmail}. Click it to '
+            'finish the change — keep signing in with your current email '
+            'until then.',
+          ),
+          duration: const Duration(seconds: 8),
+        ),
+      );
+    } catch (e) {
+      messenger.showSnackBar(
+        SnackBar(content: Text(AuthService.describeError(e))),
+      );
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     final session = Session.of(context);
@@ -132,10 +162,20 @@ class _ProfilePageState extends State<ProfilePage> {
                   TextFormField(
                     initialValue: Identity.display(user.email),
                     enabled: false,
-                    decoration: const InputDecoration(
+                    decoration: InputDecoration(
                       labelText: 'Email',
-                      helperText:
-                          'Email and role are managed by your administrator.',
+                      helperText: Identity.isSynthetic(user.email)
+                          ? 'Accounts that sign in with a registration '
+                                'number don\'t have an email to change.'
+                          : null,
+                      suffixIcon: Identity.isSynthetic(user.email)
+                          ? null
+                          : TextButton(
+                              onPressed: _busy
+                                  ? null
+                                  : () => _changeEmail(context),
+                              child: const Text('Change'),
+                            ),
                     ),
                   ),
                   const SizedBox(height: 20),
@@ -170,6 +210,111 @@ class _ProfilePageState extends State<ProfilePage> {
           ),
         ],
       ),
+    );
+  }
+}
+
+class _EmailChangeRequest {
+  final String newEmail;
+  final String password;
+  const _EmailChangeRequest(this.newEmail, this.password);
+}
+
+/// Collects the new address plus the current password — email changes are
+/// security-sensitive, so Firebase requires a recent sign-in, and asking here
+/// is friendlier than surfacing a raw "requires-recent-login" error later.
+class _ChangeEmailDialog extends StatefulWidget {
+  const _ChangeEmailDialog();
+
+  @override
+  State<_ChangeEmailDialog> createState() => _ChangeEmailDialogState();
+}
+
+class _ChangeEmailDialogState extends State<_ChangeEmailDialog> {
+  final _formKey = GlobalKey<FormState>();
+  final _email = TextEditingController();
+  final _password = TextEditingController();
+  bool _obscure = true;
+
+  @override
+  void dispose() {
+    _email.dispose();
+    _password.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return AlertDialog(
+      title: const Text('Change your email'),
+      content: Form(
+        key: _formKey,
+        child: SizedBox(
+          width: 380,
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Text(
+                'We\'ll send a confirmation link to the new address. Your '
+                'sign-in email only changes once you click it.',
+                style: TextStyle(color: AppColors.textMuted, fontSize: 13),
+              ),
+              const SizedBox(height: 18),
+              TextFormField(
+                controller: _email,
+                autofocus: true,
+                keyboardType: TextInputType.emailAddress,
+                decoration: const InputDecoration(labelText: 'New email'),
+                validator: (v) {
+                  final s = v?.trim() ?? '';
+                  if (s.isEmpty) return 'Enter your new email address';
+                  if (!s.contains('@') || !s.contains('.')) {
+                    return 'Enter a valid email address';
+                  }
+                  return null;
+                },
+              ),
+              const SizedBox(height: 14),
+              TextFormField(
+                controller: _password,
+                obscureText: _obscure,
+                decoration: InputDecoration(
+                  labelText: 'Current password',
+                  helperText: 'Needed to confirm this is really you.',
+                  suffixIcon: IconButton(
+                    icon: Icon(
+                      _obscure
+                          ? Icons.visibility_outlined
+                          : Icons.visibility_off_outlined,
+                      size: 19,
+                    ),
+                    onPressed: () => setState(() => _obscure = !_obscure),
+                  ),
+                ),
+                validator: (v) => (v == null || v.isEmpty)
+                    ? 'Your current password is required'
+                    : null,
+              ),
+            ],
+          ),
+        ),
+      ),
+      actions: [
+        TextButton(
+          onPressed: () => Navigator.pop(context),
+          child: const Text('Cancel'),
+        ),
+        FilledButton(
+          onPressed: () {
+            if (!_formKey.currentState!.validate()) return;
+            Navigator.pop(
+              context,
+              _EmailChangeRequest(_email.text.trim(), _password.text),
+            );
+          },
+          child: const Text('Send confirmation link'),
+        ),
+      ],
     );
   }
 }

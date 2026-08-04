@@ -112,6 +112,23 @@ node delete-students.js --from-csv ../students.csv --commit
 `--from-csv` deletes only the people listed in that file — the safe way to
 undo a botched import.
 
+### Orphaned sign-in accounts
+
+```bash
+node delete-students.js --orphans           # preview
+node delete-students.js --orphans --commit  # do it
+```
+
+An **orphan** is a sign-in account with no profile document behind it. The app
+deletes both where it can, but deleting an Auth account from a browser means
+signing in as it — which only works when the password is the one derived from
+the registration number. Give someone a custom password in *Add user* and the
+app can no longer remove their login, so deleting them leaves an orphan.
+
+The symptom is **"email already in use"** when you re-add the same person.
+This is the fix. It only touches accounts with no profile *anywhere*, so a
+user belonging to another workspace is never removed.
+
 To wipe every non-admin account in the college:
 
 ```bash

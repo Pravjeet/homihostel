@@ -183,14 +183,14 @@ class _Confirm extends StatelessWidget {
             color: AppColors.warningSoft,
             borderRadius: BorderRadius.circular(10),
           ),
-          child: const Text(
-            'Their sign-in accounts are NOT removed — the app cannot delete '
-            'those. Re-importing the same registration numbers from inside the '
-            'app will fail with "email already in use".\n\n'
-            'For a complete wipe that removes the logins too, run:\n'
-            'tools/delete-students.js --all-students --i-mean-it --commit',
+          child: Text(
+            'Sign-in accounts go too, wherever the password is still the one '
+            'derived from the registration number.\n\n'
+            'Anyone who changed their password keeps their login — those are '
+            'listed by name when this finishes, and '
+            'tools/delete-students.js clears them properly.',
             style: TextStyle(
-              color: Color(0xFF92400E),
+              color: AppColors.warning,
               fontSize: 12.5,
               height: 1.5,
             ),
@@ -290,15 +290,47 @@ class _Result extends StatelessWidget {
     crossAxisAlignment: CrossAxisAlignment.start,
     mainAxisSize: MainAxisSize.min,
     children: [
-      Row(
+      Wrap(
+        spacing: 30,
+        runSpacing: 12,
         children: [
-          _Tally('Deleted', outcome.deleted, AppColors.success),
-          const SizedBox(width: 30),
+          _Tally('Profiles deleted', outcome.deleted, AppColors.success),
+          _Tally('Logins removed', outcome.authDeleted, AppColors.success),
           _Tally('Beds freed', outcome.vacated, AppColors.info),
-          const SizedBox(width: 30),
           _Tally('Problems', outcome.failures.length, AppColors.danger),
         ],
       ),
+      if (outcome.authLeftBehind.isNotEmpty) ...[
+        const SizedBox(height: 16),
+        Text(
+          'Profile gone, sign-in account still there:',
+          style: TextStyle(
+            fontSize: 13,
+            fontWeight: FontWeight.w700,
+            color: AppColors.warning,
+          ),
+        ),
+        const SizedBox(height: 6),
+        SizedBox(
+          height: 90,
+          child: ListView(
+            children: outcome.authLeftBehind
+                .map(
+                  (f) => Padding(
+                    padding: const EdgeInsets.only(bottom: 4),
+                    child: Text(
+                      f,
+                      style: TextStyle(
+                        fontSize: 12.5,
+                        color: AppColors.warning,
+                      ),
+                    ),
+                  ),
+                )
+                .toList(),
+          ),
+        ),
+      ],
       if (outcome.failures.isNotEmpty) ...[
         const SizedBox(height: 16),
         const Text(
@@ -307,7 +339,7 @@ class _Result extends StatelessWidget {
         ),
         const SizedBox(height: 6),
         SizedBox(
-          height: 120,
+          height: 90,
           child: ListView(
             children: outcome.failures
                 .map(

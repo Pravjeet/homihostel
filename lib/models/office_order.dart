@@ -1,12 +1,16 @@
+import 'dart:convert';
+import 'dart:typed_data';
+
 import 'package:cloud_firestore/cloud_firestore.dart';
 
 /// An office order issued by the institute.
 ///
-/// The PDF itself is not stored here — [pdfUrl] points at wherever it already
-/// lives (the institute site, a Drive share). That keeps the project on the
-/// free Firebase plan, and office orders are usually published somewhere
-/// public anyway, so re-hosting them would just create a second copy to keep
-/// in step.
+/// There is no Firebase Storage on the free Spark plan, so the scanned copy
+/// is not a file at all — it's a small photo, base64-encoded directly into
+/// the document ([imageBase64]). That only works because it's a photo (a few
+/// hundred KB) rather than a multi-page PDF; a Firestore document tops out
+/// at ~1 MB. Older orders were published as an external link instead
+/// ([pdfUrl]) and still open that way.
 class OfficeOrder {
   final String id;
 
@@ -20,7 +24,15 @@ class OfficeOrder {
   /// Date printed on the order, which is not the date it was uploaded here.
   final DateTime? orderDate;
 
-  final String pdfUrl;
+  /// Legacy field: a link to where the order already lives (institute site,
+  /// Drive share). Null for orders published with an inline photo instead.
+  final String? pdfUrl;
+
+  /// Base64-encoded photo of the order. Null for legacy link-based orders.
+  final String? imageBase64;
+
+  /// MIME type of [imageBase64], e.g. `image/jpeg`.
+  final String? imageMimeType;
 
   final String postedByUid;
   final String postedByName;
@@ -32,7 +44,9 @@ class OfficeOrder {
     required this.title,
     this.description,
     this.orderDate,
-    required this.pdfUrl,
+    this.pdfUrl,
+    this.imageBase64,
+    this.imageMimeType,
     required this.postedByUid,
     required this.postedByName,
     this.createdAt,
@@ -44,7 +58,9 @@ class OfficeOrder {
     title: m['title'] as String? ?? '',
     description: m['description'] as String?,
     orderDate: (m['orderDate'] as Timestamp?)?.toDate(),
-    pdfUrl: m['pdfUrl'] as String? ?? '',
+    pdfUrl: m['pdfUrl'] as String?,
+    imageBase64: m['imageBase64'] as String?,
+    imageMimeType: m['imageMimeType'] as String?,
     postedByUid: m['postedByUid'] as String? ?? '',
     postedByName: m['postedByName'] as String? ?? 'Unknown',
     createdAt: (m['createdAt'] as Timestamp?)?.toDate(),
@@ -56,11 +72,18 @@ class OfficeOrder {
     'description': description,
     'orderDate': orderDate == null ? null : Timestamp.fromDate(orderDate!),
     'pdfUrl': pdfUrl,
+    'imageBase64': imageBase64,
+    'imageMimeType': imageMimeType,
     'postedByUid': postedByUid,
     'postedByName': postedByName,
   };
 
-  bool get isPdf => pdfUrl.toLowerCase().endsWith('.pdf');
+  bool get hasImage => imageBase64 != null && imageBase64!.isNotEmpty;
+
+  /// True for the older orders that were published as an external link.
+  bool get hasLink => (pdfUrl ?? '').trim().isNotEmpty;
+
+  bool get isPdf => (pdfUrl ?? '').toLowerCase().endsWith('.pdf');
 
   /// True when this order matches a free-text search of its number or title.
   /// Punctuation is ignored on the number, so "SLIET/HM/2024/17" is found by
@@ -92,5 +115,32 @@ class OfficeOrder {
     final d = orderDate;
     if (d == null) return false;
     return d.year == day.year && d.month == day.month && d.day == day.day;
+  }
+}
+
+/// Decoded photo bytes, memoised by order id.
+///
+/// Without this, a register of forty orders re-runs `base64Decode` on a
+/// ~700 KB string for every single one on every rebuild — which is enough to
+/// make scrolling stutter. The cache is bounded because a long session
+/// browsing hundreds of orders would otherwise grow without limit; anything
+/// evicted is simply decoded again next time it is shown.
+final Map<String, Uint8List> _decodedImages = {};
+
+Uint8List? decodedOrderImage(OfficeOrder order) {
+  if (!order.hasImage) return null;
+
+  final hit = _decodedImages[order.id];
+  if (hit != null) return hit;
+
+  try {
+    final bytes = base64Decode(order.imageBase64!);
+    if (_decodedImages.length >= 40) _decodedImages.clear();
+    _decodedImages[order.id] = bytes;
+    return bytes;
+  } catch (_) {
+    // A corrupt or truncated string shouldn't take the whole register down —
+    // the row falls back to its placeholder icon.
+    return null;
   }
 }

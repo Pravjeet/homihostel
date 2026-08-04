@@ -50,6 +50,11 @@ dependencies:
   # Bar charts for the fines mini-dashboard.
   fl_chart: ^0.69.0
 
+  # Picking an office-order photo to store inline in Firestore — there's no
+  # Firebase Storage on the free Spark plan. Chosen over image_picker because
+  # it also works on Windows desktop, not just mobile/web.
+  file_picker: ^8.0.7
+
 dev_dependencies:
   flutter_test:
     sdk: flutter

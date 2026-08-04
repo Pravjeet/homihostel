@@ -57,7 +57,7 @@ service cloud.firestore {
     // could promote themselves to Super Admin.
     function onlySelfEditableFields() {
       return request.resource.data.diff(resource.data).affectedKeys()
-        .hasOnly(['name', 'phone', 'gender', 'updatedAt']);
+        .hasOnly(['name', 'phone', 'gender', 'email', 'updatedAt']);
     }
 
     // The only user fields an allotment write may touch. Someone holding
@@ -307,6 +307,32 @@ service cloud.firestore {
                     );
 
       // No updates — if you post wrong, delete and repost.
+    }
+
+    // ---------------- audit log ----------------
+    //
+    // Append-only from the client's point of view. Entries may be created by
+    // anyone acting in their own name, read by whoever runs the workspace,
+    // and updated ONLY to mark them undone — the record of what happened must
+    // not be editable after the fact, or it is not a record.
+    //
+    // Delete is allowed so the Danger Zone can clear test noise; that is a
+    // deliberate trade, and a real deployment should set it to `false`.
+
+    match /colleges/{collegeId}/auditLog/{entryId} {
+      allow read: if sameCollege(collegeId) && hasPerm('settings.manage');
+
+      allow create: if sameCollege(collegeId)
+                    && request.resource.data.actorUid == request.auth.uid;
+
+      // Only the three undo bookkeeping fields may ever change.
+      allow update: if sameCollege(collegeId)
+                    && hasPerm('settings.manage')
+                    && request.resource.data.diff(resource.data)
+                         .affectedKeys()
+                         .hasOnly(['undone', 'undoneAt', 'undoneByName']);
+
+      allow delete: if sameCollege(collegeId) && hasPerm('settings.manage');
     }
 
     // ---------------- settings ----------------

@@ -2,6 +2,7 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 
 import '../models/app_user.dart';
 import '../models/fine.dart';
+import 'audit_service.dart';
 
 /// Fines live under their college:
 ///   colleges/{collegeId}/fines/{fineId}
@@ -91,6 +92,18 @@ class FineService {
       ...fine.toMap(),
       'createdAt': FieldValue.serverTimestamp(),
     });
+
+    // No `before` — the fine did not exist, so undo deletes it.
+    await AuditService.instance.record(
+      collegeId: collegeId,
+      actor: imposedBy,
+      action: 'fine.impose',
+      summary: 'Fined ${student.name} ₹$amount for $category',
+      targetLabel: student.name,
+      path: 'colleges/$collegeId/fines/${ref.id}',
+      reversible: true,
+    );
+
     return ref.id;
   }
 
@@ -104,12 +117,28 @@ class FineService {
     if (status == FineStatus.pending) {
       throw ArgumentError('Cannot move a fine back to unpaid.');
     }
-    await _col(collegeId).doc(fine.id).update({
+
+    final ref = _col(collegeId).doc(fine.id);
+    final before = (await ref.get()).data();
+
+    await ref.update({
       'status': status.name,
       'resolvedByUid': handler.uid,
       'resolvedByName': handler.name,
       'resolvedAt': FieldValue.serverTimestamp(),
     });
+
+    await AuditService.instance.record(
+      collegeId: collegeId,
+      actor: handler,
+      action: 'fine.${status.name}',
+      summary: 'Marked ${fine.studentName}\'s ₹${fine.amount} fine '
+          '${status.label.toLowerCase()}',
+      targetLabel: fine.studentName,
+      path: 'colleges/$collegeId/fines/${fine.id}',
+      before: before,
+      reversible: before != null,
+    );
   }
 
   /// Removes a fine raised in error. Only while it's still unpaid — once money
@@ -117,13 +146,30 @@ class FineService {
   Future<void> remove({
     required String collegeId,
     required Fine fine,
+    AppUser? actor,
   }) async {
     if (!fine.status.isOutstanding) {
       throw StateError(
         'This fine has already been settled and can no longer be removed.',
       );
     }
-    await _col(collegeId).doc(fine.id).delete();
+
+    final ref = _col(collegeId).doc(fine.id);
+    final before = (await ref.get()).data();
+    await ref.delete();
+
+    if (actor != null) {
+      await AuditService.instance.record(
+        collegeId: collegeId,
+        actor: actor,
+        action: 'fine.delete',
+        summary: 'Removed ${fine.studentName}\'s ₹${fine.amount} fine',
+        targetLabel: fine.studentName,
+        path: 'colleges/$collegeId/fines/${fine.id}',
+        before: before,
+        reversible: before != null,
+      );
+    }
   }
 
   /// Deletes every fine in the college. For clearing test data.

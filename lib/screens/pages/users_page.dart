@@ -658,6 +658,9 @@ class _UserRow extends StatelessWidget {
 
   Future<void> _handle(BuildContext context, String action) async {
     final messenger = ScaffoldMessenger.of(context);
+    // Read before the first await — these actions all show dialogs, and the
+    // context may be gone by the time we need the actor for the audit entry.
+    final session = Session.of(context);
     try {
       switch (action) {
         case 'role':
@@ -669,6 +672,8 @@ class _UserRow extends StatelessWidget {
             await DataService.instance.setUserRole(
               user.uid,
               picked.id == '__none__' ? null : picked,
+              collegeId: user.collegeId,
+              actor: session.user,
             );
             messenger.showSnackBar(
               const SnackBar(content: Text('Role updated')),
@@ -676,7 +681,12 @@ class _UserRow extends StatelessWidget {
           }
           break;
         case 'active':
-          await DataService.instance.setUserActive(user.uid, !user.isActive);
+          await DataService.instance.setUserActive(
+            user.uid,
+            !user.isActive,
+            collegeId: user.collegeId,
+            actor: session.user,
+          );
           messenger.showSnackBar(
             SnackBar(
               content: Text(
@@ -686,15 +696,59 @@ class _UserRow extends StatelessWidget {
           );
           break;
         case 'delete':
+          // Whether the sign-in account can go too depends on the password
+          // still being the derived one, which is knowable up front — so say
+          // it in the dialog rather than surprising them afterwards.
+          final canRemoveLogin =
+              (user.enrollmentNo ?? '').trim().isNotEmpty ||
+              Identity.isSynthetic(user.email);
+
           final ok = await showDialog<bool>(
             context: context,
             builder: (c) => AlertDialog(
               title: Text('Delete ${user.name}?'),
-              content: const Text(
-                'This removes their profile and access immediately.\n\n'
-                'Note: their sign-in account itself can only be removed from '
-                'the Firebase console (or a Cloud Function). Deactivating is '
-                'usually the safer choice.',
+              content: SizedBox(
+                width: 440,
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      'This removes their profile and access immediately'
+                      '${user.isAllotted ? ', and frees ${user.roomLabel}' : ''}.',
+                      style: const TextStyle(fontSize: 13.5, height: 1.5),
+                    ),
+                    const SizedBox(height: 14),
+                    Container(
+                      padding: const EdgeInsets.all(12),
+                      decoration: BoxDecoration(
+                        color: canRemoveLogin
+                            ? AppColors.infoSoft
+                            : AppColors.warningSoft,
+                        borderRadius: BorderRadius.circular(9),
+                      ),
+                      child: Text(
+                        canRemoveLogin
+                            ? 'Their sign-in account will also be removed, so '
+                                  'the registration number can be re-imported '
+                                  'cleanly.\n\nIf they have changed their '
+                                  'password this part will fail and say so — '
+                                  'the profile is still deleted.'
+                            : 'Their sign-in account will NOT be removed — it '
+                                  'has no derivable password. Use '
+                                  'tools/delete-students.js for a complete '
+                                  'wipe.',
+                        style: TextStyle(
+                          fontSize: 12.5,
+                          height: 1.45,
+                          color: canRemoveLogin
+                              ? AppColors.info
+                              : AppColors.warning,
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
               ),
               actions: [
                 TextButton(
@@ -712,9 +766,20 @@ class _UserRow extends StatelessWidget {
             ),
           );
           if (ok == true) {
-            await DataService.instance.deleteUserProfile(user.uid);
+            final outcome = await DataService.instance.deleteUserCompletely(
+              collegeId: user.collegeId,
+              user: user,
+              actor: session.user,
+            );
             messenger.showSnackBar(
-              const SnackBar(content: Text('Profile deleted')),
+              SnackBar(
+                content: Text(
+                  'Profile deleted · ${outcome.auth.explanation}',
+                ),
+                duration: outcome.auth.isGone
+                    ? const Duration(seconds: 3)
+                    : const Duration(seconds: 7),
+              ),
             );
           }
           break;
@@ -791,6 +856,32 @@ class _CreateUserDialogState extends State<_CreateUserDialog> {
   final _phone = TextEditingController();
   final _enrollment = TextEditingController();
 
+  // Everything below mirrors the columns the CSV importer accepts, so a
+  // single manual add can capture the same detail a bulk import would —
+  // without a second trip through the user's detail page afterwards.
+  // Hostel/room are deliberately absent: allotment is a transaction against
+  // live room availability (see AllotmentService.allot) and belongs to the
+  // dedicated allot picker, not a text field on a creation form.
+  final _course = TextEditingController();
+  final _year = TextEditingController();
+  final _batch = TextEditingController();
+  final _officeRoom = TextEditingController();
+  final _dateOfBirth = TextEditingController();
+  final _address = TextEditingController();
+  final _guardianName = TextEditingController();
+  final _guardianRelation = TextEditingController();
+  final _guardianPhone = TextEditingController();
+  final _notes = TextEditingController();
+
+  String? _trade;
+  int? _sem;
+  String? _state;
+  String? _bloodGroup;
+
+  /// Once the admin edits the password themselves, stop overwriting it from
+  /// the registration number.
+  bool _passwordTouched = false;
+
   AppRole? _role;
   String? _gender;
   bool _busy = false;
@@ -804,10 +895,31 @@ class _CreateUserDialogState extends State<_CreateUserDialog> {
 
   @override
   void dispose() {
-    for (final c in [_name, _email, _password, _phone, _enrollment]) {
+    for (final c in [
+      _name,
+      _email,
+      _password,
+      _phone,
+      _enrollment,
+      _course,
+      _year,
+      _batch,
+      _officeRoom,
+      _dateOfBirth,
+      _address,
+      _guardianName,
+      _guardianRelation,
+      _guardianPhone,
+      _notes,
+    ]) {
       c.dispose();
     }
     super.dispose();
+  }
+
+  String? _val(TextEditingController c) {
+    final t = c.text.trim();
+    return t.isEmpty ? null : t;
   }
 
   Future<void> _submit() async {
@@ -830,6 +942,22 @@ class _CreateUserDialogState extends State<_CreateUserDialog> {
         roleName: _role!.name,
         phone: _phone.text.trim().isEmpty ? null : _phone.text.trim(),
         gender: _gender,
+        extra: {
+          'course': _val(_course),
+          'year': _val(_year),
+          'trade': _trade,
+          'batch': _val(_batch),
+          'sem': _sem,
+          'state': _state ?? stateFromAddress(_val(_address)),
+          'officeRoom': _val(_officeRoom),
+          'dateOfBirth': _val(_dateOfBirth),
+          'bloodGroup': _bloodGroup,
+          'address': _val(_address),
+          'guardianName': _val(_guardianName),
+          'guardianRelation': _val(_guardianRelation),
+          'guardianPhone': _val(_guardianPhone),
+          'notes': _val(_notes),
+        }..removeWhere((_, v) => v == null),
       );
       if (mounted) Navigator.pop(context, true);
     } catch (e) {
@@ -844,7 +972,7 @@ class _CreateUserDialogState extends State<_CreateUserDialog> {
     return AlertDialog(
       title: const Text('Add a user'),
       content: SizedBox(
-        width: 430,
+        width: 620,
         child: SingleChildScrollView(
           child: Form(
             key: _formKey,
@@ -881,6 +1009,18 @@ class _CreateUserDialogState extends State<_CreateUserDialog> {
                 TextFormField(
                   controller: _email,
                   enabled: !_busy,
+                  // Keeps the password in step with the registration number,
+                  // matching what the CSV importer does. That consistency is
+                  // not cosmetic: in-app deletion works by reconstructing the
+                  // derived password, so a hand-typed one leaves an
+                  // undeletable sign-in account behind.
+                  onChanged: (v) {
+                    if (_passwordTouched) return;
+                    final s = v.trim();
+                    _password.text = (s.isEmpty || Identity.looksLikeEmail(s))
+                        ? ''
+                        : Identity.derivedPassword(s);
+                  },
                   decoration: const InputDecoration(
                     labelText: 'Registration number or email',
                     helperText:
@@ -908,9 +1048,20 @@ class _CreateUserDialogState extends State<_CreateUserDialog> {
                 TextFormField(
                   controller: _password,
                   enabled: !_busy,
-                  decoration: const InputDecoration(
+                  onChanged: (_) => _passwordTouched = true,
+                  decoration: InputDecoration(
                     labelText: 'Temporary password',
-                    helperText: 'Share this with them; they can reset it later.',
+                    helperText: _passwordTouched
+                        ? 'Custom password — this account can only be fully '
+                              'deleted with tools/delete-students.js'
+                        : 'Defaults to the registration number. Share it; '
+                              'they can change it later.',
+                    helperMaxLines: 2,
+                    helperStyle: TextStyle(
+                      color: _passwordTouched
+                          ? AppColors.warning
+                          : AppColors.textMuted,
+                    ),
                   ),
                   validator: (v) => (v == null || v.length < 6)
                       ? 'Use at least 6 characters'
@@ -962,11 +1113,228 @@ class _CreateUserDialogState extends State<_CreateUserDialog> {
                   ],
                 ),
                 const SizedBox(height: 14),
+                Row(
+                  children: [
+                    Expanded(
+                      child: TextFormField(
+                        controller: _enrollment,
+                        enabled: !_busy,
+                        decoration: const InputDecoration(
+                          labelText: 'Enrollment / Employee no. (optional)',
+                        ),
+                      ),
+                    ),
+                    const SizedBox(width: 12),
+                    Expanded(
+                      child: TextFormField(
+                        controller: _dateOfBirth,
+                        enabled: !_busy,
+                        decoration: const InputDecoration(
+                          labelText: 'Date of birth',
+                          hintText: 'DD/MM/YYYY',
+                        ),
+                      ),
+                    ),
+                    const SizedBox(width: 12),
+                    Expanded(
+                      child: DropdownButtonFormField<String>(
+                        initialValue: _bloodGroup,
+                        decoration: const InputDecoration(
+                          labelText: 'Blood group',
+                        ),
+                        items:
+                            const ['A+', 'A-', 'B+', 'B-', 'O+', 'O-', 'AB+', 'AB-']
+                                .map(
+                                  (g) => DropdownMenuItem(
+                                    value: g,
+                                    child: Text(g),
+                                  ),
+                                )
+                                .toList(),
+                        onChanged: _busy
+                            ? null
+                            : (v) => setState(() => _bloodGroup = v),
+                      ),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 18),
+                _SectionLabel('Academic'),
+                const SizedBox(height: 10),
+                Row(
+                  children: [
+                    Expanded(
+                      child: TextFormField(
+                        controller: _course,
+                        enabled: !_busy,
+                        decoration: const InputDecoration(
+                          labelText: 'Course',
+                          hintText: 'B.Tech CSE',
+                        ),
+                      ),
+                    ),
+                    const SizedBox(width: 12),
+                    Expanded(
+                      child: TextFormField(
+                        controller: _year,
+                        enabled: !_busy,
+                        decoration: const InputDecoration(
+                          labelText: 'Year',
+                          hintText: '2nd',
+                        ),
+                      ),
+                    ),
+                    const SizedBox(width: 12),
+                    Expanded(
+                      child: DropdownButtonFormField<int>(
+                        initialValue: _sem,
+                        decoration: const InputDecoration(
+                          labelText: 'Semester',
+                        ),
+                        items: List.generate(8, (i) => i + 1)
+                            .map(
+                              (s) =>
+                                  DropdownMenuItem(value: s, child: Text('$s')),
+                            )
+                            .toList(),
+                        onChanged: _busy
+                            ? null
+                            : (v) => setState(() => _sem = v),
+                      ),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 14),
+                Row(
+                  children: [
+                    Expanded(
+                      child: DropdownButtonFormField<String>(
+                        initialValue: kTrades.contains(_trade) ? _trade : null,
+                        isExpanded: true,
+                        decoration: const InputDecoration(labelText: 'Trade'),
+                        items: kTrades
+                            .map(
+                              (t) =>
+                                  DropdownMenuItem(value: t, child: Text(t)),
+                            )
+                            .toList(),
+                        onChanged: _busy
+                            ? null
+                            : (v) => setState(() => _trade = v),
+                      ),
+                    ),
+                    const SizedBox(width: 12),
+                    Expanded(
+                      child: TextFormField(
+                        controller: _batch,
+                        enabled: !_busy,
+                        decoration: const InputDecoration(
+                          labelText: 'Batch',
+                          hintText: '2023-24',
+                        ),
+                      ),
+                    ),
+                    const SizedBox(width: 12),
+                    Expanded(
+                      child: TextFormField(
+                        controller: _officeRoom,
+                        enabled: !_busy,
+                        decoration: const InputDecoration(
+                          labelText: 'Office / staff room',
+                          hintText: 'Admin Block, Room 12',
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 18),
+                _SectionLabel('Guardian & emergency contact'),
+                const SizedBox(height: 10),
+                Row(
+                  children: [
+                    Expanded(
+                      flex: 2,
+                      child: TextFormField(
+                        controller: _guardianName,
+                        enabled: !_busy,
+                        decoration: const InputDecoration(
+                          labelText: 'Guardian name',
+                        ),
+                      ),
+                    ),
+                    const SizedBox(width: 12),
+                    Expanded(
+                      child: TextFormField(
+                        controller: _guardianRelation,
+                        enabled: !_busy,
+                        decoration: const InputDecoration(
+                          labelText: 'Relation',
+                          hintText: 'Father',
+                        ),
+                      ),
+                    ),
+                    const SizedBox(width: 12),
+                    Expanded(
+                      flex: 2,
+                      child: TextFormField(
+                        controller: _guardianPhone,
+                        enabled: !_busy,
+                        keyboardType: TextInputType.phone,
+                        decoration: const InputDecoration(
+                          labelText: 'Guardian phone',
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 18),
+                _SectionLabel('Other'),
+                const SizedBox(height: 10),
+                Row(
+                  children: [
+                    Expanded(
+                      flex: 2,
+                      child: TextFormField(
+                        controller: _address,
+                        enabled: !_busy,
+                        maxLines: 2,
+                        decoration: const InputDecoration(
+                          labelText: 'Permanent address',
+                        ),
+                      ),
+                    ),
+                    const SizedBox(width: 12),
+                    Expanded(
+                      child: DropdownButtonFormField<String>(
+                        initialValue: kIndianStates.contains(_state)
+                            ? _state
+                            : null,
+                        isExpanded: true,
+                        decoration: const InputDecoration(
+                          labelText: 'Home state',
+                          helperText: 'Used by the fines dashboard',
+                        ),
+                        items: kIndianStates
+                            .map(
+                              (s) =>
+                                  DropdownMenuItem(value: s, child: Text(s)),
+                            )
+                            .toList(),
+                        onChanged: _busy
+                            ? null
+                            : (v) => setState(() => _state = v),
+                      ),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 14),
                 TextFormField(
-                  controller: _enrollment,
+                  controller: _notes,
                   enabled: !_busy,
+                  maxLines: 2,
                   decoration: const InputDecoration(
-                    labelText: 'Enrollment / Employee no. (optional)',
+                    labelText: 'Internal notes',
+                    hintText: 'Only staff can see this',
                   ),
                 ),
               ],
@@ -995,4 +1363,20 @@ class _CreateUserDialogState extends State<_CreateUserDialog> {
       ],
     );
   }
+}
+
+class _SectionLabel extends StatelessWidget {
+  final String text;
+  const _SectionLabel(this.text);
+
+  @override
+  Widget build(BuildContext context) => Text(
+    text.toUpperCase(),
+    style: TextStyle(
+      fontSize: 11,
+      fontWeight: FontWeight.w800,
+      letterSpacing: 0.9,
+      color: AppColors.textMuted,
+    ),
+  );
 }

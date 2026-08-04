@@ -1,3 +1,7 @@
+import 'dart:convert';
+import 'dart:typed_data';
+
+import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
 
 import '../../core/logo.dart';
@@ -9,6 +13,18 @@ import '../../services/auth_service.dart';
 import '../../services/data_service.dart';
 import '../../services/fine_service.dart';
 import '../../services/settings_service.dart';
+
+/// Largest logo photo accepted, in bytes. Base64 adds ~33% on top, and this
+/// document also carries the rest of the institution profile plus theming —
+/// a much tighter budget than an office order gets its own document for.
+const int _maxLogoBytes = 250 * 1024;
+
+const Map<String, String> _logoMimeByExt = {
+  'jpg': 'image/jpeg',
+  'jpeg': 'image/jpeg',
+  'png': 'image/png',
+  'webp': 'image/webp',
+};
 
 /// Workspace configuration.
 ///
@@ -79,7 +95,11 @@ class SettingsPage extends StatelessWidget {
               value: s.institution,
             ),
             const SizedBox(height: 18),
-            _ThemeSection(collegeId: collegeId, value: s.theming),
+            _ThemeSection(
+              collegeId: collegeId,
+              value: s.theming,
+              logoBase64: s.institution.logoBase64,
+            ),
             const SizedBox(height: 18),
             _SessionSection(collegeId: collegeId, value: s.session),
             const SizedBox(height: 18),
@@ -232,6 +252,14 @@ class _InstitutionSectionState extends State<_InstitutionSection>
     with _Saving {
   late final Map<String, TextEditingController> _c;
 
+  Uint8List? _logoBytes;
+  String? _logoMimeType;
+
+  /// Tracks whether the logo was touched this session, and how — untouched
+  /// means "keep whatever's already saved" rather than re-sending the same
+  /// bytes on every unrelated field edit.
+  bool _logoRemoved = false;
+
   @override
   void initState() {
     super.initState();
@@ -245,6 +273,14 @@ class _InstitutionSectionState extends State<_InstitutionSection>
       'contactPhone': TextEditingController(text: v.contactPhone ?? ''),
       'website': TextEditingController(text: v.website ?? ''),
     };
+    if (v.hasLogo) {
+      try {
+        _logoBytes = base64Decode(v.logoBase64!);
+        _logoMimeType = v.logoMimeType;
+      } catch (_) {
+        // Corrupt stored value — treat as no logo rather than crash the page.
+      }
+    }
   }
 
   @override
@@ -259,6 +295,37 @@ class _InstitutionSectionState extends State<_InstitutionSection>
     final t = _c[k]!.text.trim();
     return t.isEmpty ? null : t;
   }
+
+  Future<void> _pickLogo() async {
+    final result = await FilePicker.platform.pickFiles(
+      type: FileType.custom,
+      allowedExtensions: ['jpg', 'jpeg', 'png', 'webp'],
+      withData: true,
+    );
+    final file = result?.files.single;
+    if (file == null || file.bytes == null) return;
+
+    if (file.bytes!.lengthInBytes > _maxLogoBytes) {
+      setState(() => error =
+          'That image is too large (${(file.bytes!.lengthInBytes / 1024).round()} '
+          'KB). Please keep it under ${_maxLogoBytes ~/ 1024} KB.');
+      return;
+    }
+
+    final ext = file.extension?.toLowerCase() ?? '';
+    setState(() {
+      error = null;
+      _logoBytes = file.bytes;
+      _logoMimeType = _logoMimeByExt[ext] ?? 'image/jpeg';
+      _logoRemoved = false;
+    });
+  }
+
+  void _removeLogo() => setState(() {
+    _logoBytes = null;
+    _logoMimeType = null;
+    _logoRemoved = true;
+  });
 
   @override
   Widget build(BuildContext context) {
@@ -284,12 +351,92 @@ class _InstitutionSectionState extends State<_InstitutionSection>
             contactEmail: _val('contactEmail'),
             contactPhone: _val('contactPhone'),
             website: _val('website'),
+            logoBase64: _logoRemoved || _logoBytes == null
+                ? null
+                : base64Encode(_logoBytes!),
+            logoMimeType: _logoRemoved ? null : _logoMimeType,
           ),
           byName: name,
         );
       }, 'Institution profile saved'),
       child: Column(
         children: [
+          Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              ClipRRect(
+                borderRadius: BorderRadius.circular(14),
+                child: _logoBytes == null
+                    ? Container(
+                        height: 64,
+                        width: 64,
+                        alignment: Alignment.center,
+                        decoration: BoxDecoration(
+                          color: AppColors.canvas,
+                          borderRadius: BorderRadius.circular(14),
+                        ),
+                        child: Icon(
+                          Icons.image_outlined,
+                          color: AppColors.textMuted,
+                        ),
+                      )
+                    : Image.memory(
+                        _logoBytes!,
+                        height: 64,
+                        width: 64,
+                        fit: BoxFit.cover,
+                      ),
+              ),
+              const SizedBox(width: 14),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      'College logo',
+                      style: TextStyle(
+                        fontSize: 12.5,
+                        fontWeight: FontWeight.w600,
+                        color: AppColors.textMuted,
+                      ),
+                    ),
+                    const SizedBox(height: 2),
+                    Text(
+                      'Replaces the default mark in the sidebar. JPG/PNG/WebP, '
+                      'under ${_maxLogoBytes ~/ 1024} KB.',
+                      style: TextStyle(
+                        fontSize: 11.5,
+                        color: AppColors.textMuted,
+                      ),
+                    ),
+                    const SizedBox(height: 8),
+                    Row(
+                      children: [
+                        OutlinedButton.icon(
+                          onPressed: busy ? null : _pickLogo,
+                          icon: const Icon(
+                            Icons.upload_rounded,
+                            size: 16,
+                          ),
+                          label: Text(
+                            _logoBytes == null ? 'Upload logo' : 'Change logo',
+                          ),
+                        ),
+                        if (_logoBytes != null) ...[
+                          const SizedBox(width: 10),
+                          TextButton(
+                            onPressed: busy ? null : _removeLogo,
+                            child: const Text('Remove'),
+                          ),
+                        ],
+                      ],
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 18),
           Row(
             children: [
               Expanded(
@@ -358,8 +505,13 @@ class _InstitutionSectionState extends State<_InstitutionSection>
 class _ThemeSection extends StatefulWidget {
   final String collegeId;
   final AppTheming value;
+  final String? logoBase64;
 
-  const _ThemeSection({required this.collegeId, required this.value});
+  const _ThemeSection({
+    required this.collegeId,
+    required this.value,
+    this.logoBase64,
+  });
 
   @override
   State<_ThemeSection> createState() => _ThemeSectionState();
@@ -442,7 +594,11 @@ class _ThemeSectionState extends State<_ThemeSection> with _Saving {
           const SizedBox(height: 20),
           Row(
             children: [
-              HomiLogo(size: 54, background: chosen.color),
+              WorkspaceLogo(
+                logoBase64: widget.logoBase64,
+                size: 54,
+                background: chosen.color,
+              ),
               const SizedBox(width: 16),
               Expanded(
                 child: Column(

@@ -43,6 +43,7 @@ class _FinesOverviewViewState extends State<FinesOverviewView> {
   String? _regNo;
   String? _officeOrder;
   String? _room;
+  String? _year;
 
   /// Hostel display name -> short code ("Birbal Sahni House" -> "BH-01").
   ///
@@ -73,16 +74,17 @@ class _FinesOverviewViewState extends State<FinesOverviewView> {
       (_status == null || f.status.name == _status) &&
       (_regNo == null || f.studentRegNo == _regNo) &&
       (_officeOrder == null || f.officeOrderNo == _officeOrder) &&
-      (_room == null || f.roomNumber == _room);
+      (_room == null || f.roomNumber == _room) &&
+      (_year == null || '${f.createdAt?.year}' == _year);
 
   bool get _anyFilter =>
       _hostel != null || _batch != null || _sem != null || _trade != null ||
       _state != null || _status != null || _regNo != null ||
-      _officeOrder != null || _room != null;
+      _officeOrder != null || _room != null || _year != null;
 
   void _clearAll() => setState(() {
     _hostel = _batch = _sem = _trade = _state = null;
-    _status = _regNo = _officeOrder = _room = null;
+    _status = _regNo = _officeOrder = _room = _year = null;
   });
 
   @override
@@ -134,11 +136,13 @@ class _FinesOverviewViewState extends State<FinesOverviewView> {
               officeOrder: _officeOrder,
               room: _room,
               status: _status,
+              year: _year,
               onRegNo: (v) => setState(() => _regNo = v),
               onHostel: (v) => setState(() => _hostel = v),
               onOfficeOrder: (v) => setState(() => _officeOrder = v),
               onRoom: (v) => setState(() => _room = v),
               onStatus: (v) => setState(() => _status = v),
+              onYear: (v) => setState(() => _year = v),
             ),
             const SizedBox(height: 14),
             // Charts on the left, slicer rail down the right — the report's
@@ -324,11 +328,13 @@ class _Filters extends StatelessWidget {
   final String? officeOrder;
   final String? room;
   final String? status;
+  final String? year;
   final ValueChanged<String?> onRegNo;
   final ValueChanged<String?> onHostel;
   final ValueChanged<String?> onOfficeOrder;
   final ValueChanged<String?> onRoom;
   final ValueChanged<String?> onStatus;
+  final ValueChanged<String?> onYear;
 
   const _Filters({
     required this.all,
@@ -338,59 +344,74 @@ class _Filters extends StatelessWidget {
     required this.officeOrder,
     required this.room,
     required this.status,
+    required this.year,
     required this.onRegNo,
     required this.onHostel,
     required this.onOfficeOrder,
     required this.onRoom,
     required this.onStatus,
+    required this.onYear,
   });
 
   @override
-  Widget build(BuildContext context) => AppCard(
-    padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
-    child: Wrap(
-      spacing: 12,
-      runSpacing: 12,
-      children: [
-        _Drop(
-          label: 'Student Registration Number',
-          value: regNo,
-          options: all.valuesOf((f) => f.studentRegNo),
-          onChanged: onRegNo,
-          width: 236,
-        ),
-        _Drop(
-          label: 'Hostel',
-          value: hostel,
-          options: all.valuesOf((f) => hostelLabel(f.hostelName)),
-          onChanged: onHostel,
-          width: 150,
-        ),
-        _Drop(
-          label: 'Office Order',
-          value: officeOrder,
-          options: all.valuesOf((f) => f.officeOrderNo),
-          onChanged: onOfficeOrder,
-          width: 200,
-        ),
-        _Drop(
-          label: 'Hostel Room No.',
-          value: room,
-          options: all.valuesOf((f) => f.roomNumber),
-          onChanged: onRoom,
-          width: 160,
-        ),
-        _Drop(
-          label: 'Status',
-          value: status,
-          options: FineStatus.values.map((s) => s.name).toList(),
-          labelFor: (v) => FineStatusX.parse(v).label,
-          onChanged: onStatus,
-          width: 150,
-        ),
-      ],
-    ),
-  );
+  Widget build(BuildContext context) {
+    // Newest year first — that's the one most people are filtering for.
+    final years = all.valuesOf((f) => f.createdAt?.year.toString())
+      ..sort((a, b) => b.compareTo(a));
+
+    return AppCard(
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+      child: Wrap(
+        spacing: 12,
+        runSpacing: 12,
+        children: [
+          _Drop(
+            label: 'Student Registration Number',
+            value: regNo,
+            options: all.valuesOf((f) => f.studentRegNo),
+            onChanged: onRegNo,
+            width: 236,
+          ),
+          _Drop(
+            label: 'Hostel',
+            value: hostel,
+            options: all.valuesOf((f) => hostelLabel(f.hostelName)),
+            onChanged: onHostel,
+            width: 150,
+          ),
+          _Drop(
+            label: 'Office Order',
+            value: officeOrder,
+            options: all.valuesOf((f) => f.officeOrderNo),
+            onChanged: onOfficeOrder,
+            width: 200,
+          ),
+          _Drop(
+            label: 'Hostel Room No.',
+            value: room,
+            options: all.valuesOf((f) => f.roomNumber),
+            onChanged: onRoom,
+            width: 160,
+          ),
+          _Drop(
+            label: 'Status',
+            value: status,
+            options: FineStatus.values.map((s) => s.name).toList(),
+            labelFor: (v) => FineStatusX.parse(v).label,
+            onChanged: onStatus,
+            width: 150,
+          ),
+          _Drop(
+            label: 'Year',
+            value: year,
+            options: years,
+            onChanged: onYear,
+            width: 110,
+          ),
+        ],
+      ),
+    );
+  }
 }
 
 class _Drop extends StatelessWidget {

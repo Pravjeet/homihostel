@@ -1,3 +1,5 @@
+import 'dart:typed_data';
+
 import 'package:flutter/material.dart';
 import 'package:url_launcher/url_launcher.dart';
 
@@ -27,12 +29,35 @@ class _OfficeOrdersPageState extends State<OfficeOrdersPage> {
   String _query = '';
   DateTime? _onDate;
 
-  Future<void> _open(String url) async {
+  /// Opens an order the right way for how it was published.
+  ///
+  /// Photo orders open in a viewer inside the app; the older link-based ones
+  /// still hand off to the browser. Both paths stay because the register
+  /// contains a mix and always will.
+  Future<void> _open(OfficeOrder order) async {
+    if (order.hasImage) {
+      final bytes = decodedOrderImage(order);
+      if (bytes != null) {
+        await showDialog<void>(
+          context: context,
+          barrierColor: Colors.black.withValues(alpha: 0.86),
+          builder: (_) => _OrderViewer(order: order, bytes: bytes),
+        );
+        return;
+      }
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('That photo could not be read')),
+        );
+      }
+      return;
+    }
+
     final messenger = ScaffoldMessenger.of(context);
-    final uri = Uri.tryParse(url);
-    if (uri == null) {
+    final uri = Uri.tryParse(order.pdfUrl ?? '');
+    if (uri == null || !order.hasLink) {
       messenger.showSnackBar(
-        const SnackBar(content: Text('That order has no usable link')),
+        const SnackBar(content: Text('That order has no photo or link')),
       );
       return;
     }
@@ -226,7 +251,7 @@ class _OfficeOrdersPageState extends State<OfficeOrdersPage> {
                           session.user.isSuperAdmin ||
                           (canManage &&
                               shown[i].postedByUid == session.user.uid),
-                      onOpen: () => _open(shown[i].pdfUrl),
+                      onOpen: () => _open(shown[i]),
                       onDelete: () => _confirmDelete(collegeId, shown[i]),
                     ),
                     if (i != shown.length - 1)
@@ -255,6 +280,154 @@ String _labelFor(DateTime d) {
   return '${d.day} ${months[d.month - 1]} ${d.year}';
 }
 
+/// The order's own photo as a 42px square, so the register is scannable by
+/// sight — most people recognise the letterhead faster than they read the
+/// order number. Falls back to an icon for the older link-based orders.
+class _Thumb extends StatelessWidget {
+  final OfficeOrder order;
+  const _Thumb({required this.order});
+
+  @override
+  Widget build(BuildContext context) {
+    final bytes = decodedOrderImage(order);
+
+    if (bytes == null) {
+      return Container(
+        height: 42,
+        width: 42,
+        alignment: Alignment.center,
+        decoration: BoxDecoration(
+          color: AppColors.primarySoft,
+          borderRadius: BorderRadius.circular(12),
+        ),
+        child: Icon(
+          order.hasLink ? Icons.link_rounded : Icons.description_rounded,
+          size: 20,
+          color: AppColors.primary,
+        ),
+      );
+    }
+
+    return ClipRRect(
+      borderRadius: BorderRadius.circular(12),
+      child: Image.memory(
+        bytes,
+        height: 42,
+        width: 42,
+        fit: BoxFit.cover,
+        // Decoded down to roughly the size actually painted. Without this
+        // Flutter holds the full-resolution bitmap in memory for every row.
+        cacheWidth: 128,
+        filterQuality: FilterQuality.low,
+        errorBuilder: (context, _, _) => Container(
+          height: 42,
+          width: 42,
+          alignment: Alignment.center,
+          decoration: BoxDecoration(
+            color: AppColors.dangerSoft,
+            borderRadius: BorderRadius.circular(12),
+          ),
+          child: Icon(
+            Icons.broken_image_rounded,
+            size: 18,
+            color: AppColors.danger,
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+/// Full-size viewer for a photographed order.
+///
+/// [InteractiveViewer] is the point of this screen: a phone photo of an A4
+/// order is unreadable at fit-to-screen, so pinch and drag to zoom is what
+/// makes the feature usable at all.
+class _OrderViewer extends StatelessWidget {
+  final OfficeOrder order;
+  final Uint8List bytes;
+
+  const _OrderViewer({required this.order, required this.bytes});
+
+  @override
+  Widget build(BuildContext context) {
+    return Dialog(
+      backgroundColor: Colors.transparent,
+      insetPadding: const EdgeInsets.all(24),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Container(
+            padding: const EdgeInsets.fromLTRB(18, 14, 10, 14),
+            decoration: BoxDecoration(
+              color: AppColors.card,
+              borderRadius: const BorderRadius.vertical(
+                top: Radius.circular(14),
+              ),
+            ),
+            child: Row(
+              children: [
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Text(
+                        order.title.isEmpty ? order.orderNo : order.title,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: const TextStyle(
+                          fontSize: 15,
+                          fontWeight: FontWeight.w700,
+                        ),
+                      ),
+                      const SizedBox(height: 2),
+                      Text(
+                        [
+                          if (order.orderNo.isNotEmpty) order.orderNo,
+                          if (order.dateLabel != null) order.dateLabel!,
+                          order.postedByName,
+                        ].join('  ·  '),
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: TextStyle(
+                          fontSize: 12.5,
+                          color: AppColors.textMuted,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+                IconButton(
+                  onPressed: () => Navigator.pop(context),
+                  icon: const Icon(Icons.close_rounded),
+                  tooltip: 'Close',
+                ),
+              ],
+            ),
+          ),
+          Flexible(
+            child: Container(
+              decoration: BoxDecoration(
+                color: Colors.black,
+                borderRadius: const BorderRadius.vertical(
+                  bottom: Radius.circular(14),
+                ),
+              ),
+              clipBehavior: Clip.antiAlias,
+              child: InteractiveViewer(
+                minScale: 1,
+                maxScale: 5,
+                child: Image.memory(bytes, fit: BoxFit.contain),
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
 class _OrderRow extends StatelessWidget {
   final OfficeOrder order;
   final bool canDelete;
@@ -276,20 +449,7 @@ class _OrderRow extends StatelessWidget {
         padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 14),
         child: Row(
           children: [
-            Container(
-              height: 42,
-              width: 42,
-              alignment: Alignment.center,
-              decoration: BoxDecoration(
-                color: AppColors.primarySoft,
-                borderRadius: BorderRadius.circular(12),
-              ),
-              child: Icon(
-                Icons.picture_as_pdf_rounded,
-                size: 20,
-                color: AppColors.primary,
-              ),
-            ),
+            _Thumb(order: order),
             const SizedBox(width: 14),
             Expanded(
               child: Column(
@@ -333,8 +493,13 @@ class _OrderRow extends StatelessWidget {
             const SizedBox(width: 10),
             TextButton.icon(
               onPressed: onOpen,
-              icon: const Icon(Icons.open_in_new_rounded, size: 16),
-              label: const Text('Open'),
+              icon: Icon(
+                order.hasImage
+                    ? Icons.zoom_in_rounded
+                    : Icons.open_in_new_rounded,
+                size: 16,
+              ),
+              label: Text(order.hasImage ? 'View' : 'Open'),
             ),
             if (canDelete)
               PopupMenuButton<String>(

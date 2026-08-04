@@ -1,3 +1,6 @@
+import 'dart:convert';
+import 'dart:typed_data';
+
 import 'package:cloud_firestore/cloud_firestore.dart';
 
 import '../models/app_user.dart';
@@ -32,12 +35,17 @@ class OfficeOrderService {
 
   // ------------------------------ writes -----------------------------
 
+  /// Publishes an order as a photo, base64-encoded into the document itself
+  /// — there's no Firebase Storage on the free plan. [imageBytes] should
+  /// already be under the ~700 KB cap the publish form enforces; base64 adds
+  /// ~33% on top of that, and a Firestore document tops out around 1 MB.
   Future<String> publish({
     required String collegeId,
     required AppUser author,
     required String orderNo,
     required String title,
-    required String pdfUrl,
+    required Uint8List imageBytes,
+    required String imageMimeType,
     String? description,
     DateTime? orderDate,
   }) async {
@@ -50,7 +58,8 @@ class OfficeOrderService {
           ? null
           : description.trim(),
       orderDate: orderDate,
-      pdfUrl: pdfUrl.trim(),
+      imageBase64: base64Encode(imageBytes),
+      imageMimeType: imageMimeType,
       postedByUid: author.uid,
       postedByName: author.name,
     );

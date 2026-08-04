@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
 import '../screens/pages/allotment_page.dart';
+import '../screens/pages/audit_page.dart';
 import '../screens/pages/fees_page.dart';
 import '../screens/pages/fines_page.dart';
 import '../screens/pages/hostels_page.dart';
@@ -184,6 +185,13 @@ const List<NavSection> _allSections = [
         requires: [Perm.settingsManage],
         builder: _settings,
       ),
+      NavItem(
+        id: 'audit',
+        label: 'Activity Log',
+        icon: Icons.history_rounded,
+        requires: [Perm.settingsManage],
+        builder: _audit,
+      ),
     ],
   ),
 ];
@@ -224,3 +232,4 @@ Widget _fines(BuildContext c) => const FinesPage();
 Widget _fees(BuildContext c) => const FeesPage();
 Widget _officeOrders(BuildContext c) => const OfficeOrdersPage();
 Widget _settings(BuildContext c) => const SettingsPage();
+Widget _audit(BuildContext c) => const AuditPage();

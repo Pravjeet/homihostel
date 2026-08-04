@@ -1,8 +1,79 @@
+import 'dart:convert';
 import 'dart:math' as math;
+import 'dart:typed_data';
 
 import 'package:flutter/material.dart';
 
 import 'theme.dart';
+
+/// The mark shown in the sidebar: a college's own uploaded photo if it has
+/// one, otherwise the drawn [HomiLogo]. Kept as one widget so every call
+/// site gets the fallback for free instead of repeating the null check.
+class WorkspaceLogo extends StatelessWidget {
+  final String? logoBase64;
+  final double size;
+  final Color? background;
+  final bool bare;
+
+  const WorkspaceLogo({
+    super.key,
+    required this.logoBase64,
+    this.size = 56,
+    this.background,
+    this.bare = false,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final bytes = _decodeLogo(logoBase64);
+    if (bytes == null) {
+      return HomiLogo(size: size, background: background, bare: bare);
+    }
+
+    final image = Image.memory(
+      bytes,
+      fit: BoxFit.cover,
+      // A stored photo that fails to decode (truncated write, corrupt data)
+      // shouldn't blank the sidebar — fall back exactly as if none was set.
+      errorBuilder: (_, __, ___) =>
+          HomiLogo(size: size, background: background, bare: bare),
+    );
+
+    if (bare) {
+      return ClipRRect(
+        borderRadius: BorderRadius.circular(size * 0.28),
+        child: SizedBox.square(dimension: size, child: image),
+      );
+    }
+
+    return Container(
+      height: size,
+      width: size,
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(size * 0.28),
+        boxShadow: [
+          BoxShadow(
+            color: (background ?? AppColors.primary).withValues(alpha: 0.32),
+            blurRadius: size * 0.22,
+            offset: Offset(0, size * 0.08),
+          ),
+        ],
+      ),
+      clipBehavior: Clip.antiAlias,
+      child: image,
+    );
+  }
+}
+
+Uint8List? _decodeLogo(String? base64) {
+  if (base64 == null || base64.isEmpty) return null;
+  try {
+    return base64Decode(base64);
+  } catch (_) {
+    return null;
+  }
+}
 
 /// The Homi Hostel mark.
 ///

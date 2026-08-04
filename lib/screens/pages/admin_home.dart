@@ -207,6 +207,39 @@ class _Data {
     return residents.where((r) => !paid.contains(r.uid)).length;
   }
 
+  /// The last 7 periods, oldest first — the x-axis every trend here shares.
+  List<String> get trendPeriods =>
+      recentPeriods(DateTime.now(), count: 7).reversed.toList();
+
+  /// Head-count at the END of each period, from users' `createdAt`.
+  ///
+  /// Cumulative rather than per-month arrivals: the tile shows a total, so a
+  /// sparkline of monthly intake underneath it would be a different quantity
+  /// wearing the same label.
+  List<num> growthOf(bool Function(AppUser) test) {
+    final matched = users.where(test).toList();
+    return [
+      for (final p in trendPeriods)
+        matched
+            .where(
+              (u) =>
+                  u.createdAt == null || periodOf(u.createdAt!).compareTo(p) <= 0,
+            )
+            .length,
+    ];
+  }
+
+  /// How many matching users first appeared this month.
+  int addedThisMonth(bool Function(AppUser) test) => users
+      .where(test)
+      .where((u) => u.createdAt != null && periodOf(u.createdAt!) == thisPeriod)
+      .length;
+
+  List<num> get feeTrend => [
+    for (final p in trendPeriods)
+      fees.where((f) => f.period == p).fold<num>(0, (a, f) => a + f.amount),
+  ];
+
   /// Things a warden should actually look at. Counted, not guessed — an alert
   /// tile that invents urgency trains people to ignore it.
   List<String> get alerts => [
@@ -293,6 +326,11 @@ class _KpiStrip extends StatelessWidget {
   Widget build(BuildContext context) {
     final symbol = data.mess.currencySymbol;
 
+    final newResidents = data.addedThisMonth((u) => u.isAllotted);
+    final newStaff = data.addedThisMonth(
+      (u) => !u.isAllotted && !u.isSuperAdmin,
+    );
+
     final cells = <Widget>[
       _Kpi(
         icon: Icons.school_rounded,
@@ -300,6 +338,8 @@ class _KpiStrip extends StatelessWidget {
         value: '${data.residents.length}',
         sub: '${data.users.length} people in total',
         navId: 'users',
+        delta: newResidents > 0 ? '$newResidents this month' : null,
+        spark: data.growthOf((u) => u.isAllotted),
       ),
       _Kpi(
         icon: Icons.badge_rounded,
@@ -309,6 +349,8 @@ class _KpiStrip extends StatelessWidget {
             ? 'All have a role'
             : '${data.unassigned} awaiting a role',
         navId: 'users',
+        delta: newStaff > 0 ? '$newStaff this month' : null,
+        spark: data.growthOf((u) => !u.isAllotted && !u.isSuperAdmin),
       ),
       _Kpi(
         icon: Icons.grid_view_rounded,
@@ -328,6 +370,7 @@ class _KpiStrip extends StatelessWidget {
             ? '$symbol${_compact(data.messPending)} still due'
             : 'Set a mess charge',
         navId: 'fees',
+        spark: data.feeTrend,
       ),
       _Kpi(
         icon: Icons.assignment_rounded,
@@ -400,6 +443,13 @@ class _Kpi extends StatelessWidget {
   final bool alert;
   final bool warn;
 
+  /// "12 this month" — shown with an up-arrow before [sub]. Only ever passed
+  /// when there is a real figure behind it; a decorative trend arrow is a lie.
+  final String? delta;
+
+  /// Seven points, oldest first. Drawn small in the corner.
+  final List<num>? spark;
+
   const _Kpi({
     required this.icon,
     required this.label,
@@ -408,6 +458,8 @@ class _Kpi extends StatelessWidget {
     this.navId,
     this.alert = false,
     this.warn = false,
+    this.delta,
+    this.spark,
   });
 
   @override
@@ -420,67 +472,169 @@ class _Kpi extends StatelessWidget {
         ? AppColors.warning
         : AppColors.textStrong;
 
+    // The sparkline sits in the bottom-right corner, behind the text — the
+    // trend is ambient context, not something to read precisely.
+    final hasSpark =
+        spark != null &&
+        spark!.length > 1 &&
+        spark!.any((v) => v > 0) &&
+        spark!.toSet().length > 1;
+
     return InkWell(
       onTap: canGo ? () => nav!.goTo(navId!) : null,
-      child: Padding(
-        padding: const EdgeInsets.fromLTRB(17, 15, 17, 15),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Row(
-              children: [
-                Icon(
-                  icon,
-                  size: 14,
-                  color: alert ? AppColors.danger : AppColors.textMuted,
+      child: Stack(
+        children: [
+          if (hasSpark)
+            Positioned(
+              right: 14,
+              bottom: 12,
+              child: CustomPaint(
+                size: const Size(52, 20),
+                painter: _SparkPainter(
+                  values: spark!,
+                  colour: alert ? AppColors.danger : AppColors.success,
                 ),
-                const SizedBox(width: 7),
-                Expanded(
+              ),
+            ),
+          Padding(
+            padding: const EdgeInsets.fromLTRB(17, 15, 17, 15),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Row(
+                  children: [
+                    Icon(
+                      icon,
+                      size: 14,
+                      color: alert ? AppColors.danger : AppColors.textMuted,
+                    ),
+                    const SizedBox(width: 7),
+                    Expanded(
+                      child: Text(
+                        label,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: TextStyle(
+                          fontSize: 11.5,
+                          fontWeight: FontWeight.w600,
+                          color: AppColors.textMuted,
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 9),
+                FittedBox(
+                  fit: BoxFit.scaleDown,
+                  alignment: Alignment.centerLeft,
                   child: Text(
-                    label,
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
+                    value,
                     style: TextStyle(
-                      fontSize: 11.5,
-                      fontWeight: FontWeight.w600,
-                      color: AppColors.textMuted,
+                      fontSize: 24,
+                      fontWeight: FontWeight.w700,
+                      letterSpacing: -0.6,
+                      height: 1.1,
+                      color: tone,
+                      fontFeatures: const [FontFeature.tabularFigures()],
                     ),
                   ),
                 ),
+                const SizedBox(height: 6),
+                Row(
+                  children: [
+                    if (delta != null) ...[
+                      Icon(
+                        Icons.arrow_upward_rounded,
+                        size: 11,
+                        color: AppColors.success,
+                      ),
+                      Text(
+                        delta!,
+                        style: TextStyle(
+                          fontSize: 11.5,
+                          fontWeight: FontWeight.w600,
+                          color: AppColors.success,
+                        ),
+                      ),
+                    ] else
+                      Flexible(
+                        child: Text(
+                          sub,
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: TextStyle(
+                            fontSize: 11.5,
+                            color: canGo
+                                ? AppColors.primary
+                                : AppColors.textMuted,
+                            fontWeight: canGo
+                                ? FontWeight.w600
+                                : FontWeight.w400,
+                          ),
+                        ),
+                      ),
+                  ],
+                ),
               ],
             ),
-            const SizedBox(height: 9),
-            FittedBox(
-              fit: BoxFit.scaleDown,
-              alignment: Alignment.centerLeft,
-              child: Text(
-                value,
-                style: TextStyle(
-                  fontSize: 24,
-                  fontWeight: FontWeight.w700,
-                  letterSpacing: -0.6,
-                  height: 1.1,
-                  color: tone,
-                  fontFeatures: const [FontFeature.tabularFigures()],
-                ),
-              ),
-            ),
-            const SizedBox(height: 6),
-            Text(
-              sub,
-              maxLines: 1,
-              overflow: TextOverflow.ellipsis,
-              style: TextStyle(
-                fontSize: 11.5,
-                color: canGo ? AppColors.primary : AppColors.textMuted,
-                fontWeight: canGo ? FontWeight.w600 : FontWeight.w400,
-              ),
-            ),
-          ],
-        ),
+          ),
+        ],
       ),
     );
+  }
+}
+
+/// A 52×20 trend line. Hand-painted rather than a chart widget — at this size
+/// axes, tooltips and touch handling are all overhead for something the eye
+/// reads as a single gesture.
+class _SparkPainter extends CustomPainter {
+  final List<num> values;
+  final Color colour;
+
+  const _SparkPainter({required this.values, required this.colour});
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    if (values.length < 2) return;
+
+    final lo = values.reduce(math.min).toDouble();
+    final hi = values.reduce(math.max).toDouble();
+    // A flat series would divide by zero; draw it down the middle instead.
+    final span = (hi - lo).abs() < 0.0001 ? 1.0 : hi - lo;
+
+    final path = Path();
+    for (var i = 0; i < values.length; i++) {
+      final x = size.width * (i / (values.length - 1));
+      final y = size.height - ((values[i] - lo) / span) * size.height;
+      if (i == 0) {
+        path.moveTo(x, y);
+      } else {
+        path.lineTo(x, y);
+      }
+    }
+
+    canvas.drawPath(
+      path,
+      Paint()
+        ..color = colour.withValues(alpha: 0.55)
+        ..style = PaintingStyle.stroke
+        ..strokeWidth = 1.6
+        ..strokeCap = StrokeCap.round
+        ..strokeJoin = StrokeJoin.round,
+    );
+  }
+
+  @override
+  bool shouldRepaint(_SparkPainter old) =>
+      old.colour != colour || !_same(old.values, values);
+
+  static bool _same(List<num> a, List<num> b) {
+    if (a.length != b.length) return false;
+    for (var i = 0; i < a.length; i++) {
+      if (a[i] != b[i]) return false;
+    }
+    return true;
   }
 }
 

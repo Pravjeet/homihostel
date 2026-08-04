@@ -2,6 +2,7 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 
 import '../models/app_user.dart';
 import '../models/fee.dart';
+import 'audit_service.dart';
 
 /// Mess-fee status records, at `colleges/{collegeId}/feeRecords/{period_uid}`.
 ///
@@ -76,7 +77,7 @@ class FeeService {
     DateTime? paidOn,
     String? method,
     String? note,
-  }) {
+  }) async {
     final id = feeDocId(period, student.uid);
     final record = FeeRecord(
       id: id,
@@ -98,10 +99,20 @@ class FeeService {
       recordedByName: recordedBy.name,
     );
 
-    return _col(collegeId).doc(id).set({
+    await _col(collegeId).doc(id).set({
       ...record.toMap(),
       'createdAt': FieldValue.serverTimestamp(),
     });
+
+    await AuditService.instance.record(
+      collegeId: collegeId,
+      actor: recordedBy,
+      action: 'fee.markPaid',
+      summary: 'Recorded ${student.name} paid ${periodLabel(period)}',
+      targetLabel: student.name,
+      path: 'colleges/$collegeId/feeRecords/$id',
+      reversible: true,
+    );
   }
 
   /// Undoes a payment record, returning the student to unpaid.
@@ -112,7 +123,27 @@ class FeeService {
     required String collegeId,
     required String period,
     required String studentUid,
-  }) => _col(collegeId).doc(feeDocId(period, studentUid)).delete();
+    AppUser? actor,
+  }) async {
+    final id = feeDocId(period, studentUid);
+    final ref = _col(collegeId).doc(id);
+    final before = (await ref.get()).data();
+    await ref.delete();
+
+    if (actor != null && before != null) {
+      await AuditService.instance.record(
+        collegeId: collegeId,
+        actor: actor,
+        action: 'fee.markUnpaid',
+        summary: 'Un-marked ${before['studentName']} for '
+            '${periodLabel(period)}',
+        targetLabel: '${before['studentName']}',
+        path: 'colleges/$collegeId/feeRecords/$id',
+        before: before,
+        reversible: true,
+      );
+    }
+  }
 
   /// Marks a whole list paid in one go, for a warden working down a hostel.
   ///

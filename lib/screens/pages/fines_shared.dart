@@ -78,7 +78,11 @@ class FineRow extends StatelessWidget {
           ),
         );
         if (ok != true) return;
-        await FineService.instance.remove(collegeId: collegeId, fine: fine);
+        await FineService.instance.remove(
+          collegeId: collegeId,
+          fine: fine,
+          actor: session.user,
+        );
         messenger.showSnackBar(const SnackBar(content: Text('Fine removed')));
         return;
       }
