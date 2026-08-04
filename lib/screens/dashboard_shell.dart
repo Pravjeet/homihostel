@@ -73,9 +73,21 @@ class _DashboardShellState extends State<DashboardShell> {
                       constraints: const BoxConstraints(maxWidth: 1400),
                       // KeyedSubtree forces a fresh state when the page
                       // changes, so stale form state never leaks across pages.
-                      child: KeyedSubtree(
-                        key: ValueKey(current.id),
-                        child: Builder(builder: current.builder),
+                      child: DashboardNav(
+                        // Lets a page send the user somewhere else in the
+                        // sidebar — a "Raise a request" button on the
+                        // dashboard should actually open Requests, not just
+                        // name it.
+                        goTo: (id) {
+                          if (items.any((i) => i.id == id)) {
+                            setState(() => _selectedId = id);
+                          }
+                        },
+                        canReach: (id) => items.any((i) => i.id == id),
+                        child: KeyedSubtree(
+                          key: ValueKey(current.id),
+                          child: Builder(builder: current.builder),
+                        ),
                       ),
                     ),
                   ),
@@ -87,6 +99,29 @@ class _DashboardShellState extends State<DashboardShell> {
       ),
     );
   }
+}
+
+/// Lets any page inside the shell jump to another sidebar entry.
+///
+/// [canReach] matters as much as [goTo]: a page should not offer a shortcut
+/// to something the current user's permissions have filtered out of the
+/// sidebar, or the button would silently do nothing.
+class DashboardNav extends InheritedWidget {
+  final void Function(String navId) goTo;
+  final bool Function(String navId) canReach;
+
+  const DashboardNav({
+    super.key,
+    required this.goTo,
+    required this.canReach,
+    required super.child,
+  });
+
+  static DashboardNav? maybeOf(BuildContext context) =>
+      context.dependOnInheritedWidgetOfExactType<DashboardNav>();
+
+  @override
+  bool updateShouldNotify(DashboardNav oldWidget) => false;
 }
 
 class _Sidebar extends StatelessWidget {
@@ -109,7 +144,7 @@ class _Sidebar extends StatelessWidget {
     final session = Session.of(context);
 
     return AnimatedContainer(
-      duration: const Duration(milliseconds: 180),
+      duration: Duration(milliseconds: 180),
       width: expanded ? 262 : 80,
       color: AppColors.sidebar,
       child: Column(
@@ -119,7 +154,7 @@ class _Sidebar extends StatelessWidget {
             height: 88,
             width: double.infinity,
             color: AppColors.sidebarDeep,
-            padding: const EdgeInsets.symmetric(horizontal: 18),
+            padding: EdgeInsets.symmetric(horizontal: 18),
             child: Row(
               children: [
                 const HomiLogo(size: 40),
@@ -385,7 +420,7 @@ class _TopBar extends StatelessWidget {
                 const SizedBox(height: 3),
                 Text(
                   'Welcome back, ${session.user.name.split(' ').first}',
-                  style: const TextStyle(
+                  style: TextStyle(
                     color: AppColors.textMuted,
                     fontSize: 13.5,
                   ),
@@ -395,7 +430,7 @@ class _TopBar extends StatelessWidget {
           ),
           Text(
             '${now.day} ${_month(now.month)} ${now.year}',
-            style: const TextStyle(
+            style: TextStyle(
               color: AppColors.textMuted,
               fontSize: 13,
               fontWeight: FontWeight.w600,
@@ -407,7 +442,7 @@ class _TopBar extends StatelessWidget {
             backgroundColor: AppColors.primarySoft,
             child: Text(
               session.user.initials,
-              style: const TextStyle(
+              style: TextStyle(
                 color: AppColors.primary,
                 fontWeight: FontWeight.w700,
               ),

@@ -65,7 +65,7 @@ class _ProfilePageState extends State<ProfilePage> {
                   backgroundColor: AppColors.primarySoft,
                   child: Text(
                     user.initials,
-                    style: const TextStyle(
+                    style: TextStyle(
                       color: AppColors.primary,
                       fontWeight: FontWeight.w800,
                       fontSize: 20,
@@ -87,7 +87,7 @@ class _ProfilePageState extends State<ProfilePage> {
                       const SizedBox(height: 3),
                       Text(
                         Identity.display(user.email),
-                        style: const TextStyle(
+                        style: TextStyle(
                           color: AppColors.textMuted,
                           fontSize: 13.5,
                         ),

@@ -210,7 +210,7 @@ class _Metric extends StatelessWidget {
     children: [
       Text(
         label,
-        style: const TextStyle(
+        style: TextStyle(
           color: AppColors.textMuted,
           fontSize: 12,
           fontWeight: FontWeight.w600,
@@ -242,7 +242,7 @@ class _EmptyState extends StatelessWidget {
             color: AppColors.primarySoft,
             borderRadius: BorderRadius.circular(18),
           ),
-          child: const Icon(
+          child: Icon(
             Icons.apartment_rounded,
             size: 30,
             color: AppColors.primary,
@@ -258,7 +258,7 @@ class _EmptyState extends StatelessWidget {
         // which disqualifies it from being a const constructor.
         ConstrainedBox(
           constraints: const BoxConstraints(maxWidth: 420),
-          child: const Text(
+          child: Text(
             'Add your first hostel block. You describe the floors and rooms '
             'per floor, and every room is created for you.',
             textAlign: TextAlign.center,
@@ -331,7 +331,7 @@ class _HostelCard extends StatelessWidget {
                           : (hostel.name.trim().isEmpty
                                 ? '?'
                                 : hostel.name.trim()[0].toUpperCase()),
-                      style: const TextStyle(
+                      style: TextStyle(
                         color: AppColors.primary,
                         fontWeight: FontWeight.w800,
                         fontSize: 15,
@@ -357,7 +357,7 @@ class _HostelCard extends StatelessWidget {
                       Text(
                         '${hostel.gender.label} · ${hostel.floors} floor'
                         '${hostel.floors == 1 ? '' : 's'}',
-                        style: const TextStyle(
+                        style: TextStyle(
                           color: AppColors.textMuted,
                           fontSize: 12.5,
                         ),
@@ -370,7 +370,7 @@ class _HostelCard extends StatelessWidget {
                     icon: const Icon(Icons.more_horiz_rounded, size: 20),
                     onSelected: (v) =>
                         v == 'edit' ? onEdit() : onDelete(),
-                    itemBuilder: (_) => const [
+                    itemBuilder: (_) => [
                       PopupMenuItem(value: 'edit', child: Text('Edit details')),
                       PopupMenuItem(
                         value: 'delete',
@@ -394,7 +394,7 @@ class _HostelCard extends StatelessWidget {
             const SizedBox(height: 14),
             Row(
               children: [
-                const Text(
+                Text(
                   'Occupancy',
                   style: TextStyle(
                     fontSize: 12,
@@ -461,7 +461,7 @@ class _MiniStat extends StatelessWidget {
         ),
         Text(
           label,
-          style: const TextStyle(
+          style: TextStyle(
             color: AppColors.textMuted,
             fontSize: 11.5,
             fontWeight: FontWeight.w600,

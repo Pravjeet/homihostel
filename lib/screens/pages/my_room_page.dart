@@ -37,7 +37,7 @@ class MyRoomPage extends StatelessWidget {
 
           final room = roomSnap.data;
           if (room == null) {
-            return const AppCard(
+            return AppCard(
               child: Text(
                 'Your room record couldn\'t be found. It may have been '
                 'removed — please check with your warden.',
@@ -88,7 +88,7 @@ class _NotAllotted extends StatelessWidget {
             color: AppColors.warningSoft,
             borderRadius: BorderRadius.circular(18),
           ),
-          child: const Icon(
+          child: Icon(
             Icons.no_meeting_room_rounded,
             size: 30,
             color: AppColors.warning,
@@ -102,7 +102,7 @@ class _NotAllotted extends StatelessWidget {
         const SizedBox(height: 8),
         ConstrainedBox(
           constraints: const BoxConstraints(maxWidth: 420),
-          child: const Text(
+          child: Text(
             'Your warden hasn\'t assigned you a room yet. This page will fill '
             'in by itself as soon as they do.',
             textAlign: TextAlign.center,
@@ -140,7 +140,7 @@ class _RoomHeader extends StatelessWidget {
               ),
               child: Text(
                 room.number,
-                style: const TextStyle(
+                style: TextStyle(
                   color: AppColors.primary,
                   fontWeight: FontWeight.w800,
                   fontSize: 17,
@@ -163,7 +163,7 @@ class _RoomHeader extends StatelessWidget {
                   Text(
                     '${user.hostelName} · Floor ${room.floor} · '
                     '${room.capacityLabel}',
-                    style: const TextStyle(
+                    style: TextStyle(
                       color: AppColors.textMuted,
                       fontSize: 13.5,
                     ),
@@ -192,7 +192,7 @@ class _RoomHeader extends StatelessWidget {
           const SizedBox(height: 8),
           Text(
             room.note!,
-            style: const TextStyle(
+            style: TextStyle(
               fontSize: 13,
               color: AppColors.textMuted,
               fontStyle: FontStyle.italic,
@@ -243,7 +243,7 @@ class _Roommates extends StatelessWidget {
                       ? 'You have this room to yourself.'
                       : 'Nobody else has been allotted here yet — '
                             '${room.free} bed(s) still free.',
-                  style: const TextStyle(
+                  style: TextStyle(
                     color: AppColors.textMuted,
                     fontSize: 13.5,
                   ),
@@ -262,7 +262,7 @@ class _Roommates extends StatelessWidget {
                               backgroundColor: AppColors.primarySoft,
                               child: Text(
                                 m.initials,
-                                style: const TextStyle(
+                                style: TextStyle(
                                   color: AppColors.primary,
                                   fontWeight: FontWeight.w700,
                                   fontSize: 13,
@@ -287,7 +287,7 @@ class _Roommates extends StatelessWidget {
                                         if (m.course != null) m.course!,
                                         if (m.year != null) m.year!,
                                       ].join(' · '),
-                                      style: const TextStyle(
+                                      style: TextStyle(
                                         color: AppColors.textMuted,
                                         fontSize: 12.5,
                                       ),
@@ -298,7 +298,7 @@ class _Roommates extends StatelessWidget {
                             if (m.phone != null)
                               Text(
                                 m.phone!,
-                                style: const TextStyle(
+                                style: TextStyle(
                                   color: AppColors.textMuted,
                                   fontSize: 12.5,
                                   fontWeight: FontWeight.w600,

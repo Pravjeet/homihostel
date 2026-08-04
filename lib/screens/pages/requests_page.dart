@@ -91,7 +91,7 @@ class _RequestsPageState extends State<RequestsPage> {
                 showsQueue
                     ? 'Leave, complaints and room changes raised by residents.'
                     : 'Ask for leave, report a problem, or request a move.',
-                style: const TextStyle(
+                style: TextStyle(
                   fontSize: 13,
                   color: AppColors.textMuted,
                 ),
@@ -136,7 +136,7 @@ class _RequestsPageState extends State<RequestsPage> {
             onOpen: (r) => setState(() => _open = r),
           )
         else
-          const AppCard(
+          AppCard(
             padding: EdgeInsets.symmetric(vertical: 54),
             child: Center(
               child: Text(
@@ -285,7 +285,7 @@ class _QueueSection extends StatelessWidget {
                     filter == _Queue.open
                         ? 'Nothing waiting. All caught up.'
                         : 'Nothing matches that search.',
-                    style: const TextStyle(color: AppColors.textMuted),
+                    style: TextStyle(color: AppColors.textMuted),
                   ),
                 ),
               )
@@ -301,7 +301,7 @@ class _QueueSection extends StatelessWidget {
                         onTap: () => onOpen(shown[i]),
                       ),
                       if (i != shown.length - 1)
-                        const Divider(
+                        Divider(
                           height: 1,
                           indent: 20,
                           endIndent: 20,
@@ -363,7 +363,7 @@ class _MineSection extends StatelessWidget {
                     color: AppColors.primarySoft,
                     borderRadius: BorderRadius.circular(18),
                   ),
-                  child: const Icon(
+                  child: Icon(
                     Icons.assignment_turned_in_rounded,
                     size: 29,
                     color: AppColors.primary,
@@ -377,7 +377,7 @@ class _MineSection extends StatelessWidget {
                 const SizedBox(height: 8),
                 ConstrainedBox(
                   constraints: const BoxConstraints(maxWidth: 430),
-                  child: const Text(
+                  child: Text(
                     'Ask for leave, report something broken in your room, or '
                     'request a room change. You\'ll see the warden\'s reply '
                     'here.',
@@ -413,7 +413,7 @@ class _MineSection extends StatelessWidget {
                   onTap: () => onOpen(mine[i]),
                 ),
                 if (i != mine.length - 1)
-                  const Divider(
+                  Divider(
                     height: 1,
                     indent: 20,
                     endIndent: 20,
@@ -528,7 +528,7 @@ class _RequestRow extends StatelessWidget {
                         shortDate(request.createdAt),
                     ].join(' · '),
                     overflow: TextOverflow.ellipsis,
-                    style: const TextStyle(
+                    style: TextStyle(
                       color: AppColors.textMuted,
                       fontSize: 12.5,
                     ),
@@ -539,7 +539,7 @@ class _RequestRow extends StatelessWidget {
             const SizedBox(width: 10),
             StatusPill(request.status.label.toUpperCase(), c.fg, c.bg),
             const SizedBox(width: 6),
-            const Icon(
+            Icon(
               Icons.chevron_right_rounded,
               size: 20,
               color: AppColors.textMuted,
@@ -564,7 +564,7 @@ class _Metric extends StatelessWidget {
     children: [
       Text(
         label,
-        style: const TextStyle(
+        style: TextStyle(
           color: AppColors.textMuted,
           fontSize: 12,
           fontWeight: FontWeight.w600,

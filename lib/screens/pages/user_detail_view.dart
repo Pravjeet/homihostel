@@ -141,7 +141,7 @@ class _Header extends StatelessWidget {
             backgroundColor: AppColors.primarySoft,
             child: Text(
               user.initials,
-              style: const TextStyle(
+              style: TextStyle(
                 color: AppColors.primary,
                 fontWeight: FontWeight.w700,
                 fontSize: 15,
@@ -163,7 +163,7 @@ class _Header extends StatelessWidget {
                 const SizedBox(height: 3),
                 Text(
                   '${Identity.display(user.email)} · ${user.displayRole}',
-                  style: const TextStyle(
+                  style: TextStyle(
                     fontSize: 13,
                     color: AppColors.textMuted,
                   ),
@@ -172,7 +172,7 @@ class _Header extends StatelessWidget {
             ),
           ),
           if (!user.isActive)
-            const StatusPill(
+            StatusPill(
               'DISABLED',
               AppColors.danger,
               AppColors.dangerSoft,
@@ -250,7 +250,7 @@ class _FinesSection extends StatelessWidget {
                     isSelf
                         ? 'You have no fines.'
                         : '${user.name.split(' ').first} has no fines.',
-                    style: const TextStyle(
+                    style: TextStyle(
                       color: AppColors.textMuted,
                       fontSize: 13.5,
                     ),
@@ -284,7 +284,7 @@ class _FinesSection extends StatelessWidget {
                 const SizedBox(height: 8),
                 for (var i = 0; i < fines.length; i++) ...[
                   if (i != 0)
-                    const Divider(height: 1, color: AppColors.border),
+                    Divider(height: 1, color: AppColors.border),
                   Padding(
                     // FineRow brings its own horizontal padding, which would
                     // double up inside a card that already has some.
@@ -319,7 +319,7 @@ class _FineStat extends StatelessWidget {
     children: [
       Text(
         label,
-        style: const TextStyle(
+        style: TextStyle(
           fontSize: 11.5,
           fontWeight: FontWeight.w700,
           color: AppColors.textMuted,
@@ -785,7 +785,7 @@ class _RoomSection extends StatelessWidget {
                   u.isAllotted
                       ? 'Allotted room'
                       : 'This person hasn\'t been given a bed yet.',
-                  style: const TextStyle(
+                  style: TextStyle(
                     fontSize: 12.5,
                     color: AppColors.textMuted,
                   ),
@@ -801,7 +801,7 @@ class _RoomSection extends StatelessWidget {
               ),
               TextButton(
                 onPressed: () => _vacate(context, u),
-                child: const Text(
+                child: Text(
                   'Vacate',
                   style: TextStyle(color: AppColors.danger),
                 ),
@@ -864,7 +864,7 @@ class _SectionLabel extends StatelessWidget {
     padding: const EdgeInsets.only(bottom: 12),
     child: Text(
       text.toUpperCase(),
-      style: const TextStyle(
+      style: TextStyle(
         fontSize: 11,
         fontWeight: FontWeight.w800,
         letterSpacing: 0.9,
@@ -921,7 +921,7 @@ class _ErrorBox extends StatelessWidget {
     ),
     child: Text(
       message,
-      style: const TextStyle(color: AppColors.danger, fontSize: 13),
+      style: TextStyle(color: AppColors.danger, fontSize: 13),
     ),
   );
 }

@@ -228,11 +228,11 @@ class _Banner extends StatelessWidget {
         _Headline(
           compactAmount(summary.outstanding),
           'Still Outstanding',
-          accent: summary.outstanding == 0
+          accentOverride: summary.outstanding == 0
               ? AppColors.success
               : AppColors.danger,
         ),
-        const Expanded(
+        Expanded(
           child: Column(
             children: [
               Text(
@@ -256,8 +256,8 @@ class _Banner extends StatelessWidget {
         if (anyFilter)
           TextButton.icon(
             onPressed: onClear,
-            icon: const Icon(Icons.filter_alt_off_rounded, size: 17),
-            label: const Text('Clear filters'),
+            icon: Icon(Icons.filter_alt_off_rounded, size: 17),
+            label: Text('Clear filters'),
           ),
       ],
     ),
@@ -267,11 +267,16 @@ class _Banner extends StatelessWidget {
 class _Headline extends StatelessWidget {
   final String value;
   final String label;
-  final Color accent;
-  const _Headline(this.value, this.label, {this.accent = AppColors.primary});
+
+  /// Nullable so it resolves to the live accent rather than a colour baked in
+  /// at compile time.
+  final Color? accentOverride;
+  const _Headline(this.value, this.label, {this.accentOverride});
 
   @override
-  Widget build(BuildContext context) => Container(
+  Widget build(BuildContext context) {
+    final accent = accentOverride ?? AppColors.primary;
+    return Container(
     width: 168,
     padding: const EdgeInsets.symmetric(vertical: 12, horizontal: 14),
     decoration: BoxDecoration(
@@ -294,18 +299,19 @@ class _Headline extends StatelessWidget {
           ),
         ),
         const SizedBox(height: 2),
-        Text(
-          label,
-          textAlign: TextAlign.center,
-          style: const TextStyle(
-            fontSize: 11.5,
-            fontWeight: FontWeight.w600,
-            color: AppColors.textMuted,
+          Text(
+            label,
+            textAlign: TextAlign.center,
+            style: TextStyle(
+              fontSize: 11.5,
+              fontWeight: FontWeight.w600,
+              color: AppColors.textMuted,
+            ),
           ),
-        ),
-      ],
-    ),
-  );
+        ],
+      ),
+    );
+  }
 }
 
 // ------------------------------- filters -------------------------------
@@ -608,7 +614,7 @@ class _VBars extends StatelessWidget {
                 drawVerticalLine: false,
                 horizontalInterval: top / 4,
                 getDrawingHorizontalLine: (_) =>
-                    const FlLine(color: AppColors.border, strokeWidth: 1),
+                    FlLine(color: AppColors.border, strokeWidth: 1),
               ),
               borderData: FlBorderData(show: false),
               // Labels are drawn as always-on tooltips. Touch stays enabled so
@@ -625,7 +631,7 @@ class _VBars extends StatelessWidget {
                     money
                         ? compactAmount(rod.toY)
                         : rod.toY.toStringAsFixed(0),
-                    const TextStyle(
+                    TextStyle(
                       color: AppColors.textStrong,
                       fontSize: 10.5,
                       fontWeight: FontWeight.w700,
@@ -655,7 +661,7 @@ class _VBars extends StatelessWidget {
                       child: Text(
                         money ? compactAmount(v) : v.toStringAsFixed(0),
                         textAlign: TextAlign.right,
-                        style: const TextStyle(
+                        style: TextStyle(
                           fontSize: 10,
                           color: AppColors.textMuted,
                         ),
@@ -678,7 +684,7 @@ class _VBars extends StatelessWidget {
                           padding: const EdgeInsets.only(top: 5),
                           child: Text(
                             label,
-                            style: const TextStyle(
+                            style: TextStyle(
                               fontSize: 10,
                               color: AppColors.textMuted,
                               fontWeight: FontWeight.w600,
@@ -698,7 +704,7 @@ class _VBars extends StatelessWidget {
                                 label,
                                 maxLines: 1,
                                 overflow: TextOverflow.ellipsis,
-                                style: const TextStyle(
+                                style: TextStyle(
                                   fontSize: 9.5,
                                   color: AppColors.textMuted,
                                   fontWeight: FontWeight.w600,
@@ -735,7 +741,7 @@ class _VBars extends StatelessWidget {
         const SizedBox(height: 2),
         Text(
           axisTitle,
-          style: const TextStyle(
+          style: TextStyle(
             fontSize: 10.5,
             fontWeight: FontWeight.w700,
             color: AppColors.textMuted,
@@ -791,7 +797,7 @@ class _HBars extends StatelessWidget {
           quarterTurns: 3,
           child: Text(
             axisTitle,
-            style: const TextStyle(
+            style: TextStyle(
               fontSize: 10.5,
               fontWeight: FontWeight.w700,
               color: AppColors.textMuted,
@@ -820,7 +826,7 @@ class _HBars extends StatelessWidget {
                           textAlign: TextAlign.right,
                           maxLines: 1,
                           overflow: TextOverflow.ellipsis,
-                          style: const TextStyle(
+                          style: TextStyle(
                             fontSize: 10,
                             color: AppColors.textMuted,
                             fontWeight: FontWeight.w600,
@@ -843,7 +849,7 @@ class _HBars extends StatelessWidget {
                               width: w.isFinite && w > 0
                                   ? w.clamp(2.0, box.maxWidth)
                                   : 2,
-                              decoration: const BoxDecoration(
+                              decoration: BoxDecoration(
                                 color: AppColors.primary,
                                 borderRadius: BorderRadius.horizontal(
                                   right: Radius.circular(3),
@@ -863,7 +869,7 @@ class _HBars extends StatelessWidget {
                             : e.value.toStringAsFixed(0),
                         maxLines: 1,
                         overflow: TextOverflow.ellipsis,
-                        style: const TextStyle(
+                        style: TextStyle(
                           fontSize: 10.5,
                           fontWeight: FontWeight.w700,
                           color: AppColors.textStrong,
@@ -885,7 +891,7 @@ class _NoData extends StatelessWidget {
   const _NoData();
 
   @override
-  Widget build(BuildContext context) => const Center(
+  Widget build(BuildContext context) => Center(
     child: Text(
       'Nothing matches these filters.',
       style: TextStyle(color: AppColors.textMuted, fontSize: 12.5),

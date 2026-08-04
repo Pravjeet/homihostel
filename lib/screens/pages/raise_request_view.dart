@@ -146,7 +146,7 @@ class _RaiseRequestViewState extends State<RaiseRequestView> {
                 padding: const EdgeInsets.all(14),
                 child: Row(
                   children: [
-                    const Icon(
+                    Icon(
                       Icons.error_outline_rounded,
                       color: AppColors.danger,
                       size: 19,
@@ -155,7 +155,7 @@ class _RaiseRequestViewState extends State<RaiseRequestView> {
                     Expanded(
                       child: Text(
                         _error!,
-                        style: const TextStyle(
+                        style: TextStyle(
                           color: AppColors.danger,
                           fontSize: 13,
                         ),
@@ -307,7 +307,7 @@ class _RaiseRequestViewState extends State<RaiseRequestView> {
                           : 'This will be raised as ${user.name}. You have no '
                                 'room allotted, so the warden won\'t see a '
                                 'room against it.',
-                      style: const TextStyle(
+                      style: TextStyle(
                         fontSize: 12.5,
                         color: AppColors.textMuted,
                       ),

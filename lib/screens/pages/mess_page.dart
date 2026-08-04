@@ -49,7 +49,7 @@ class _MessPageState extends State<MessPage> {
                 children: [
                   const SectionHeader('Mess'),
                   const SizedBox(height: 4),
-                  const Text(
+                  Text(
                     'The weekly menu, and what a month of it costs.',
                     style: TextStyle(
                       fontSize: 13,

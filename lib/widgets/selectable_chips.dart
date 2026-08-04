@@ -77,7 +77,7 @@ class ReadOnlyChips extends StatelessWidget {
     if (values.isEmpty) {
       return Text(
         emptyLabel,
-        style: const TextStyle(color: AppColors.textMuted, fontSize: 12.5),
+        style: TextStyle(color: AppColors.textMuted, fontSize: 12.5),
       );
     }
 
@@ -100,7 +100,7 @@ class ReadOnlyChips extends StatelessWidget {
             ),
             child: Text(
               v,
-              style: const TextStyle(
+              style: TextStyle(
                 fontSize: 11.5,
                 fontWeight: FontWeight.w600,
                 color: AppColors.textMuted,
@@ -116,7 +116,7 @@ class ReadOnlyChips extends StatelessWidget {
             ),
             child: Text(
               '+$hidden more',
-              style: const TextStyle(
+              style: TextStyle(
                 fontSize: 11.5,
                 fontWeight: FontWeight.w700,
                 color: AppColors.primary,

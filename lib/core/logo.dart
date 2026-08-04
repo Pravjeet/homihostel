@@ -20,7 +20,12 @@ class HomiLogo extends StatelessWidget {
 
   /// Colour of the badge behind the mark. The mark itself is always drawn in
   /// white/translucent white on top.
-  final Color background;
+  ///
+  /// Nullable so it can default to the *current* accent. A default of
+  /// `AppColors.primary` would be baked in at compile time and the logo would
+  /// stay indigo no matter what the workspace picked — which is exactly the
+  /// bug this whole refactor exists to fix.
+  final Color? background;
 
   /// Draw only the mark, no rounded-square badge — for placing on a surface
   /// that already provides its own container.
@@ -29,16 +34,18 @@ class HomiLogo extends StatelessWidget {
   const HomiLogo({
     super.key,
     this.size = 56,
-    this.background = AppColors.primary,
+    this.background,
     this.bare = false,
   });
 
   @override
   Widget build(BuildContext context) {
+    final bg = background ?? AppColors.primary;
+
     final mark = CustomPaint(
       size: Size.square(size),
       painter: _HomiPainter(
-        ink: bare ? background : Colors.white,
+        ink: bare ? bg : Colors.white,
         // Below roughly 22px the window grid turns to mud, so the painter
         // drops to a simplified two-tower silhouette.
         detailed: size >= 22,
@@ -55,15 +62,15 @@ class HomiLogo extends StatelessWidget {
           begin: Alignment.topLeft,
           end: Alignment.bottomRight,
           colors: [
-            Color.lerp(background, Colors.white, 0.18)!,
-            background,
-            Color.lerp(background, Colors.black, 0.22)!,
+            Color.lerp(bg, Colors.white, 0.18)!,
+            bg,
+            Color.lerp(bg, Colors.black, 0.22)!,
           ],
         ),
         borderRadius: BorderRadius.circular(size * 0.28),
         boxShadow: [
           BoxShadow(
-            color: background.withValues(alpha: 0.32),
+            color: bg.withValues(alpha: 0.32),
             blurRadius: size * 0.22,
             offset: Offset(0, size * 0.08),
           ),

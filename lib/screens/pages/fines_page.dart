@@ -58,7 +58,7 @@ class _FinesPageState extends State<FinesPage> {
     }
 
     if (!canViewAll && !showsMine) {
-      return const AppCard(
+      return AppCard(
         padding: EdgeInsets.symmetric(vertical: 54),
         child: Center(
           child: Text(
@@ -115,7 +115,7 @@ class _FinesPageState extends State<FinesPage> {
                 canViewAll
                     ? 'Every fine on record. Open Overview for the dashboard.'
                     : 'Fines raised against you, and what is still owed.',
-                style: const TextStyle(
+                style: TextStyle(
                   fontSize: 13,
                   color: AppColors.textMuted,
                 ),
@@ -224,7 +224,7 @@ class _Register extends StatelessWidget {
 
         final all = snap.data!;
         if (all.isEmpty) {
-          return const AppCard(
+          return AppCard(
             padding: EdgeInsets.symmetric(vertical: 60, horizontal: 28),
             child: Center(
               child: Column(
@@ -255,7 +255,7 @@ class _Register extends StatelessWidget {
         final summary = FineSummary(shown);
 
         if (shown.isEmpty) {
-          return const AppCard(
+          return AppCard(
             padding: EdgeInsets.symmetric(vertical: 54),
             child: Center(
               child: Text(
@@ -309,7 +309,7 @@ class _Register extends StatelessWidget {
                       collegeId: collegeId,
                     ),
                     if (i != shown.length - 1)
-                      const Divider(
+                      Divider(
                         height: 1,
                         indent: 20,
                         endIndent: 20,
@@ -351,7 +351,7 @@ class _MyFines extends StatelessWidget {
 
         final mine = snap.data!;
         if (mine.isEmpty) {
-          return const AppCard(
+          return AppCard(
             padding: EdgeInsets.symmetric(vertical: 56, horizontal: 28),
             child: Center(
               child: Text(
@@ -402,7 +402,7 @@ class _MyFines extends StatelessWidget {
                       collegeId: collegeId,
                     ),
                     if (i != mine.length - 1)
-                      const Divider(
+                      Divider(
                         height: 1,
                         indent: 20,
                         endIndent: 20,
@@ -432,7 +432,7 @@ class _Stat extends StatelessWidget {
     children: [
       Text(
         label,
-        style: const TextStyle(
+        style: TextStyle(
           fontSize: 11.5,
           fontWeight: FontWeight.w700,
           color: AppColors.textMuted,

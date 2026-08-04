@@ -52,7 +52,7 @@ class _BulkDeleteButton extends StatelessWidget {
         label: Text('Delete $n shown'),
         style: OutlinedButton.styleFrom(
           foregroundColor: AppColors.danger,
-          side: const BorderSide(color: AppColors.dangerSoft),
+          side: BorderSide(color: AppColors.dangerSoft),
           padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
         ),
       ),
@@ -63,6 +63,24 @@ class _BulkDeleteButton extends StatelessWidget {
 class _UsersPageState extends State<UsersPage> {
   String _query = '';
   String _roleFilter = 'All';
+
+  /// Null = any. `_kUnallotted` is a real choice, not a missing one — finding
+  /// who still needs a bed is the reason someone opens this filter.
+  String? _hostelFilter;
+  String? _roomFilter;
+
+  static const _kUnallotted = '__none__';
+
+  /// Owned so "Clear filters" can actually empty the box. Without a
+  /// controller, resetting `_query` in setState leaves the typed text on
+  /// screen while the list silently shows everything.
+  final _search = TextEditingController();
+
+  @override
+  void dispose() {
+    _search.dispose();
+    super.dispose();
+  }
 
   /// Cached so the import dialog can resolve hostel names to allot rooms.
   List<Hostel> _hostels = const [];
@@ -110,15 +128,46 @@ class _UsersPageState extends State<UsersPage> {
             }
 
             final all = userSnap.data!;
+
+            // Room numbers offered are those in the chosen hostel only —
+            // "Room 101" exists in every block, so an unscoped room list
+            // would match people across four buildings at once.
+            final roomOptions =
+                all
+                    .where(
+                      (u) =>
+                          _hostelFilter == null ||
+                          _hostelFilter == _kUnallotted ||
+                          u.hostelName == _hostelFilter,
+                    )
+                    .map((u) => u.roomNumber)
+                    .whereType<String>()
+                    .toSet()
+                    .toList()
+                  ..sort((a, b) {
+                    final na = int.tryParse(a);
+                    final nb = int.tryParse(b);
+                    if (na != null && nb != null) return na.compareTo(nb);
+                    return a.compareTo(b);
+                  });
+
             final filtered = all.where((u) {
               final q = _query.toLowerCase();
               final matchesQuery =
                   q.isEmpty ||
                   u.name.toLowerCase().contains(q) ||
-                  u.email.toLowerCase().contains(q);
+                  u.email.toLowerCase().contains(q) ||
+                  (u.enrollmentNo ?? '').toLowerCase().contains(q);
               final matchesRole =
                   _roleFilter == 'All' || u.displayRole == _roleFilter;
-              return matchesQuery && matchesRole;
+              final matchesHostel = switch (_hostelFilter) {
+                null => true,
+                _kUnallotted => !u.isAllotted,
+                final h => u.hostelName == h,
+              };
+              final matchesRoom =
+                  _roomFilter == null || u.roomNumber == _roomFilter;
+              return matchesQuery && matchesRole && matchesHostel && matchesRoom;
             }).toList();
 
             return Column(
@@ -193,7 +242,7 @@ class _UsersPageState extends State<UsersPage> {
                             : null,
                       ),
                       if (session.can(Perm.usersCreate) && assignable.isEmpty)
-                        const Padding(
+                        Padding(
                           padding: EdgeInsets.only(top: 12),
                           child: Text(
                             'Create at least one role before adding users — '
@@ -209,6 +258,7 @@ class _UsersPageState extends State<UsersPage> {
                         children: [
                           Expanded(
                             child: TextField(
+                              controller: _search,
                               onChanged: (v) => setState(() => _query = v),
                               decoration: const InputDecoration(
                                 hintText: 'Search by name, registration number or email',
@@ -249,12 +299,118 @@ class _UsersPageState extends State<UsersPage> {
                           ),
                         ],
                       ),
+                      const SizedBox(height: 12),
+                      Row(
+                        children: [
+                          SizedBox(
+                            width: 220,
+                            child: DropdownButtonFormField<String>(
+                              initialValue: _hostelFilter,
+                              isExpanded: true,
+                              decoration: const InputDecoration(
+                                labelText: 'Hostel',
+                                isDense: true,
+                              ),
+                              hint: const Text('Any hostel'),
+                              items: [
+                                const DropdownMenuItem<String>(
+                                  value: null,
+                                  child: Text('Any hostel'),
+                                ),
+                                const DropdownMenuItem<String>(
+                                  value: _kUnallotted,
+                                  child: Text('Not allotted'),
+                                ),
+                                ..._hostels.map(
+                                  (h) => DropdownMenuItem(
+                                    value: h.name,
+                                    child: Text(
+                                      h.code.isEmpty
+                                          ? h.name
+                                          : '${h.code} · ${h.name}',
+                                      overflow: TextOverflow.ellipsis,
+                                    ),
+                                  ),
+                                ),
+                              ],
+                              // Clearing the room too: a room number from the
+                              // old hostel almost certainly matches nobody in
+                              // the new one, leaving an empty list that looks
+                              // like a bug.
+                              onChanged: (v) => setState(() {
+                                _hostelFilter = v;
+                                _roomFilter = null;
+                              }),
+                            ),
+                          ),
+                          const SizedBox(width: 12),
+                          SizedBox(
+                            width: 170,
+                            child: DropdownButtonFormField<String>(
+                              initialValue: roomOptions.contains(_roomFilter)
+                                  ? _roomFilter
+                                  : null,
+                              isExpanded: true,
+                              decoration: const InputDecoration(
+                                labelText: 'Room',
+                                isDense: true,
+                              ),
+                              hint: const Text('Any room'),
+                              items: [
+                                const DropdownMenuItem<String>(
+                                  value: null,
+                                  child: Text('Any room'),
+                                ),
+                                ...roomOptions.map(
+                                  (r) => DropdownMenuItem(
+                                    value: r,
+                                    child: Text(r),
+                                  ),
+                                ),
+                              ],
+                              onChanged: _hostelFilter == _kUnallotted
+                                  ? null
+                                  : (v) => setState(() => _roomFilter = v),
+                            ),
+                          ),
+                          const SizedBox(width: 12),
+                          Text(
+                            '${filtered.length} of ${all.length}',
+                            style: TextStyle(
+                              fontSize: 12.5,
+                              fontWeight: FontWeight.w600,
+                              color: AppColors.textMuted,
+                            ),
+                          ),
+                          const Spacer(),
+                          if (_hostelFilter != null ||
+                              _roomFilter != null ||
+                              _roleFilter != 'All' ||
+                              _query.isNotEmpty)
+                            TextButton.icon(
+                              onPressed: () {
+                                _search.clear();
+                                setState(() {
+                                  _hostelFilter = null;
+                                  _roomFilter = null;
+                                  _roleFilter = 'All';
+                                  _query = '';
+                                });
+                              },
+                              icon: const Icon(
+                                Icons.filter_alt_off_rounded,
+                                size: 17,
+                              ),
+                              label: const Text('Clear filters'),
+                            ),
+                        ],
+                      ),
                     ],
                   ),
                 ),
                 const SizedBox(height: 18),
                 if (filtered.isEmpty)
-                  const AppCard(
+                  AppCard(
                     padding: EdgeInsets.symmetric(vertical: 50),
                     child: Center(
                       child: Text(
@@ -277,7 +433,7 @@ class _UsersPageState extends State<UsersPage> {
                                 setState(() => _openUser = filtered[i]),
                           ),
                           if (i != filtered.length - 1)
-                            const Divider(
+                            Divider(
                               height: 1,
                               indent: 20,
                               endIndent: 20,
@@ -397,7 +553,7 @@ class _UserRow extends StatelessWidget {
             backgroundColor: AppColors.primarySoft,
             child: Text(
               user.initials,
-              style: const TextStyle(
+              style: TextStyle(
                 color: AppColors.primary,
                 fontWeight: FontWeight.w700,
                 fontSize: 14,
@@ -423,7 +579,7 @@ class _UserRow extends StatelessWidget {
                       ),
                     ),
                     if (isSelf)
-                      const Padding(
+                      Padding(
                         padding: EdgeInsets.only(left: 8),
                         child: StatusPill(
                           'YOU',
@@ -437,7 +593,7 @@ class _UserRow extends StatelessWidget {
                 Text(
                   Identity.display(user.email),
                   overflow: TextOverflow.ellipsis,
-                  style: const TextStyle(
+                  style: TextStyle(
                     color: AppColors.textMuted,
                     fontSize: 12.5,
                   ),
@@ -450,7 +606,7 @@ class _UserRow extends StatelessWidget {
             child: Align(
               alignment: Alignment.centerLeft,
               child: user.roleId == null && !user.isSuperAdmin
-                  ? const StatusPill(
+                  ? StatusPill(
                       'NO ROLE',
                       AppColors.warning,
                       AppColors.warningSoft,
@@ -463,7 +619,7 @@ class _UserRow extends StatelessWidget {
             ),
           ),
           if (!user.isActive)
-            const StatusPill(
+            StatusPill(
               'DEACTIVATED',
               AppColors.danger,
               AppColors.dangerSoft,
@@ -483,7 +639,7 @@ class _UserRow extends StatelessWidget {
                   child: Text(user.isActive ? 'Deactivate' : 'Reactivate'),
                 ),
                 if (session.can(Perm.usersDelete))
-                  const PopupMenuItem(
+                  PopupMenuItem(
                     value: 'delete',
                     child: Text(
                       'Delete profile',
@@ -597,7 +753,7 @@ class _RolePickerDialog extends StatelessWidget {
               const Spacer(),
               Text(
                 '${r.permissions.length}',
-                style: const TextStyle(
+                style: TextStyle(
                   color: AppColors.textMuted,
                   fontSize: 12,
                 ),
@@ -609,7 +765,7 @@ class _RolePickerDialog extends StatelessWidget {
       SimpleDialogOption(
         onPressed: () =>
             Navigator.pop(context, const AppRole(id: '__none__', name: '')),
-        child: const Text(
+        child: Text(
           'Remove role',
           style: TextStyle(color: AppColors.danger),
         ),
@@ -705,7 +861,7 @@ class _CreateUserDialogState extends State<_CreateUserDialog> {
                     ),
                     child: Text(
                       _error!,
-                      style: const TextStyle(
+                      style: TextStyle(
                         color: AppColors.danger,
                         fontSize: 13,
                       ),

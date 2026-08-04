@@ -322,6 +322,39 @@ service cloud.firestore {
       allow write: if sameCollege(collegeId) && hasPerm('settings.manage');
     }
 
+    // ---------------- mess fees ----------------
+    //
+    // Status records, not payments. A row exists only for a student who has
+    // been marked paid, so absence means unpaid — which is why delete is a
+    // normal operation here rather than an exceptional one.
+
+    match /colleges/{collegeId}/feeRecords/{recordId} {
+
+      allow get: if sameCollege(collegeId) && (
+                   resource.data.studentUid == request.auth.uid
+                   || hasPerm('fees.viewAll')
+                 );
+
+      // Per-document evaluation on list, so viewOwn cannot be widened into
+      // reading who else has or hasn't paid.
+      allow list: if sameCollege(collegeId) && (
+                    hasPerm('fees.viewAll')
+                    || (
+                      hasPerm('fees.viewOwn')
+                      && resource.data.studentUid == request.auth.uid
+                    )
+                  );
+
+      // Recording must be in your own name — the audit trail is the only
+      // thing standing behind "the office says this was received".
+      allow create, update: if sameCollege(collegeId)
+                           && hasPerm('fees.manage')
+                           && request.resource.data.recordedByUid
+                              == request.auth.uid;
+
+      allow delete: if sameCollege(collegeId) && hasPerm('fees.manage');
+    }
+
     // ---------------- fines ----------------
 
     match /colleges/{collegeId}/fines/{fineId} {

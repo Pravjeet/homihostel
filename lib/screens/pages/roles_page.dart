@@ -56,7 +56,7 @@ class RolesPage extends StatelessWidget {
                         : null,
                   ),
                   const SizedBox(height: 10),
-                  const Text(
+                  Text(
                     'A role is just a bundle of permissions. Ticking a '
                     'permission makes the matching section appear in that '
                     'user\'s sidebar — there is no separate app to build per '
@@ -191,7 +191,7 @@ class _RoleCard extends StatelessWidget {
                 ),
               ),
               if (role.isSystem)
-                const StatusPill(
+                StatusPill(
                   'SYSTEM',
                   AppColors.textMuted,
                   Color(0xFFF1F5F9),
@@ -203,7 +203,7 @@ class _RoleCard extends StatelessWidget {
             role.description.isEmpty ? 'No description.' : role.description,
             maxLines: 2,
             overflow: TextOverflow.ellipsis,
-            style: const TextStyle(color: AppColors.textMuted, fontSize: 12.5),
+            style: TextStyle(color: AppColors.textMuted, fontSize: 12.5),
           ),
           const SizedBox(height: 12),
           Expanded(
@@ -228,7 +228,7 @@ class _RoleCard extends StatelessWidget {
             children: [
               Text(
                 '${role.permissions.length} permissions',
-                style: const TextStyle(
+                style: TextStyle(
                   color: AppColors.textMuted,
                   fontSize: 12,
                   fontWeight: FontWeight.w600,
@@ -239,7 +239,7 @@ class _RoleCard extends StatelessWidget {
                 TextButton(onPressed: onEdit, child: const Text('Edit')),
                 TextButton(
                   onPressed: onDelete,
-                  child: const Text(
+                  child: Text(
                     'Delete',
                     style: TextStyle(color: AppColors.danger),
                   ),
@@ -346,7 +346,7 @@ class _RoleEditorDialogState extends State<_RoleEditorDialog> {
                   ),
                   child: Text(
                     _error!,
-                    style: const TextStyle(
+                    style: TextStyle(
                       color: AppColors.danger,
                       fontSize: 13,
                     ),

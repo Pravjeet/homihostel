@@ -42,6 +42,11 @@ class Perm {
   static const officeOrdersView = 'officeOrders.view';
   static const officeOrdersManage = 'officeOrders.manage';
 
+  // Mess fees (status only — the app never takes money)
+  static const feesViewOwn = 'fees.viewOwn';
+  static const feesViewAll = 'fees.viewAll';
+  static const feesManage = 'fees.manage';
+
   // Notices
   static const noticesView = 'notices.view';
   static const noticesManage = 'notices.manage';
@@ -88,6 +93,11 @@ class Perm {
       PermissionDef(officeOrdersView, 'View office orders', 'Read issued orders'),
       PermissionDef(officeOrdersManage, 'Manage office orders', 'Publish orders'),
     ],
+    'Mess Fees': [
+      PermissionDef(feesViewOwn, 'View own fee status', 'See if you have paid'),
+      PermissionDef(feesViewAll, 'View all fee status', 'Month-by-month roster'),
+      PermissionDef(feesManage, 'Record fee status', 'Mark students paid'),
+    ],
     'Notices': [
       PermissionDef(noticesView, 'View notices', 'Read announcements'),
       PermissionDef(noticesManage, 'Manage notices', 'Publish announcements'),
@@ -129,6 +139,8 @@ const Map<String, List<String>> kRoleTemplates = {
     Perm.finesManage,
     Perm.officeOrdersView,
     Perm.officeOrdersManage,
+    Perm.feesViewAll,
+    Perm.feesManage,
     Perm.noticesView,
     Perm.noticesManage,
   ],
@@ -142,6 +154,8 @@ const Map<String, List<String>> kRoleTemplates = {
     Perm.finesViewAll,
     Perm.finesManage,
     Perm.officeOrdersView,
+    Perm.feesViewAll,
+    Perm.feesManage,
     Perm.noticesView,
   ],
   'Hostel Manager': [
@@ -155,6 +169,8 @@ const Map<String, List<String>> kRoleTemplates = {
     Perm.finesManage,
     Perm.officeOrdersView,
     Perm.officeOrdersManage,
+    Perm.feesViewAll,
+    Perm.feesManage,
     Perm.noticesView,
   ],
   'Student': [
@@ -165,5 +181,6 @@ const Map<String, List<String>> kRoleTemplates = {
     Perm.requestsViewOwn,
     Perm.finesViewOwn,
     Perm.officeOrdersView,
+    Perm.feesViewOwn,
   ],
 };

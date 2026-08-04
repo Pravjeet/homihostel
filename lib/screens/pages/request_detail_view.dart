@@ -191,7 +191,7 @@ class _RequestDetailViewState extends State<RequestDetailView> {
                                   if (request.createdAt != null)
                                     'Raised ${shortDate(request.createdAt)}',
                                 ].join(' · '),
-                                style: const TextStyle(
+                                style: TextStyle(
                                   color: AppColors.textMuted,
                                   fontSize: 13,
                                 ),
@@ -233,7 +233,7 @@ class _RequestDetailViewState extends State<RequestDetailView> {
                     ],
                     if (request.details.isNotEmpty) ...[
                       const SizedBox(height: 10),
-                      const Text(
+                      Text(
                         'NOTES',
                         style: TextStyle(
                           fontSize: 11,
@@ -283,7 +283,7 @@ class _RequestDetailViewState extends State<RequestDetailView> {
                   padding: const EdgeInsets.all(14),
                   child: Text(
                     _error!,
-                    style: const TextStyle(
+                    style: TextStyle(
                       color: AppColors.danger,
                       fontSize: 13,
                     ),
@@ -357,7 +357,7 @@ class _RequestDetailViewState extends State<RequestDetailView> {
                 AppCard(
                   child: Row(
                     children: [
-                      const Expanded(
+                      Expanded(
                         child: Text(
                           'Raised this by mistake? You can withdraw it while '
                           'nobody has acted on it yet.',
@@ -402,7 +402,7 @@ class _Line extends StatelessWidget {
           width: 150,
           child: Text(
             label,
-            style: const TextStyle(
+            style: TextStyle(
               fontSize: 12.5,
               color: AppColors.textMuted,
               fontWeight: FontWeight.w600,

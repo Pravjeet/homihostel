@@ -87,7 +87,7 @@ class _RegisterCollegeScreenState extends State<RegisterCollegeScreen> {
                       ),
                     ),
                     const SizedBox(height: 6),
-                    const Text(
+                    Text(
                       'This creates the institution and makes you its Super '
                       'Admin. You can add wardens, managers and students '
                       'afterwards from the dashboard.',

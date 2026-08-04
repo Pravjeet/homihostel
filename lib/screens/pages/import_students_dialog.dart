@@ -248,7 +248,7 @@ class _PasteStep extends StatelessWidget {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        const Text(
+        Text(
           'Open your CSV in Excel or Notepad, select everything, copy, and '
           'paste it below. Each row needs a name and either a registration '
           'number or an email — every other column can be left blank.',
@@ -329,7 +329,7 @@ class _PasteStep extends StatelessWidget {
             ),
             child: Text(
               error!,
-              style: const TextStyle(color: AppColors.danger, fontSize: 13),
+              style: TextStyle(color: AppColors.danger, fontSize: 13),
             ),
           ),
           const SizedBox(height: 12),
@@ -350,7 +350,7 @@ class _PasteStep extends StatelessWidget {
           ),
         ),
         const SizedBox(height: 8),
-        const Text(
+        Text(
           'Tabs or commas both work, so a direct copy out of Excel is fine.',
           style: TextStyle(fontSize: 11.5, color: AppColors.textMuted),
         ),
@@ -372,7 +372,7 @@ class _PreviewStep extends StatelessWidget {
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            const Icon(
+            Icon(
               Icons.error_outline_rounded,
               size: 42,
               color: AppColors.danger,
@@ -385,7 +385,7 @@ class _PreviewStep extends StatelessWidget {
               style: const TextStyle(fontSize: 15, fontWeight: FontWeight.w700),
             ),
             const SizedBox(height: 8),
-            const Text(
+            Text(
               'Go back and make sure your first pasted line is the header row.',
               style: TextStyle(color: AppColors.textMuted, fontSize: 13),
             ),
@@ -410,7 +410,7 @@ class _PreviewStep extends StatelessWidget {
               'skipped, so the Import button is disabled. The reason for '
               'each row is shown in red below. The usual cause is a role '
               'name in the sheet that does not exist yet.',
-              style: const TextStyle(
+              style: TextStyle(
                 color: AppColors.danger,
                 fontSize: 12.5,
                 height: 1.4,
@@ -436,7 +436,7 @@ class _PreviewStep extends StatelessWidget {
           Text(
             'Ignored column${plan.unknownColumns.length == 1 ? '' : 's'}: '
             '${plan.unknownColumns.join(', ')}',
-            style: const TextStyle(
+            style: TextStyle(
               fontSize: 12.5,
               color: AppColors.warning,
               fontWeight: FontWeight.w600,
@@ -449,7 +449,7 @@ class _PreviewStep extends StatelessWidget {
           child: ListView.separated(
             itemCount: plan.rows.length,
             separatorBuilder: (context, index) =>
-                const Divider(height: 1, color: AppColors.border),
+                Divider(height: 1, color: AppColors.border),
             itemBuilder: (context, i) => _RowTile(row: plan.rows[i]),
           ),
         ),
@@ -493,7 +493,7 @@ class _Tally extends StatelessWidget {
     children: [
       Text(
         label,
-        style: const TextStyle(
+        style: TextStyle(
           fontSize: 11.5,
           fontWeight: FontWeight.w700,
           color: AppColors.textMuted,
@@ -532,7 +532,7 @@ class _RowTile extends StatelessWidget {
             width: 34,
             child: Text(
               '${row.lineNumber}',
-              style: const TextStyle(
+              style: TextStyle(
                 fontSize: 11.5,
                 color: AppColors.textMuted,
                 fontWeight: FontWeight.w600,
@@ -559,7 +559,7 @@ class _RowTile extends StatelessWidget {
                     if (row.values['enrollmentNo'] != null)
                       row.values['enrollmentNo']!,
                   ].join(' · '),
-                  style: const TextStyle(
+                  style: TextStyle(
                     fontSize: 12,
                     color: AppColors.textMuted,
                   ),
@@ -569,7 +569,7 @@ class _RowTile extends StatelessWidget {
                     padding: const EdgeInsets.only(top: 3),
                     child: Text(
                       row.problems.join(' · '),
-                      style: const TextStyle(
+                      style: TextStyle(
                         fontSize: 12,
                         color: AppColors.danger,
                         fontWeight: FontWeight.w600,
@@ -581,7 +581,7 @@ class _RowTile extends StatelessWidget {
                     padding: const EdgeInsets.only(top: 3),
                     child: Text(
                       row.warnings.join(' · '),
-                      style: const TextStyle(
+                      style: TextStyle(
                         fontSize: 12,
                         color: AppColors.warning,
                         fontWeight: FontWeight.w600,
@@ -593,7 +593,7 @@ class _RowTile extends StatelessWidget {
                     padding: const EdgeInsets.only(top: 3),
                     child: Text(
                       '→ ${row.hostel!.name}, room ${row.roomNumber}',
-                      style: const TextStyle(
+                      style: TextStyle(
                         fontSize: 12,
                         color: AppColors.info,
                         fontWeight: FontWeight.w600,
@@ -635,7 +635,7 @@ class _RunStep extends StatelessWidget {
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            const Icon(
+            Icon(
               Icons.error_outline_rounded,
               size: 42,
               color: AppColors.danger,
@@ -651,7 +651,7 @@ class _RunStep extends StatelessWidget {
               child: Text(
                 fatalError!,
                 textAlign: TextAlign.center,
-                style: const TextStyle(
+                style: TextStyle(
                   color: AppColors.danger,
                   fontSize: 13,
                   height: 1.4,
@@ -666,7 +666,7 @@ class _RunStep extends StatelessWidget {
                         'Re-running is safe — existing people are updated, '
                         'not duplicated.',
               textAlign: TextAlign.center,
-              style: const TextStyle(
+              style: TextStyle(
                 color: AppColors.textMuted,
                 fontSize: 12.5,
               ),
@@ -696,10 +696,10 @@ class _RunStep extends StatelessWidget {
           const SizedBox(height: 14),
           Text(
             label,
-            style: const TextStyle(color: AppColors.textMuted, fontSize: 13),
+            style: TextStyle(color: AppColors.textMuted, fontSize: 13),
           ),
           const SizedBox(height: 22),
-          const Text(
+          Text(
             'Please leave this window open until it finishes.',
             style: TextStyle(color: AppColors.textMuted, fontSize: 12.5),
           ),
@@ -760,7 +760,7 @@ class _RunStep extends StatelessWidget {
                       padding: const EdgeInsets.only(bottom: 4),
                       child: Text(
                         f,
-                        style: const TextStyle(
+                        style: TextStyle(
                           fontSize: 12.5,
                           color: AppColors.warning,
                         ),
@@ -786,7 +786,7 @@ class _RunStep extends StatelessWidget {
                       padding: const EdgeInsets.only(bottom: 6),
                       child: Text(
                         f,
-                        style: const TextStyle(
+                        style: TextStyle(
                           fontSize: 12.5,
                           color: AppColors.danger,
                         ),

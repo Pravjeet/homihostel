@@ -42,7 +42,7 @@ class ComingSoonPage extends StatelessWidget {
             child: Text(
               blurb,
               textAlign: TextAlign.center,
-              style: const TextStyle(
+              style: TextStyle(
                 color: AppColors.textMuted,
                 fontSize: 14,
                 height: 1.5,
@@ -50,7 +50,7 @@ class ComingSoonPage extends StatelessWidget {
             ),
           ),
           const SizedBox(height: 18),
-          const StatusPill(
+          StatusPill(
             'NOT BUILT YET',
             AppColors.warning,
             AppColors.warningSoft,

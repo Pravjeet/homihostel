@@ -203,7 +203,7 @@ class _LoginScreenState extends State<LoginScreen> {
                   mainAxisSize: MainAxisSize.min,
                   crossAxisAlignment: CrossAxisAlignment.stretch,
                   children: [
-                    const Center(child: HomiLogo(size: 62)),
+                    Center(child: HomiLogo(size: 62)),
                     const SizedBox(height: 22),
                     const Text(
                       'Homi Hostel',
@@ -219,7 +219,7 @@ class _LoginScreenState extends State<LoginScreen> {
                           ? 'Sign in to your hostel workspace'
                           : 'Pick up where you left off',
                       textAlign: TextAlign.center,
-                      style: const TextStyle(
+                      style: TextStyle(
                         color: AppColors.textMuted,
                         fontSize: 14,
                       ),
@@ -357,7 +357,7 @@ class _LoginScreenState extends State<LoginScreen> {
                       alignment: WrapAlignment.center,
                       crossAxisAlignment: WrapCrossAlignment.center,
                       children: [
-                        const Text(
+                        Text(
                           'Setting up a new institution?',
                           style: TextStyle(
                             color: AppColors.textMuted,
@@ -432,7 +432,7 @@ class _AccountCard extends StatelessWidget {
                     )
                   : Text(
                       account.initials,
-                      style: const TextStyle(
+                      style: TextStyle(
                         color: AppColors.primary,
                         fontWeight: FontWeight.w700,
                         fontSize: 14,
@@ -459,7 +459,7 @@ class _AccountCard extends StatelessWidget {
                         : account.hasPassword
                         ? 'Tap to sign in'
                         : 'Tap to enter your password',
-                    style: const TextStyle(
+                    style: TextStyle(
                       fontSize: 12,
                       color: AppColors.textMuted,
                     ),
@@ -495,7 +495,7 @@ class ErrorBanner extends StatelessWidget {
     child: Row(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        const Icon(
+        Icon(
           Icons.error_outline_rounded,
           color: AppColors.danger,
           size: 19,
@@ -504,7 +504,7 @@ class ErrorBanner extends StatelessWidget {
         Expanded(
           child: Text(
             message,
-            style: const TextStyle(
+            style: TextStyle(
               color: AppColors.danger,
               fontSize: 13,
               height: 1.35,

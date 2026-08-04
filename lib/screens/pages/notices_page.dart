@@ -43,7 +43,7 @@ class _NoticesPageState extends State<NoticesPage> {
     }
 
     if (!canView) {
-      return const AppCard(
+      return AppCard(
         padding: EdgeInsets.symmetric(vertical: 54),
         child: Center(
           child: Text(
@@ -82,7 +82,7 @@ class _NoticesPageState extends State<NoticesPage> {
                 _tab == 0
                     ? 'Announcements posted by hostel staff.'
                     : 'Notices published by the college on sliet.ac.in.',
-                style: const TextStyle(
+                style: TextStyle(
                   fontSize: 13,
                   color: AppColors.textMuted,
                 ),
@@ -159,7 +159,7 @@ class _NoticesPageState extends State<NoticesPage> {
                         : _filter == 'expired'
                         ? 'No expired notices.'
                         : 'No notices yet.',
-                    style: const TextStyle(color: AppColors.textMuted),
+                    style: TextStyle(color: AppColors.textMuted),
                   ),
                 ),
               );
@@ -220,7 +220,7 @@ class _NoticesPageState extends State<NoticesPage> {
                       },
                     ),
                     if (i != shown.length - 1)
-                      const Divider(
+                      Divider(
                         height: 1,
                         indent: 20,
                         endIndent: 20,
@@ -348,7 +348,7 @@ class _NoticeRow extends StatelessWidget {
                             fontWeight: FontWeight.w600,
                           ),
                         ),
-                        const Text(
+                        Text(
                           ' · ',
                           style: TextStyle(
                             color: AppColors.textMuted,
@@ -357,13 +357,13 @@ class _NoticeRow extends StatelessWidget {
                         ),
                         Text(
                           notice.postedByName,
-                          style: const TextStyle(
+                          style: TextStyle(
                             fontSize: 12,
                             color: AppColors.textMuted,
                           ),
                         ),
                         if (dateStr.isNotEmpty) ...[
-                          const Text(
+                          Text(
                             ' · ',
                             style: TextStyle(
                               color: AppColors.textMuted,
@@ -372,7 +372,7 @@ class _NoticeRow extends StatelessWidget {
                           ),
                           Text(
                             dateStr,
-                            style: const TextStyle(
+                            style: TextStyle(
                               fontSize: 12,
                               color: AppColors.textMuted,
                             ),
@@ -388,7 +388,7 @@ class _NoticeRow extends StatelessWidget {
                 Chip(
                   label: const Text('Archived'),
                   backgroundColor: AppColors.canvas,
-                  labelStyle: const TextStyle(
+                  labelStyle: TextStyle(
                     fontSize: 11,
                     color: AppColors.textMuted,
                   ),
@@ -396,7 +396,7 @@ class _NoticeRow extends StatelessWidget {
               else if (canDelete)
                 PopupMenuButton<String>(
                   itemBuilder: (context) => [
-                    const PopupMenuItem(
+                    PopupMenuItem(
                       value: 'delete',
                       child: Row(
                         children: [

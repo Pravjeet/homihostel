@@ -159,7 +159,7 @@ class HostelEditorDialogState extends State<HostelEditorDialog> {
                     ),
                     child: Text(
                       _error!,
-                      style: const TextStyle(
+                      style: TextStyle(
                         color: AppColors.danger,
                         fontSize: 13,
                       ),
@@ -259,7 +259,7 @@ class HostelEditorDialogState extends State<HostelEditorDialog> {
                     style: TextStyle(fontSize: 14, fontWeight: FontWeight.w700),
                   ),
                   const SizedBox(height: 4),
-                  const Text(
+                  Text(
                     'Describe the layout and every room is created for you. '
                     'You can add, edit or remove individual rooms afterwards.',
                     style: TextStyle(
@@ -359,7 +359,7 @@ class HostelEditorDialogState extends State<HostelEditorDialog> {
                         Text(
                           'Will create ${plan.totalRooms} rooms · '
                           '${plan.totalBeds} beds',
-                          style: const TextStyle(
+                          style: TextStyle(
                             fontWeight: FontWeight.w700,
                             fontSize: 13.5,
                             color: AppColors.primary,
@@ -368,7 +368,7 @@ class HostelEditorDialogState extends State<HostelEditorDialog> {
                         const SizedBox(height: 4),
                         Text(
                           'Numbered ${plan.rangeSummary}',
-                          style: const TextStyle(
+                          style: TextStyle(
                             fontSize: 12.5,
                             color: AppColors.primary,
                           ),

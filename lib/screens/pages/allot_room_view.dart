@@ -129,7 +129,7 @@ class _AllotRoomViewState extends State<AllotRoomView> {
                           ),
                         ),
                         const SizedBox(height: 3),
-                        const Text(
+                        Text(
                           'Pick a hostel, then a free room.',
                           style: TextStyle(
                             fontSize: 13,
@@ -184,7 +184,7 @@ class _AllotRoomViewState extends State<AllotRoomView> {
                   ),
                   child: Text(
                     _error!,
-                    style: const TextStyle(
+                    style: TextStyle(
                       color: AppColors.danger,
                       fontSize: 13,
                       height: 1.35,
@@ -209,7 +209,7 @@ class _AllotRoomViewState extends State<AllotRoomView> {
             }
             final hostels = hostelSnap.data!;
             if (hostels.isEmpty) {
-              return const AppCard(
+              return AppCard(
                 padding: EdgeInsets.symmetric(vertical: 50),
                 child: Center(
                   child: Text(
@@ -287,7 +287,7 @@ class _AllotRoomViewState extends State<AllotRoomView> {
                 ),
                 const SizedBox(height: 18),
                 if (_hostel == null)
-                  const AppCard(
+                  AppCard(
                     padding: EdgeInsets.symmetric(vertical: 50),
                     child: Center(
                       child: Text(
@@ -339,7 +339,7 @@ class _StudentStrip extends StatelessWidget {
                 if (student.enrollmentNo != null) student.enrollmentNo!,
                 if (student.isAllotted) 'Currently in ${student.roomLabel}',
               ].join('  ·  '),
-              style: const TextStyle(
+              style: TextStyle(
                 fontSize: 12.5,
                 color: AppColors.textMuted,
                 fontWeight: FontWeight.w600,
@@ -347,7 +347,7 @@ class _StudentStrip extends StatelessWidget {
             ),
           ),
           if (noGender)
-            const Tooltip(
+            Tooltip(
               message:
                   'No gender on this profile, so Boys/Girls hostels can\'t be '
                   'checked. Set it on their detail screen.',
@@ -410,7 +410,7 @@ class _RoomPicker extends StatelessWidget {
                 children: [
                   _Label('Available rooms  (${rooms.length})'),
                   const Spacer(),
-                  const Text(
+                  Text(
                     'Empty rooms only',
                     style: TextStyle(fontSize: 12, color: AppColors.textMuted),
                   ),
@@ -419,7 +419,7 @@ class _RoomPicker extends StatelessWidget {
               ),
               const SizedBox(height: 6),
               if (rooms.isEmpty)
-                const Padding(
+                Padding(
                   padding: EdgeInsets.symmetric(vertical: 40),
                   child: Center(
                     child: Text(
@@ -524,7 +524,7 @@ class _Label extends StatelessWidget {
   @override
   Widget build(BuildContext context) => Text(
     text.toUpperCase(),
-    style: const TextStyle(
+    style: TextStyle(
       fontSize: 11,
       fontWeight: FontWeight.w800,
       letterSpacing: 0.9,

@@ -155,16 +155,56 @@ const List<ThemePreset> kThemePresets = [
   ThemePreset('slate', 'Slate', Color(0xFF334155)),
 ];
 
+/// Light, dark, or follow the device.
+enum AppBrightness { light, dark, system }
+
+extension AppBrightnessX on AppBrightness {
+  String get label => switch (this) {
+    AppBrightness.light => 'Light',
+    AppBrightness.dark => 'Dark',
+    AppBrightness.system => 'Match device',
+  };
+
+  IconData get icon => switch (this) {
+    AppBrightness.light => Icons.light_mode_rounded,
+    AppBrightness.dark => Icons.dark_mode_rounded,
+    AppBrightness.system => Icons.brightness_auto_rounded,
+  };
+
+  static AppBrightness parse(String? raw) => switch (raw) {
+    'dark' => AppBrightness.dark,
+    'system' => AppBrightness.system,
+    _ => AppBrightness.light,
+  };
+
+  /// Resolves [AppBrightness.system] against what the device reports.
+  bool isDark(Brightness platform) => switch (this) {
+    AppBrightness.light => false,
+    AppBrightness.dark => true,
+    AppBrightness.system => platform == Brightness.dark,
+  };
+}
+
 class AppTheming {
   /// One of [kThemePresets]. Unknown ids fall back to the first preset.
   final String presetId;
 
-  const AppTheming({this.presetId = 'indigo'});
+  final AppBrightness brightness;
 
-  factory AppTheming.fromMap(Map<String, dynamic> m) =>
-      AppTheming(presetId: m['presetId'] as String? ?? 'indigo');
+  const AppTheming({
+    this.presetId = 'indigo',
+    this.brightness = AppBrightness.light,
+  });
 
-  Map<String, dynamic> toMap() => {'presetId': presetId};
+  factory AppTheming.fromMap(Map<String, dynamic> m) => AppTheming(
+    presetId: m['presetId'] as String? ?? 'indigo',
+    brightness: AppBrightnessX.parse(m['brightness'] as String?),
+  );
+
+  Map<String, dynamic> toMap() => {
+    'presetId': presetId,
+    'brightness': brightness.name,
+  };
 
   ThemePreset get preset => kThemePresets.firstWhere(
     (p) => p.id == presetId,
@@ -172,6 +212,12 @@ class AppTheming {
   );
 
   Color get seed => preset.color;
+
+  AppTheming copyWith({String? presetId, AppBrightness? brightness}) =>
+      AppTheming(
+        presetId: presetId ?? this.presetId,
+        brightness: brightness ?? this.brightness,
+      );
 }
 
 // =====================================================================

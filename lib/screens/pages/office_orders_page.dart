@@ -133,7 +133,7 @@ class _OfficeOrdersPageState extends State<OfficeOrdersPage> {
                     : null,
               ),
               const SizedBox(height: 4),
-              const Text(
+              Text(
                 'Orders issued by the institute. Search by order number or '
                 'by the date printed on the order.',
                 style: TextStyle(fontSize: 13, color: AppColors.textMuted),
@@ -209,7 +209,7 @@ class _OfficeOrdersPageState extends State<OfficeOrdersPage> {
                     (_query.isEmpty && _onDate == null)
                         ? 'No office orders have been added yet.'
                         : 'Nothing matches that search.',
-                    style: const TextStyle(color: AppColors.textMuted),
+                    style: TextStyle(color: AppColors.textMuted),
                   ),
                 ),
               );
@@ -230,7 +230,7 @@ class _OfficeOrdersPageState extends State<OfficeOrdersPage> {
                       onDelete: () => _confirmDelete(collegeId, shown[i]),
                     ),
                     if (i != shown.length - 1)
-                      const Divider(
+                      Divider(
                         height: 1,
                         indent: 20,
                         endIndent: 20,
@@ -284,7 +284,7 @@ class _OrderRow extends StatelessWidget {
                 color: AppColors.primarySoft,
                 borderRadius: BorderRadius.circular(12),
               ),
-              child: const Icon(
+              child: Icon(
                 Icons.picture_as_pdf_rounded,
                 size: 20,
                 color: AppColors.primary,
@@ -311,7 +311,7 @@ class _OrderRow extends StatelessWidget {
                       order.postedByName,
                     ].join(' · '),
                     overflow: TextOverflow.ellipsis,
-                    style: const TextStyle(
+                    style: TextStyle(
                       fontSize: 12.5,
                       color: AppColors.textMuted,
                     ),
@@ -320,7 +320,7 @@ class _OrderRow extends StatelessWidget {
                     const SizedBox(height: 6),
                     Text(
                       order.description!,
-                      style: const TextStyle(
+                      style: TextStyle(
                         fontSize: 13,
                         color: AppColors.textStrong,
                         height: 1.45,
@@ -339,7 +339,7 @@ class _OrderRow extends StatelessWidget {
             if (canDelete)
               PopupMenuButton<String>(
                 itemBuilder: (context) => [
-                  const PopupMenuItem(
+                  PopupMenuItem(
                     value: 'delete',
                     child: Row(
                       children: [

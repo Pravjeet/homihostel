@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
 import '../screens/pages/allotment_page.dart';
+import '../screens/pages/fees_page.dart';
 import '../screens/pages/fines_page.dart';
 import '../screens/pages/hostels_page.dart';
 import '../screens/pages/mess_page.dart';
@@ -152,6 +153,13 @@ const List<NavSection> _allSections = [
         builder: _fines,
       ),
       NavItem(
+        id: 'fees',
+        label: 'Mess Fees',
+        icon: Icons.receipt_long_rounded,
+        requires: [Perm.feesViewAll, Perm.feesViewOwn],
+        builder: _fees,
+      ),
+      NavItem(
         id: 'office-orders',
         label: 'Office Orders',
         icon: Icons.description_rounded,
@@ -213,5 +221,6 @@ Widget _mess(BuildContext c) => const MessPage();
 Widget _requests(BuildContext c) => const RequestsPage();
 Widget _notices(BuildContext c) => const NoticesPage();
 Widget _fines(BuildContext c) => const FinesPage();
+Widget _fees(BuildContext c) => const FeesPage();
 Widget _officeOrders(BuildContext c) => const OfficeOrdersPage();
 Widget _settings(BuildContext c) => const SettingsPage();

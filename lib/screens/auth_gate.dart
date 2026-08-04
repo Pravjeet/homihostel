@@ -101,6 +101,10 @@ class _SessionLoader extends StatelessWidget {
                   builder: (context, settingsSnap) {
                     final settings =
                         settingsSnap.data ?? const CollegeSettings();
+                    final dark = settings.theming.brightness.isDark(
+                      MediaQuery.platformBrightnessOf(context),
+                    );
+
                     return SessionScope(
                       session: Session(
                         user: profile,
@@ -108,12 +112,24 @@ class _SessionLoader extends StatelessWidget {
                         collegeName: nameSnap.data ?? 'Institution',
                         settings: settings,
                       ),
-                      // Re-themed here rather than at MaterialApp, because the
-                      // accent lives in the workspace's settings and there is
+                      // Applied here rather than at MaterialApp, because the
+                      // palette lives in the workspace's settings and there is
                       // no workspace until someone has signed in.
-                      child: Theme(
-                        data: buildAppTheme(seed: settings.theming.seed),
-                        child: const DashboardShell(),
+                      //
+                      // PaletteScope must wrap the Theme: it rewrites the
+                      // AppColors tokens that buildAppTheme then reads.
+                      child: PaletteScope(
+                        accent: settings.theming.seed,
+                        dark: dark,
+                        child: Builder(
+                          builder: (context) => Theme(
+                            data: buildAppTheme(
+                              seed: settings.theming.seed,
+                              dark: dark,
+                            ),
+                            child: const DashboardShell(),
+                          ),
+                        ),
                       ),
                     );
                   },
@@ -146,7 +162,7 @@ class _Loading extends StatelessWidget {
           const SizedBox(height: 18),
           Text(
             message,
-            style: const TextStyle(color: AppColors.textMuted, fontSize: 14),
+            style: TextStyle(color: AppColors.textMuted, fontSize: 14),
           ),
         ],
       ),
@@ -229,7 +245,7 @@ class _Centered extends StatelessWidget {
               Text(
                 body,
                 textAlign: TextAlign.center,
-                style: const TextStyle(
+                style: TextStyle(
                   color: AppColors.textMuted,
                   fontSize: 14,
                   height: 1.5,

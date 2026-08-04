@@ -116,7 +116,7 @@ class _MessFeesViewState extends State<MessFeesView> {
                 const SizedBox(height: 14),
                 Text(
                   _config.notes!,
-                  style: const TextStyle(
+                  style: TextStyle(
                     fontSize: 13,
                     height: 1.55,
                     color: AppColors.textMuted,
@@ -135,7 +135,7 @@ class _MessFeesViewState extends State<MessFeesView> {
             children: [
               const SectionHeader('Absence calculator'),
               const SizedBox(height: 4),
-              const Text(
+              Text(
                 'Went home, or away on an internship? Work out what you '
                 'should be charged for the days you were actually here.',
                 style: TextStyle(
@@ -245,7 +245,7 @@ class _MessFeesViewState extends State<MessFeesView> {
               child: Text(
                 '${r.effectiveAbsent}',
                 textAlign: TextAlign.center,
-                style: const TextStyle(
+                style: TextStyle(
                   fontSize: 16,
                   fontWeight: FontWeight.w800,
                   color: AppColors.primary,
@@ -258,7 +258,7 @@ class _MessFeesViewState extends State<MessFeesView> {
           padding: const EdgeInsets.only(left: 12, top: 4),
           child: Text(
             'Present for ${r.daysPresent} of ${r.daysInMonth} days',
-            style: const TextStyle(fontSize: 12, color: AppColors.textMuted),
+            style: TextStyle(fontSize: 12, color: AppColors.textMuted),
           ),
         ),
       ],
@@ -273,7 +273,7 @@ class _MessFeesViewState extends State<MessFeesView> {
       child: Center(
         child: Column(
           children: [
-            const Icon(
+            Icon(
               Icons.payments_rounded,
               size: 40,
               color: AppColors.textMuted,
@@ -290,7 +290,7 @@ class _MessFeesViewState extends State<MessFeesView> {
                         'available to every resident.'
                   : 'Your mess manager hasn\'t published the charges yet.',
               textAlign: TextAlign.center,
-              style: const TextStyle(
+              style: TextStyle(
                 fontSize: 13,
                 color: AppColors.textMuted,
                 height: 1.5,
@@ -406,7 +406,7 @@ class _Breakdown extends StatelessWidget {
                       '$symbol${r.perDay.toStringAsFixed(2)}',
             valueColor: blocked ? AppColors.textMuted : AppColors.success,
           ),
-          const Padding(
+          Padding(
             padding: EdgeInsets.symmetric(vertical: 14),
             child: Divider(height: 1, color: AppColors.border),
           ),
@@ -420,7 +420,7 @@ class _Breakdown extends StatelessWidget {
               ),
               Text(
                 '$symbol${r.payable.toStringAsFixed(2)}',
-                style: const TextStyle(
+                style: TextStyle(
                   fontSize: 24,
                   fontWeight: FontWeight.w800,
                   color: AppColors.primary,
@@ -429,7 +429,7 @@ class _Breakdown extends StatelessWidget {
             ],
           ),
           const SizedBox(height: 12),
-          const _Note(
+          _Note(
             'An estimate only. The actual rebate depends on your mess\'s '
             'rules and an approved leave record — check with your warden '
             'before assuming it.',
@@ -466,7 +466,7 @@ class _Line extends StatelessWidget {
             if (caption != null)
               Text(
                 caption!,
-                style: const TextStyle(
+                style: TextStyle(
                   fontSize: 11.5,
                   color: AppColors.textMuted,
                 ),
@@ -516,7 +516,7 @@ class _Stat extends StatelessWidget {
       children: [
         Text(
           label.toUpperCase(),
-          style: const TextStyle(
+          style: TextStyle(
             fontSize: 10.5,
             fontWeight: FontWeight.w800,
             letterSpacing: 0.8,
@@ -535,7 +535,7 @@ class _Stat extends StatelessWidget {
         const SizedBox(height: 4),
         Text(
           caption,
-          style: const TextStyle(fontSize: 11.5, color: AppColors.textMuted),
+          style: TextStyle(fontSize: 11.5, color: AppColors.textMuted),
         ),
       ],
     ),
@@ -549,7 +549,7 @@ class _Label extends StatelessWidget {
   @override
   Widget build(BuildContext context) => Text(
     text.toUpperCase(),
-    style: const TextStyle(
+    style: TextStyle(
       fontSize: 11,
       fontWeight: FontWeight.w800,
       letterSpacing: 0.9,

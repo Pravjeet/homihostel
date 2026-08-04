@@ -25,7 +25,7 @@ class SettingsPage extends StatelessWidget {
     final collegeId = session.user.collegeId;
 
     if (!session.can(Perm.settingsManage)) {
-      return const AppCard(
+      return AppCard(
         padding: EdgeInsets.symmetric(vertical: 54),
         child: Center(
           child: Text(
@@ -64,7 +64,7 @@ class SettingsPage extends StatelessWidget {
                         ? 'Configuration for this workspace.'
                         : 'Configuration for this workspace. '
                               'Last changed by ${s.updatedByName}.',
-                    style: const TextStyle(
+                    style: TextStyle(
                       fontSize: 13,
                       color: AppColors.textMuted,
                     ),
@@ -127,7 +127,7 @@ class _Section extends StatelessWidget {
         const SizedBox(height: 3),
         Text(
           blurb,
-          style: const TextStyle(fontSize: 12.5, color: AppColors.textMuted),
+          style: TextStyle(fontSize: 12.5, color: AppColors.textMuted),
         ),
         const SizedBox(height: 18),
         child,
@@ -135,7 +135,7 @@ class _Section extends StatelessWidget {
           const SizedBox(height: 12),
           Text(
             error!,
-            style: const TextStyle(color: AppColors.danger, fontSize: 12.5),
+            style: TextStyle(color: AppColors.danger, fontSize: 12.5),
           ),
         ],
         if (onSave != null) ...[
@@ -367,6 +367,7 @@ class _ThemeSection extends StatefulWidget {
 
 class _ThemeSectionState extends State<_ThemeSection> with _Saving {
   late String _preset = widget.value.presetId;
+  late AppBrightness _brightness = widget.value.brightness;
 
   @override
   Widget build(BuildContext context) {
@@ -378,20 +379,54 @@ class _ThemeSectionState extends State<_ThemeSection> with _Saving {
 
     return _Section(
       title: 'Appearance',
-      blurb: 'The accent colour used across buttons, charts and the sidebar.',
+      blurb: 'Light or dark, and the accent colour used across the app.',
       busy: busy,
       error: error,
       onSave: () => save(
         () => SettingsService.instance.saveTheming(
           widget.collegeId,
-          AppTheming(presetId: _preset),
+          AppTheming(presetId: _preset, brightness: _brightness),
           byName: name,
         ),
-        'Theme saved — reload to see it everywhere',
+        'Appearance saved',
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
+          Text(
+            'MODE',
+            style: TextStyle(
+              fontSize: 11,
+              fontWeight: FontWeight.w800,
+              color: AppColors.textMuted,
+              letterSpacing: 0.6,
+            ),
+          ),
+          const SizedBox(height: 10),
+          Wrap(
+            spacing: 10,
+            runSpacing: 10,
+            children: [
+              for (final b in AppBrightness.values)
+                _ModeChip(
+                  mode: b,
+                  selected: b == _brightness,
+                  accent: chosen.color,
+                  onTap: busy ? null : () => setState(() => _brightness = b),
+                ),
+            ],
+          ),
+          const SizedBox(height: 22),
+          Text(
+            'ACCENT',
+            style: TextStyle(
+              fontSize: 11,
+              fontWeight: FontWeight.w800,
+              color: AppColors.textMuted,
+              letterSpacing: 0.6,
+            ),
+          ),
+          const SizedBox(height: 10),
           Wrap(
             spacing: 12,
             runSpacing: 12,
@@ -462,17 +497,16 @@ class _ThemeSectionState extends State<_ThemeSection> with _Saving {
             width: double.infinity,
             padding: const EdgeInsets.all(12),
             decoration: BoxDecoration(
-              color: AppColors.warningSoft,
+              color: AppColors.infoSoft,
               borderRadius: BorderRadius.circular(9),
             ),
-            child: const Text(
-              'The accent drives the Material theme — buttons, inputs, '
-              'dialogs, sliders and the sidebar. Screens that hard-code a '
-              'colour constant still render indigo until those are migrated; '
-              'that is a known follow-up, not a bug in your choice here.',
+            child: Text(
+              'Applies across every screen the moment you save — sidebar, '
+              'cards, charts, text and borders all follow. "Match device" '
+              'tracks your system light/dark setting.',
               style: TextStyle(
                 fontSize: 12,
-                color: Color(0xFF92400E),
+                color: AppColors.info,
                 height: 1.45,
               ),
             ),
@@ -481,6 +515,56 @@ class _ThemeSectionState extends State<_ThemeSection> with _Saving {
       ),
     );
   }
+}
+
+class _ModeChip extends StatelessWidget {
+  final AppBrightness mode;
+  final bool selected;
+  final Color accent;
+  final VoidCallback? onTap;
+
+  const _ModeChip({
+    required this.mode,
+    required this.selected,
+    required this.accent,
+    required this.onTap,
+  });
+
+  @override
+  Widget build(BuildContext context) => InkWell(
+    onTap: onTap,
+    borderRadius: BorderRadius.circular(10),
+    child: Container(
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+      decoration: BoxDecoration(
+        color: selected ? accent.withValues(alpha: 0.10) : AppColors.card,
+        borderRadius: BorderRadius.circular(10),
+        border: Border.all(
+          color: selected ? accent : AppColors.border,
+          width: selected ? 1.8 : 1,
+        ),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(
+            mode.icon,
+            size: 18,
+            color: selected ? accent : AppColors.textMuted,
+          ),
+          const SizedBox(width: 9),
+          Text(
+            mode.label,
+            style: TextStyle(
+              fontSize: 13,
+              fontWeight: FontWeight.w600,
+              color: selected ? accent : AppColors.textStrong,
+            ),
+          ),
+        ],
+      ),
+    ),
+  );
 }
 
 class _Swatch extends StatelessWidget {
@@ -614,7 +698,7 @@ class _SessionSectionState extends State<_SessionSection> with _Saving {
           ),
           Text(
             'Semesters currently running: $sems',
-            style: const TextStyle(fontSize: 12.5, color: AppColors.textMuted),
+            style: TextStyle(fontSize: 12.5, color: AppColors.textMuted),
           ),
         ],
       ),
@@ -735,7 +819,7 @@ class _FineCategoriesSectionState extends State<_FineCategoriesSection>
             ),
           ),
           const SizedBox(height: 4),
-          const Text(
+          Text(
             'Renaming a category does not change fines already imposed under '
             'the old name — those keep what they were issued with, which is '
             'what a record is for.',
@@ -839,7 +923,7 @@ class _DangerZoneState extends State<_DangerZone> {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          const Row(
+          Row(
             children: [
               Icon(Icons.warning_amber_rounded,
                   size: 19, color: AppColors.danger),
@@ -855,7 +939,7 @@ class _DangerZoneState extends State<_DangerZone> {
             ],
           ),
           const SizedBox(height: 3),
-          const Text(
+          Text(
             'Bulk resets for clearing test data. None of these can be undone '
             'from inside the app.',
             style: TextStyle(fontSize: 12.5, color: AppColors.textMuted),
@@ -880,7 +964,7 @@ class _DangerZoneState extends State<_DangerZone> {
               },
             ),
           ),
-          const Divider(height: 26, color: AppColors.border),
+          Divider(height: 26, color: AppColors.border),
           _DangerRow(
             label: 'Delete every non-admin account',
             detail: 'Removes all student and staff profiles, freeing their '
@@ -948,7 +1032,7 @@ class _DangerRow extends StatelessWidget {
             const SizedBox(height: 2),
             Text(
               detail,
-              style: const TextStyle(
+              style: TextStyle(
                 fontSize: 12.5,
                 color: AppColors.textMuted,
                 height: 1.4,
@@ -962,7 +1046,7 @@ class _DangerRow extends StatelessWidget {
         onPressed: busy ? null : onTap,
         style: OutlinedButton.styleFrom(
           foregroundColor: AppColors.danger,
-          side: const BorderSide(color: AppColors.dangerSoft),
+          side: BorderSide(color: AppColors.dangerSoft),
         ),
         child: const Text('Run'),
       ),

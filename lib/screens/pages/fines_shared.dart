@@ -144,7 +144,7 @@ class FineRow extends StatelessWidget {
                     if (fine.createdAt != null) shortDate(fine.createdAt!),
                   ].join(' · '),
                   overflow: TextOverflow.ellipsis,
-                  style: const TextStyle(
+                  style: TextStyle(
                     color: AppColors.textMuted,
                     fontSize: 12.5,
                   ),
@@ -175,7 +175,7 @@ class FineRow extends StatelessWidget {
                 if (fine.status.isOutstanding) ...[
                   const PopupMenuItem(value: 'paid', child: Text('Mark paid')),
                   const PopupMenuItem(value: 'waived', child: Text('Waive')),
-                  const PopupMenuItem(
+                  PopupMenuItem(
                     value: 'delete',
                     child: Text(
                       'Remove',

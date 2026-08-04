@@ -133,7 +133,7 @@ class _AllotmentPageState extends State<AllotmentPage> {
                       ),
                       if (hostels.isEmpty) ...[
                         const SizedBox(height: 16),
-                        const Text(
+                        Text(
                           'No hostels exist yet — create one under '
                           '"Hostels & Rooms" before allotting.',
                           style: TextStyle(
@@ -144,7 +144,7 @@ class _AllotmentPageState extends State<AllotmentPage> {
                         ),
                       ] else if (pending.isNotEmpty && freeBeds == 0) ...[
                         const SizedBox(height: 16),
-                        const Text(
+                        Text(
                           'Every bed is taken but people are still waiting. '
                           'Add rooms or a floor to make space.',
                           style: TextStyle(
@@ -203,7 +203,7 @@ class _AllotmentPageState extends State<AllotmentPage> {
                         _filter == _Filter.pending
                             ? 'Everyone has a room. Nice.'
                             : 'Nobody matches that search.',
-                        style: const TextStyle(color: AppColors.textMuted),
+                        style: TextStyle(color: AppColors.textMuted),
                       ),
                     ),
                   )
@@ -222,7 +222,7 @@ class _AllotmentPageState extends State<AllotmentPage> {
                             onVacate: () => _vacate(shown[i]),
                           ),
                           if (i != shown.length - 1)
-                            const Divider(
+                            Divider(
                               height: 1,
                               indent: 20,
                               endIndent: 20,
@@ -307,7 +307,7 @@ class _Metric extends StatelessWidget {
     children: [
       Text(
         label,
-        style: const TextStyle(
+        style: TextStyle(
           color: AppColors.textMuted,
           fontSize: 12,
           fontWeight: FontWeight.w600,
@@ -356,7 +356,7 @@ class _PersonRow extends StatelessWidget {
               backgroundColor: AppColors.primarySoft,
               child: Text(
                 person.initials,
-                style: const TextStyle(
+                style: TextStyle(
                   color: AppColors.primary,
                   fontWeight: FontWeight.w700,
                   fontSize: 13.5,
@@ -385,7 +385,7 @@ class _PersonRow extends StatelessWidget {
                       if (person.gender != null) person.gender!,
                     ].join(' · '),
                     overflow: TextOverflow.ellipsis,
-                    style: const TextStyle(
+                    style: TextStyle(
                       color: AppColors.textMuted,
                       fontSize: 12.5,
                     ),
@@ -403,7 +403,7 @@ class _PersonRow extends StatelessWidget {
                         AppColors.success,
                         AppColors.successSoft,
                       )
-                    : const StatusPill(
+                    : StatusPill(
                         'NO ROOM',
                         AppColors.warning,
                         AppColors.warningSoft,
@@ -416,7 +416,7 @@ class _PersonRow extends StatelessWidget {
                       icon: const Icon(Icons.more_horiz_rounded, size: 20),
                       onSelected: (v) =>
                           v == 'move' ? onMove() : onVacate(),
-                      itemBuilder: (_) => const [
+                      itemBuilder: (_) => [
                         PopupMenuItem(
                           value: 'move',
                           child: Text('Change room'),

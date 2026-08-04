@@ -76,13 +76,13 @@ class _CollegeNoticesViewState extends State<CollegeNoticesView> {
             AppCard(
               child: Row(
                 children: [
-                  const Icon(
+                  Icon(
                     Icons.public_rounded,
                     size: 19,
                     color: AppColors.primary,
                   ),
                   const SizedBox(width: 10),
-                  const Expanded(
+                  Expanded(
                     child: Text(
                       'Published on sliet.ac.in. Read-only — tap to open the '
                       'notice.',
@@ -124,7 +124,7 @@ class _CollegeNoticesViewState extends State<CollegeNoticesView> {
                     _studentsOnly
                         ? 'None of the latest notices are tagged for students.'
                         : 'The college has not posted any notices.',
-                    style: const TextStyle(color: AppColors.textMuted),
+                    style: TextStyle(color: AppColors.textMuted),
                   ),
                 ),
               )
@@ -139,7 +139,7 @@ class _CollegeNoticesViewState extends State<CollegeNoticesView> {
                         onTap: () => _open(shown[i].target),
                       ),
                       if (i != shown.length - 1)
-                        const Divider(
+                        Divider(
                           height: 1,
                           indent: 20,
                           endIndent: 20,
@@ -185,7 +185,7 @@ class _AnnouncementsStrip extends StatelessWidget {
           Container(
             width: double.infinity,
             padding: const EdgeInsets.fromLTRB(20, 14, 20, 13),
-            decoration: const BoxDecoration(
+            decoration: BoxDecoration(
               color: AppColors.primary,
               borderRadius: BorderRadius.vertical(top: Radius.circular(14)),
             ),
@@ -242,7 +242,7 @@ class _AnnouncementsStrip extends StatelessWidget {
                     Expanded(
                       child: Text(
                         notices[i].title,
-                        style: const TextStyle(
+                        style: TextStyle(
                           fontSize: 13.5,
                           fontWeight: FontWeight.w600,
                           height: 1.4,
@@ -251,7 +251,7 @@ class _AnnouncementsStrip extends StatelessWidget {
                       ),
                     ),
                     const SizedBox(width: 8),
-                    const Padding(
+                    Padding(
                       padding: EdgeInsets.only(top: 2),
                       child: Icon(
                         Icons.open_in_new_rounded,
@@ -264,7 +264,7 @@ class _AnnouncementsStrip extends StatelessWidget {
               ),
             ),
             if (i != notices.length - 1)
-              const Divider(
+              Divider(
                 height: 1,
                 indent: 20,
                 endIndent: 20,
@@ -335,7 +335,7 @@ class _CollegeRow extends StatelessWidget {
                       if (dateStr.isNotEmpty)
                         Text(
                           dateStr,
-                          style: const TextStyle(
+                          style: TextStyle(
                             fontSize: 12,
                             color: AppColors.textMuted,
                           ),
@@ -351,7 +351,7 @@ class _CollegeRow extends StatelessWidget {
                             color: AppColors.primarySoft,
                             borderRadius: BorderRadius.circular(5),
                           ),
-                          child: const Text(
+                          child: Text(
                             'STUDENTS',
                             style: TextStyle(
                               fontSize: 9.5,
@@ -368,7 +368,7 @@ class _CollegeRow extends StatelessWidget {
               ),
             ),
             const SizedBox(width: 8),
-            const Icon(
+            Icon(
               Icons.open_in_new_rounded,
               size: 16,
               color: AppColors.textMuted,
@@ -414,7 +414,7 @@ class _Unavailable extends StatelessWidget {
               color: AppColors.canvas,
               borderRadius: BorderRadius.circular(17),
             ),
-            child: const Icon(
+            child: Icon(
               Icons.cloud_off_rounded,
               size: 27,
               color: AppColors.textMuted,
@@ -429,7 +429,7 @@ class _Unavailable extends StatelessWidget {
           const SizedBox(height: 8),
           ConstrainedBox(
             constraints: const BoxConstraints(maxWidth: 440),
-            child: const Text(
+            child: Text(
               'Notices posted here in the app are unaffected — this only '
               'covers the feed from sliet.ac.in.',
               textAlign: TextAlign.center,

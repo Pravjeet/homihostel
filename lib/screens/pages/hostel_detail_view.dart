@@ -87,7 +87,7 @@ class HostelDetailView extends StatelessWidget {
                     child: Center(child: CircularProgressIndicator()),
                   )
                 else if (rooms.isEmpty)
-                  const AppCard(
+                  AppCard(
                     padding: EdgeInsets.symmetric(vertical: 50),
                     child: Center(
                       child: Text(
@@ -232,7 +232,7 @@ class _Header extends StatelessWidget {
                       '${hostel.gender.label} · ${hostel.floors} floors · '
                       '${hostel.roomCount} rooms · ${hostel.bedCount} beds '
                       '(${hostel.freeBeds} free)',
-                      style: const TextStyle(
+                      style: TextStyle(
                         color: AppColors.textMuted,
                         fontSize: 13,
                       ),
@@ -293,7 +293,7 @@ class _Header extends StatelessWidget {
             const SizedBox(height: 14),
             Row(
               children: [
-                const Icon(
+                Icon(
                   Icons.place_outlined,
                   size: 15,
                   color: AppColors.textMuted,
@@ -302,7 +302,7 @@ class _Header extends StatelessWidget {
                 Expanded(
                   child: Text(
                     hostel.address!,
-                    style: const TextStyle(
+                    style: TextStyle(
                       color: AppColors.textMuted,
                       fontSize: 13,
                     ),
@@ -313,7 +313,7 @@ class _Header extends StatelessWidget {
           ],
           if (hostel.amenities.isNotEmpty) ...[
             const SizedBox(height: 16),
-            const Text(
+            Text(
               'Provided in this hostel',
               style: TextStyle(
                 fontSize: 12,
@@ -364,7 +364,7 @@ class _FloorSection extends StatelessWidget {
               const SizedBox(width: 10),
               Text(
                 '${rooms.length} rooms · $occupied/$beds beds',
-                style: const TextStyle(
+                style: TextStyle(
                   color: AppColors.textMuted,
                   fontSize: 12.5,
                 ),
@@ -470,7 +470,7 @@ class _Legend extends StatelessWidget {
     child: Wrap(
       spacing: 18,
       runSpacing: 8,
-      children: const [
+      children: [
         _LegendDot('Empty', AppColors.success),
         _LegendDot('Partly filled', AppColors.primary),
         _LegendDot('Full', AppColors.warning),
@@ -498,7 +498,7 @@ class _LegendDot extends StatelessWidget {
       const SizedBox(width: 7),
       Text(
         label,
-        style: const TextStyle(
+        style: TextStyle(
           fontSize: 12,
           color: AppColors.textMuted,
           fontWeight: FontWeight.w600,
@@ -707,7 +707,7 @@ class _RoomEditorDialogState extends State<_RoomEditorDialog> {
                     ),
                     child: Text(
                       _error!,
-                      style: const TextStyle(
+                      style: TextStyle(
                         color: AppColors.danger,
                         fontSize: 13,
                       ),
@@ -761,7 +761,7 @@ class _RoomEditorDialogState extends State<_RoomEditorDialog> {
                       'Floor ${widget.room!.floor} · '
                       '${widget.room!.occupied}/${widget.room!.capacity} '
                       'beds occupied',
-                      style: const TextStyle(
+                      style: TextStyle(
                         fontSize: 13,
                         fontWeight: FontWeight.w600,
                         color: AppColors.textMuted,
@@ -856,7 +856,7 @@ class _RoomEditorDialogState extends State<_RoomEditorDialog> {
         if (!_isNew)
           TextButton(
             onPressed: _busy ? null : _delete,
-            child: const Text(
+            child: Text(
               'Delete',
               style: TextStyle(color: AppColors.danger),
             ),
@@ -981,7 +981,7 @@ class _AddFloorDialogState extends State<_AddFloorDialog> {
                     ),
                     child: Text(
                       _error!,
-                      style: const TextStyle(
+                      style: TextStyle(
                         color: AppColors.danger,
                         fontSize: 13,
                       ),
@@ -1074,7 +1074,7 @@ class _AddFloorDialogState extends State<_AddFloorDialog> {
                         : 'Will create rooms ${floor * 100 + 1}–'
                               '${floor * 100 + count}. Any that already exist '
                               'are skipped.',
-                    style: const TextStyle(
+                    style: TextStyle(
                       fontSize: 12.5,
                       color: AppColors.primary,
                       fontWeight: FontWeight.w600,

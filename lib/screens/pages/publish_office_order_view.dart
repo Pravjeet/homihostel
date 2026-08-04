@@ -127,7 +127,7 @@ class _PublishOfficeOrderViewState extends State<PublishOfficeOrderView> {
                 padding: const EdgeInsets.all(14),
                 child: Row(
                   children: [
-                    const Icon(
+                    Icon(
                       Icons.error_outline_rounded,
                       color: AppColors.danger,
                       size: 19,
@@ -136,7 +136,7 @@ class _PublishOfficeOrderViewState extends State<PublishOfficeOrderView> {
                     Expanded(
                       child: Text(
                         _error!,
-                        style: const TextStyle(
+                        style: TextStyle(
                           color: AppColors.danger,
                           fontSize: 13,
                         ),

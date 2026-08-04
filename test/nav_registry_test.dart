@@ -1,6 +1,9 @@
+import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 import 'package:hostel_app/core/nav_registry.dart';
+import 'package:hostel_app/core/theme.dart';
+import 'package:hostel_app/models/college_settings.dart';
 import 'package:hostel_app/core/permissions.dart';
 import 'package:hostel_app/core/session.dart';
 import 'package:hostel_app/models/app_role.dart';
@@ -143,6 +146,75 @@ void main() {
         ),
       );
       expect(asWarden, asSomethingElse);
+    });
+  });
+
+  group('palette', () {
+    tearDown(() {
+      // Tokens are global mutable state — leaving a test in dark mode would
+      // silently change what every later test sees.
+      AppColors.apply(accent: kThemePresets.first.color, dark: false);
+    });
+
+    test('light and dark produce genuinely different surfaces', () {
+      AppColors.apply(accent: kThemePresets.first.color, dark: false);
+      final lightCanvas = AppColors.canvas;
+      final lightText = AppColors.textStrong;
+
+      AppColors.apply(accent: kThemePresets.first.color, dark: true);
+      expect(AppColors.canvas, isNot(lightCanvas));
+      expect(AppColors.textStrong, isNot(lightText));
+      expect(AppColors.isDark, isTrue);
+    });
+
+    test('dark mode inverts the text/background relationship', () {
+      AppColors.apply(accent: kThemePresets.first.color, dark: true);
+      // Text must be lighter than the card it sits on, or it is invisible.
+      expect(
+        AppColors.textStrong.computeLuminance(),
+        greaterThan(AppColors.card.computeLuminance()),
+      );
+
+      AppColors.apply(accent: kThemePresets.first.color, dark: false);
+      expect(
+        AppColors.textStrong.computeLuminance(),
+        lessThan(AppColors.card.computeLuminance()),
+      );
+    });
+
+    test('the accent actually reaches the primary token', () {
+      for (final p in kThemePresets) {
+        AppColors.apply(accent: p.color, dark: false);
+        expect(AppColors.primary, p.color, reason: p.label);
+      }
+    });
+
+    test('every preset stays readable against white text', () {
+      // The reason presets exist instead of a free colour picker.
+      for (final p in kThemePresets) {
+        expect(
+          p.color.computeLuminance(),
+          lessThan(0.5),
+          reason: '${p.label} is too light to carry white button text',
+        );
+      }
+    });
+  });
+
+  group('AppBrightness', () {
+    test('system follows the device, the others do not', () {
+      expect(AppBrightness.system.isDark(Brightness.dark), isTrue);
+      expect(AppBrightness.system.isDark(Brightness.light), isFalse);
+      expect(AppBrightness.dark.isDark(Brightness.light), isTrue);
+      expect(AppBrightness.light.isDark(Brightness.dark), isFalse);
+    });
+
+    test('round-trips through the stored string', () {
+      for (final b in AppBrightness.values) {
+        expect(AppBrightnessX.parse(b.name), b);
+      }
+      expect(AppBrightnessX.parse(null), AppBrightness.light);
+      expect(AppBrightnessX.parse('nonsense'), AppBrightness.light);
     });
   });
 

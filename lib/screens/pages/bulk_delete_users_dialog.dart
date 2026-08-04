@@ -163,7 +163,7 @@ class _Confirm extends StatelessWidget {
             '${users.length == 1 ? '' : 's'} matching: $scopeLabel'
             '${allotted > 0 ? '\n\n$allotted of them hold a room — those beds '
                 'will be freed first.' : ''}',
-            style: const TextStyle(
+            style: TextStyle(
               color: AppColors.danger,
               fontSize: 13,
               height: 1.45,
@@ -239,7 +239,7 @@ class _Confirm extends StatelessWidget {
           const SizedBox(height: 10),
           Text(
             error!,
-            style: const TextStyle(color: AppColors.danger, fontSize: 12.5),
+            style: TextStyle(color: AppColors.danger, fontSize: 12.5),
           ),
         ],
       ],
@@ -272,7 +272,7 @@ class _Progress extends StatelessWidget {
           ),
         ),
         const SizedBox(height: 16),
-        const Text(
+        Text(
           'Freeing rooms and removing profiles. Leave this open.',
           style: TextStyle(color: AppColors.textMuted, fontSize: 12.5),
         ),
@@ -315,7 +315,7 @@ class _Result extends StatelessWidget {
                     padding: const EdgeInsets.only(bottom: 4),
                     child: Text(
                       f,
-                      style: const TextStyle(
+                      style: TextStyle(
                         fontSize: 12.5,
                         color: AppColors.danger,
                       ),
@@ -343,7 +343,7 @@ class _Tally extends StatelessWidget {
     children: [
       Text(
         label,
-        style: const TextStyle(
+        style: TextStyle(
           fontSize: 11.5,
           fontWeight: FontWeight.w700,
           color: AppColors.textMuted,

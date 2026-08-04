@@ -155,7 +155,7 @@ class _ImposeFineViewState extends State<ImposeFineView> {
                 padding: const EdgeInsets.all(14),
                 child: Row(
                   children: [
-                    const Icon(
+                    Icon(
                       Icons.error_outline_rounded,
                       color: AppColors.danger,
                       size: 19,
@@ -164,7 +164,7 @@ class _ImposeFineViewState extends State<ImposeFineView> {
                     Expanded(
                       child: Text(
                         _error!,
-                        style: const TextStyle(
+                        style: TextStyle(
                           color: AppColors.danger,
                           fontSize: 13,
                         ),
@@ -181,7 +181,7 @@ class _ImposeFineViewState extends State<ImposeFineView> {
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  const Text(
+                  Text(
                     'Student',
                     style: TextStyle(
                       fontSize: 12,
@@ -377,7 +377,7 @@ class _SelectedStudent extends StatelessWidget {
               const SizedBox(height: 2),
               Text(
                 _subtitleFor(student),
-                style: const TextStyle(
+                style: TextStyle(
                   fontSize: 12.5,
                   color: AppColors.textMuted,
                 ),
@@ -416,7 +416,7 @@ class _StudentResults extends StatelessWidget {
   Widget build(BuildContext context) {
     final q = query.trim().toLowerCase();
     if (q.length < 2) {
-      return const Padding(
+      return Padding(
         padding: EdgeInsets.symmetric(vertical: 18),
         child: Text(
           'Type at least two characters to find a student.',
@@ -450,7 +450,7 @@ class _StudentResults extends StatelessWidget {
             .toList();
 
         if (matches.isEmpty) {
-          return const Padding(
+          return Padding(
             padding: EdgeInsets.symmetric(vertical: 18),
             child: Text(
               'Nobody matches that.',
@@ -481,7 +481,7 @@ class _StudentResults extends StatelessWidget {
                           backgroundColor: AppColors.primarySoft,
                           child: Text(
                             matches[i].initials,
-                            style: const TextStyle(
+                            style: TextStyle(
                               color: AppColors.primary,
                               fontWeight: FontWeight.w700,
                               fontSize: 12,
@@ -504,7 +504,7 @@ class _StudentResults extends StatelessWidget {
                               Text(
                                 _subtitleFor(matches[i]),
                                 overflow: TextOverflow.ellipsis,
-                                style: const TextStyle(
+                                style: TextStyle(
                                   fontSize: 12,
                                   color: AppColors.textMuted,
                                 ),
@@ -517,7 +517,7 @@ class _StudentResults extends StatelessWidget {
                   ),
                 ),
                 if (i != matches.length - 1)
-                  const Divider(height: 1, color: AppColors.border),
+                  Divider(height: 1, color: AppColors.border),
               ],
             ],
           ),

@@ -63,7 +63,7 @@ class _MessMenuViewState extends State<MessMenuView> {
                 children: [
                   Row(
                     children: [
-                      const Expanded(
+                      Expanded(
                         child: Text(
                           'DAY',
                           style: TextStyle(
@@ -144,7 +144,7 @@ class _MessMenuViewState extends State<MessMenuView> {
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    const Text(
+                    Text(
                       'GOOD TO KNOW',
                       style: TextStyle(
                         fontSize: 11,
@@ -160,7 +160,7 @@ class _MessMenuViewState extends State<MessMenuView> {
                         child: Row(
                           crossAxisAlignment: CrossAxisAlignment.start,
                           children: [
-                            const Padding(
+                            Padding(
                               padding: EdgeInsets.only(top: 5, right: 10),
                               child: Icon(
                                 Icons.circle,
@@ -171,7 +171,7 @@ class _MessMenuViewState extends State<MessMenuView> {
                             Expanded(
                               child: Text(
                                 n,
-                                style: const TextStyle(
+                                style: TextStyle(
                                   fontSize: 13,
                                   height: 1.5,
                                   color: AppColors.textMuted,
@@ -192,7 +192,7 @@ class _MessMenuViewState extends State<MessMenuView> {
               Text(
                 'Last updated ${_formatDate(menu.updatedAt!)}'
                 '${menu.updatedByName != null ? ' by ${menu.updatedByName}' : ''}',
-                style: const TextStyle(
+                style: TextStyle(
                   fontSize: 12,
                   color: AppColors.textMuted,
                 ),
@@ -212,7 +212,7 @@ class _MessMenuViewState extends State<MessMenuView> {
       child: Center(
         child: Column(
           children: [
-            const Icon(
+            Icon(
               Icons.restaurant_menu_rounded,
               size: 40,
               color: AppColors.textMuted,
@@ -229,7 +229,7 @@ class _MessMenuViewState extends State<MessMenuView> {
                         'meal to match your mess.'
                   : 'Your mess manager hasn\'t published the menu yet.',
               textAlign: TextAlign.center,
-              style: const TextStyle(
+              style: TextStyle(
                 fontSize: 13,
                 color: AppColors.textMuted,
                 height: 1.5,
@@ -415,7 +415,7 @@ class _MealCard extends StatelessWidget {
                         ),
                         if (isSpecial) ...[
                           const SizedBox(width: 8),
-                          const StatusPill(
+                          StatusPill(
                             'SPECIAL',
                             AppColors.warning,
                             AppColors.warningSoft,
@@ -426,7 +426,7 @@ class _MealCard extends StatelessWidget {
                     const SizedBox(height: 2),
                     Text(
                       timing,
-                      style: const TextStyle(
+                      style: TextStyle(
                         fontSize: 12,
                         color: AppColors.textMuted,
                         height: 1.4,

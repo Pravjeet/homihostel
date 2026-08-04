@@ -54,7 +54,7 @@ class _StartupError extends StatelessWidget {
           child: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
-              const Icon(
+              Icon(
                 Icons.cloud_off_rounded,
                 size: 44,
                 color: AppColors.danger,
@@ -68,7 +68,7 @@ class _StartupError extends StatelessWidget {
               Text(
                 '$error',
                 textAlign: TextAlign.center,
-                style: const TextStyle(
+                style: TextStyle(
                   color: AppColors.textMuted,
                   fontSize: 13,
                 ),

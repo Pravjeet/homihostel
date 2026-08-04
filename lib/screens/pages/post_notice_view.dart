@@ -122,7 +122,7 @@ class _PostNoticeViewState extends State<PostNoticeView> {
                 padding: const EdgeInsets.all(14),
                 child: Row(
                   children: [
-                    const Icon(
+                    Icon(
                       Icons.error_outline_rounded,
                       color: AppColors.danger,
                       size: 19,
@@ -131,7 +131,7 @@ class _PostNoticeViewState extends State<PostNoticeView> {
                     Expanded(
                       child: Text(
                         _error!,
-                        style: const TextStyle(
+                        style: TextStyle(
                           color: AppColors.danger,
                           fontSize: 13,
                         ),
