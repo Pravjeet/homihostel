@@ -45,6 +45,29 @@ class _ProfilePageState extends State<ProfilePage> {
     }
   }
 
+  Future<void> _changePassword(BuildContext context) async {
+    final messenger = ScaffoldMessenger.of(context);
+    final result = await showDialog<_PasswordChangeRequest>(
+      context: context,
+      builder: (_) => const _ChangePasswordDialog(),
+    );
+    if (result == null) return;
+
+    try {
+      await AuthService.instance.changeOwnPassword(
+        currentPassword: result.currentPassword,
+        newPassword: result.newPassword,
+      );
+      messenger.showSnackBar(
+        const SnackBar(content: Text('Password changed')),
+      );
+    } catch (e) {
+      messenger.showSnackBar(
+        SnackBar(content: Text(AuthService.describeError(e))),
+      );
+    }
+  }
+
   Future<void> _changeEmail(BuildContext context) async {
     final messenger = ScaffoldMessenger.of(context);
     final result = await showDialog<_EmailChangeRequest>(
@@ -189,19 +212,33 @@ class _ProfilePageState extends State<ProfilePage> {
                       OutlinedButton(
                         onPressed: _busy
                             ? null
-                            : () async {
-                                final messenger = ScaffoldMessenger.of(context);
-                                await AuthService.instance.sendPasswordReset(
-                                  Identity.display(user.email),
-                                );
-                                messenger.showSnackBar(
-                                  const SnackBar(
-                                    content: Text('Password reset email sent'),
-                                  ),
-                                );
-                              },
-                        child: const Text('Reset password'),
+                            : () => _changePassword(context),
+                        child: const Text('Change password'),
                       ),
+                      if (!Identity.isSynthetic(user.email)) ...[
+                        const SizedBox(width: 12),
+                        OutlinedButton(
+                          onPressed: _busy
+                              ? null
+                              : () async {
+                                  final messenger = ScaffoldMessenger.of(
+                                    context,
+                                  );
+                                  await AuthService.instance
+                                      .sendPasswordReset(
+                                        Identity.display(user.email),
+                                      );
+                                  messenger.showSnackBar(
+                                    const SnackBar(
+                                      content: Text(
+                                        'Password reset email sent',
+                                      ),
+                                    ),
+                                  );
+                                },
+                          child: const Text('Email me a reset link'),
+                        ),
+                      ],
                     ],
                   ),
                 ],
@@ -210,6 +247,126 @@ class _ProfilePageState extends State<ProfilePage> {
           ),
         ],
       ),
+    );
+  }
+}
+
+class _PasswordChangeRequest {
+  final String currentPassword;
+  final String newPassword;
+  const _PasswordChangeRequest(this.currentPassword, this.newPassword);
+}
+
+/// Collects the current password plus a new one. Works the same for a
+/// synthetic (registration-number) login as for a real email — this is the
+/// only way students who signed in with the roll-number-derived starter
+/// password can set one only they know.
+class _ChangePasswordDialog extends StatefulWidget {
+  const _ChangePasswordDialog();
+
+  @override
+  State<_ChangePasswordDialog> createState() => _ChangePasswordDialogState();
+}
+
+class _ChangePasswordDialogState extends State<_ChangePasswordDialog> {
+  final _formKey = GlobalKey<FormState>();
+  final _current = TextEditingController();
+  final _next = TextEditingController();
+  final _confirm = TextEditingController();
+  bool _obscureCurrent = true;
+  bool _obscureNext = true;
+
+  @override
+  void dispose() {
+    _current.dispose();
+    _next.dispose();
+    _confirm.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return AlertDialog(
+      title: const Text('Change your password'),
+      content: Form(
+        key: _formKey,
+        child: SizedBox(
+          width: 380,
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              TextFormField(
+                controller: _current,
+                autofocus: true,
+                obscureText: _obscureCurrent,
+                decoration: InputDecoration(
+                  labelText: 'Current password',
+                  suffixIcon: IconButton(
+                    icon: Icon(
+                      _obscureCurrent
+                          ? Icons.visibility_outlined
+                          : Icons.visibility_off_outlined,
+                      size: 19,
+                    ),
+                    onPressed: () =>
+                        setState(() => _obscureCurrent = !_obscureCurrent),
+                  ),
+                ),
+                validator: (v) => (v == null || v.isEmpty)
+                    ? 'Enter your current password'
+                    : null,
+              ),
+              const SizedBox(height: 14),
+              TextFormField(
+                controller: _next,
+                obscureText: _obscureNext,
+                decoration: InputDecoration(
+                  labelText: 'New password',
+                  suffixIcon: IconButton(
+                    icon: Icon(
+                      _obscureNext
+                          ? Icons.visibility_outlined
+                          : Icons.visibility_off_outlined,
+                      size: 19,
+                    ),
+                    onPressed: () =>
+                        setState(() => _obscureNext = !_obscureNext),
+                  ),
+                ),
+                validator: (v) => (v == null || v.length < 6)
+                    ? 'Use at least 6 characters'
+                    : null,
+              ),
+              const SizedBox(height: 14),
+              TextFormField(
+                controller: _confirm,
+                obscureText: _obscureNext,
+                decoration: const InputDecoration(
+                  labelText: 'Confirm new password',
+                ),
+                validator: (v) =>
+                    v != _next.text ? 'Passwords don\'t match' : null,
+              ),
+            ],
+          ),
+        ),
+      ),
+      actions: [
+        TextButton(
+          onPressed: () => Navigator.pop(context),
+          child: const Text('Cancel'),
+        ),
+        FilledButton(
+          onPressed: () {
+            if (!_formKey.currentState!.validate()) return;
+            Navigator.pop(
+              context,
+              _PasswordChangeRequest(_current.text, _next.text),
+            );
+          },
+          child: const Text('Change password'),
+        ),
+      ],
     );
   }
 }

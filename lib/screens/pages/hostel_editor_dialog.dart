@@ -9,8 +9,9 @@ import '../../widgets/selectable_chips.dart';
 /// Create or edit a hostel.
 ///
 /// On create it also collects the room-generation plan (floors x rooms per
-/// floor) and writes every room. On edit that section is hidden, because the
-/// rooms already exist — use "Add floor" or the room editor to change them.
+/// floor, plus optional extra seater types) and writes every room. On edit
+/// that section is hidden, because the rooms already exist — use "Add floor"
+/// or the room editor to change them.
 class HostelEditorDialog extends StatefulWidget {
   final String collegeId;
 
@@ -30,11 +31,17 @@ class HostelEditorDialogState extends State<HostelEditorDialog> {
   late final TextEditingController _code;
   late final TextEditingController _address;
 
-  /// One row per [RoomBlock] — a span of floors sharing a room count and
-  /// capacity. Starts as a single block matching the old defaults, so a
-  /// uniform hostel is still just one row; a mixed building (different
-  /// capacities, or a floor laid out differently) is more rows.
-  final List<_BlockDraft> _blocks = [];
+  // The main room type: floors x rooms/floor x capacity, exactly as before.
+  final _floors = TextEditingController(text: '4');
+  final _roomsPerFloor = TextEditingController(text: '25');
+  int _capacity = 2;
+
+  /// Extra seater types beyond the main one — e.g. a hostel that's mostly
+  /// 2-seaters but has a block of singles too. Each gets its own whole
+  /// floors, picking up right after the previous type's floors, so the
+  /// building comes out divided by seater type without anyone having to
+  /// plan floor numbers by hand.
+  final List<_ExtraTypeDraft> _extraTypes = [];
 
   late HostelGender _gender;
   late Set<String> _amenities;
@@ -43,7 +50,15 @@ class HostelEditorDialogState extends State<HostelEditorDialog> {
   bool _busy = false;
   String? _error;
 
+  /// When editing, the room-plan fields are hidden behind this — set once
+  /// the admin explicitly opts into replacing the existing room layout.
+  bool _regenerateRooms = false;
+
   bool get _isEditing => widget.hostel != null;
+
+  /// Whether the room-plan fields below should currently be shown and
+  /// included in [_save].
+  bool get _showRoomPlan => !_isEditing || _regenerateRooms;
 
   @override
   void initState() {
@@ -54,61 +69,69 @@ class HostelEditorDialogState extends State<HostelEditorDialog> {
     _address = TextEditingController(text: h?.address ?? '');
     _gender = h?.gender ?? HostelGender.boys;
     _amenities = {...?h?.amenities};
-    if (!_isEditing) {
-      _blocks.add(
-        _BlockDraft(fromFloor: 1, toFloor: 4, roomsPerFloor: 25, capacity: 2),
-      );
-    }
   }
 
   @override
   void dispose() {
-    for (final c in [_name, _code, _address]) {
+    for (final c in [_name, _code, _address, _floors, _roomsPerFloor]) {
       c.dispose();
     }
-    for (final b in _blocks) {
-      b.dispose();
+    for (final t in _extraTypes) {
+      t.dispose();
     }
     super.dispose();
   }
 
-  void _addBlock() => setState(() {
-    final lastTo = _blocks.isEmpty
-        ? 0
-        : (int.tryParse(_blocks.last.toFloor.text) ?? 0);
-    _blocks.add(
-      _BlockDraft(
-        fromFloor: lastTo + 1,
-        toFloor: lastTo + 1,
-        roomsPerFloor: 25,
-        capacity: 2,
-      ),
-    );
+  /// Room types = the main one plus every extra row.
+  int get _roomTypeCount => 1 + _extraTypes.length;
+
+  void _setRoomTypeCount(int n) => setState(() {
+    final target = n.clamp(1, 6);
+    while (_extraTypes.length + 1 < target) {
+      // Pick a capacity not already used, so the new row isn't a duplicate
+      // of one already on screen — the whole point of adding a type.
+      final used = {_capacity, ..._extraTypes.map((t) => t.capacity)};
+      final next = [1, 2, 3, 4, 5, 6].firstWhere(
+        (c) => !used.contains(c),
+        orElse: () => 1,
+      );
+      _extraTypes.add(
+        _ExtraTypeDraft(totalRooms: '25', capacity: next),
+      );
+    }
+    while (_extraTypes.length + 1 > target) {
+      _extraTypes.removeLast().dispose();
+    }
   });
 
-  void _removeBlock(int i) => setState(() {
-    _blocks.removeAt(i).dispose();
-  });
-
-  RoomPlan get _plan => RoomPlan(
-    blocks: _blocks
-        .map(
-          (d) => RoomBlock(
-            fromFloor: int.tryParse(d.fromFloor.text) ?? 0,
-            toFloor: int.tryParse(d.toFloor.text) ?? 0,
-            roomsPerFloor: int.tryParse(d.roomsPerFloor.text) ?? 0,
-            capacity: d.capacity,
-            features: _roomFeatures.toList(),
+  RoomPlan get _plan {
+    final perFloor = int.tryParse(_roomsPerFloor.text) ?? 0;
+    final floors = int.tryParse(_floors.text) ?? 0;
+    final features = _roomFeatures.toList();
+    return RoomPlan(
+      blocks: [
+        RoomBlock(
+          capacity: _capacity,
+          totalRooms: floors * perFloor,
+          roomsPerFloor: perFloor,
+          features: features,
+        ),
+        for (final t in _extraTypes)
+          RoomBlock(
+            capacity: t.capacity,
+            totalRooms: int.tryParse(t.totalRooms.text) ?? 0,
+            roomsPerFloor: perFloor,
+            features: features,
           ),
-        )
-        .toList(),
-  );
+      ],
+    );
+  }
 
   Future<void> _save() async {
     if (!_formKey.currentState!.validate()) return;
 
     final plan = _plan;
-    if (!_isEditing && plan.totalRooms > 2000) {
+    if (_showRoomPlan && plan.totalRooms > 2000) {
       setState(
         () => _error =
             'That would create ${plan.totalRooms} rooms. Cap it at 2000 — '
@@ -117,12 +140,18 @@ class HostelEditorDialogState extends State<HostelEditorDialog> {
       return;
     }
 
+    final messenger = ScaffoldMessenger.of(context);
+
+    if (_regenerateRooms) {
+      final confirmed = await _confirmRegenerate(context, plan);
+      if (confirmed != true || !mounted) return;
+    }
+
     setState(() {
       _busy = true;
       _error = null;
     });
 
-    final messenger = ScaffoldMessenger.of(context);
     try {
       if (_isEditing) {
         await HostelService.instance.updateHostel(
@@ -135,6 +164,13 @@ class HostelEditorDialogState extends State<HostelEditorDialog> {
             address: _address.text.trim(),
           ),
         );
+        if (_regenerateRooms) {
+          await HostelService.instance.regenerateRooms(
+            collegeId: widget.collegeId,
+            hostelId: widget.hostel!.id,
+            plan: plan,
+          );
+        }
       } else {
         await HostelService.instance.createHostel(
           collegeId: widget.collegeId,
@@ -154,7 +190,10 @@ class HostelEditorDialogState extends State<HostelEditorDialog> {
       messenger.showSnackBar(
         SnackBar(
           content: Text(
-            _isEditing
+            _regenerateRooms
+                ? 'Hostel updated and rooms regenerated '
+                      '(${plan.totalRooms} rooms)'
+                : _isEditing
                 ? 'Hostel updated'
                 : 'Created ${_name.text.trim()} with ${plan.totalRooms} rooms',
           ),
@@ -169,6 +208,32 @@ class HostelEditorDialogState extends State<HostelEditorDialog> {
     }
   }
 
+  Future<bool?> _confirmRegenerate(BuildContext context, RoomPlan plan) {
+    return showDialog<bool>(
+      context: context,
+      builder: (c) => AlertDialog(
+        title: const Text('Replace all rooms?'),
+        content: Text(
+          'Every existing room in ${widget.hostel!.name} will be deleted '
+          'and replaced with ${plan.totalRooms} new rooms (${plan.rangeSummary}). '
+          'This cannot be undone. Rooms that currently have a student in '
+          'them will block this instead of being deleted.',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(c, false),
+            child: const Text('Cancel'),
+          ),
+          FilledButton(
+            style: FilledButton.styleFrom(backgroundColor: AppColors.danger),
+            onPressed: () => Navigator.pop(c, true),
+            child: const Text('Replace rooms'),
+          ),
+        ],
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final plan = _plan;
@@ -176,8 +241,8 @@ class HostelEditorDialogState extends State<HostelEditorDialog> {
     return AlertDialog(
       title: Text(_isEditing ? 'Edit ${widget.hostel!.name}' : 'Add a hostel'),
       content: SizedBox(
-        width: 660,
-        height: 620,
+        width: 600,
+        height: 600,
         child: Form(
           key: _formKey,
           child: SingleChildScrollView(
@@ -285,46 +350,218 @@ class HostelEditorDialogState extends State<HostelEditorDialog> {
                   onChanged: (v) => setState(() => _amenities = v),
                 ),
 
-                if (!_isEditing) ...[
-                  const SizedBox(height: 24),
-                  const Divider(),
-                  const SizedBox(height: 14),
-                  const Text(
-                    'Rooms',
-                    style: TextStyle(fontSize: 14, fontWeight: FontWeight.w700),
-                  ),
-                  const SizedBox(height: 4),
+                const SizedBox(height: 24),
+                const Divider(),
+                const SizedBox(height: 14),
+                const Text(
+                  'Rooms',
+                  style: TextStyle(fontSize: 14, fontWeight: FontWeight.w700),
+                ),
+                const SizedBox(height: 4),
+
+                if (_isEditing && !_regenerateRooms) ...[
                   Text(
-                    'Each row is a span of floors sharing the same room count '
-                    'and capacity. Add another row for a floor laid out '
-                    'differently, or to mix room sizes in the same building — '
-                    'e.g. 60 three-seaters and 61 singles.',
+                    'Rooms already exist for this hostel — use "Add room", '
+                    '"Add floor" or tap a room to edit it individually. If '
+                    'the whole layout was wrong from the start, you can '
+                    'replace every room here instead of deleting the hostel.',
                     style: TextStyle(
                       color: AppColors.textMuted,
                       fontSize: 12.5,
                       height: 1.4,
                     ),
                   ),
-                  const SizedBox(height: 14),
-                  for (var i = 0; i < _blocks.length; i++) ...[
-                    _RoomBlockRow(
-                      draft: _blocks[i],
-                      enabled: !_busy,
-                      canRemove: _blocks.length > 1,
-                      onChanged: () => setState(() {}),
-                      onRemove: () => _removeBlock(i),
-                    ),
-                    const SizedBox(height: 10),
-                  ],
-                  Align(
-                    alignment: Alignment.centerLeft,
-                    child: TextButton.icon(
-                      onPressed: _busy ? null : _addBlock,
-                      icon: const Icon(Icons.add_rounded, size: 17),
-                      label: const Text('Add a row for another floor layout'),
+                  const SizedBox(height: 12),
+                  OutlinedButton.icon(
+                    onPressed: _busy
+                        ? null
+                        : () => setState(() => _regenerateRooms = true),
+                    icon: const Icon(Icons.restart_alt_rounded, size: 17),
+                    label: const Text('Regenerate rooms…'),
+                    style: OutlinedButton.styleFrom(
+                      foregroundColor: AppColors.danger,
+                      side: BorderSide(color: AppColors.danger),
                     ),
                   ),
-                  const SizedBox(height: 16),
+                ],
+
+                if (_showRoomPlan) ...[
+                  if (_isEditing) ...[
+                    const SizedBox(height: 4),
+                    Container(
+                      width: double.infinity,
+                      padding: const EdgeInsets.all(12),
+                      decoration: BoxDecoration(
+                        color: AppColors.dangerSoft,
+                        borderRadius: BorderRadius.circular(10),
+                      ),
+                      child: Row(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Icon(
+                            Icons.warning_amber_rounded,
+                            size: 18,
+                            color: AppColors.danger,
+                          ),
+                          const SizedBox(width: 8),
+                          Expanded(
+                            child: Text(
+                              'This deletes every existing room in this '
+                              'hostel and creates new ones from the layout '
+                              'below. Blocked if any room currently has a '
+                              'student in it.',
+                              style: TextStyle(
+                                color: AppColors.danger,
+                                fontSize: 12.5,
+                                height: 1.4,
+                              ),
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                    const SizedBox(height: 10),
+                    Align(
+                      alignment: Alignment.centerLeft,
+                      child: TextButton(
+                        onPressed: _busy
+                            ? null
+                            : () => setState(() => _regenerateRooms = false),
+                        child: const Text('Cancel — keep existing rooms'),
+                      ),
+                    ),
+                  ] else
+                    Text(
+                      'Describe the layout and every room is created for '
+                      'you. You can add, edit or remove individual rooms '
+                      'afterwards.',
+                      style: TextStyle(
+                        color: AppColors.textMuted,
+                        fontSize: 12.5,
+                        height: 1.4,
+                      ),
+                    ),
+                  const SizedBox(height: 14),
+                  Row(
+                    children: [
+                      Expanded(
+                        child: TextFormField(
+                          controller: _floors,
+                          enabled: !_busy,
+                          keyboardType: TextInputType.number,
+                          onChanged: (_) => setState(() {}),
+                          decoration: const InputDecoration(
+                            labelText: 'Floors',
+                          ),
+                          validator: (v) {
+                            final n = int.tryParse(v ?? '');
+                            if (n == null || n < 1) return 'Min 1';
+                            if (n > 20) return 'Max 20';
+                            return null;
+                          },
+                        ),
+                      ),
+                      const SizedBox(width: 12),
+                      Expanded(
+                        child: TextFormField(
+                          controller: _roomsPerFloor,
+                          enabled: !_busy,
+                          keyboardType: TextInputType.number,
+                          onChanged: (_) => setState(() {}),
+                          decoration: const InputDecoration(
+                            labelText: 'Rooms per floor',
+                          ),
+                          validator: (v) {
+                            final n = int.tryParse(v ?? '');
+                            if (n == null || n < 1) return 'Min 1';
+                            if (n > 99) return 'Max 99';
+                            return null;
+                          },
+                        ),
+                      ),
+                      const SizedBox(width: 12),
+                      Expanded(
+                        child: DropdownButtonFormField<int>(
+                          initialValue: _capacity,
+                          decoration: const InputDecoration(
+                            labelText: 'Capacity',
+                          ),
+                          items: const [1, 2, 3, 4, 5, 6]
+                              .map(
+                                (n) => DropdownMenuItem(
+                                  value: n,
+                                  child: Text(
+                                    n == 1 ? 'Single' : '$n seater',
+                                  ),
+                                ),
+                              )
+                              .toList(),
+                          onChanged: _busy
+                              ? null
+                              : (v) => setState(() => _capacity = v ?? 2),
+                        ),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 18),
+
+                  // Most hostels have one room type and stop here. This is
+                  // for the building that doesn't — a wing of 3-seaters and
+                  // a wing of singles, say.
+                  Row(
+                    children: [
+                      Text(
+                        'Room types',
+                        style: TextStyle(
+                          fontSize: 13,
+                          fontWeight: FontWeight.w700,
+                        ),
+                      ),
+                      const SizedBox(width: 10),
+                      IconButton(
+                        onPressed: (_busy || _roomTypeCount <= 1)
+                            ? null
+                            : () => _setRoomTypeCount(_roomTypeCount - 1),
+                        icon: const Icon(Icons.remove_circle_outline, size: 20),
+                        visualDensity: VisualDensity.compact,
+                      ),
+                      Text(
+                        '$_roomTypeCount',
+                        style: const TextStyle(
+                          fontSize: 14,
+                          fontWeight: FontWeight.w700,
+                        ),
+                      ),
+                      IconButton(
+                        onPressed: (_busy || _roomTypeCount >= 6)
+                            ? null
+                            : () => _setRoomTypeCount(_roomTypeCount + 1),
+                        icon: const Icon(Icons.add_circle_outline, size: 20),
+                        visualDensity: VisualDensity.compact,
+                      ),
+                      const SizedBox(width: 4),
+                      Expanded(
+                        child: Text(
+                          'More than one if this building has different '
+                          'seater types — each gets its own floors.',
+                          style: TextStyle(
+                            fontSize: 11.5,
+                            color: AppColors.textMuted,
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                  for (var i = 0; i < _extraTypes.length; i++) ...[
+                    const SizedBox(height: 10),
+                    _ExtraTypeRow(
+                      draft: _extraTypes[i],
+                      enabled: !_busy,
+                      onChanged: () => setState(() {}),
+                    ),
+                  ],
+
+                  const SizedBox(height: 18),
                   const Text(
                     'Default room features',
                     style: TextStyle(
@@ -361,7 +598,7 @@ class HostelEditorDialogState extends State<HostelEditorDialog> {
                         ),
                         const SizedBox(height: 4),
                         Text(
-                          'Numbered ${plan.rangeSummary}',
+                          plan.rangeSummary,
                           style: TextStyle(
                             fontSize: 12.5,
                             color: AppColors.primary,
@@ -399,153 +636,75 @@ class HostelEditorDialogState extends State<HostelEditorDialog> {
   }
 }
 
-/// Mutable editing state for one [RoomBlock] row. A plain holder rather than
-/// an immutable value so each row keeps its own [TextEditingController]s —
-/// rebuilding them on every keystroke would drop focus and cursor position.
-class _BlockDraft {
-  final TextEditingController fromFloor;
-  final TextEditingController toFloor;
-  final TextEditingController roomsPerFloor;
+/// Editing state for one extra room type: how many rooms, and what capacity.
+/// Rooms per floor is shared with the main type above, so this row is just
+/// two fields.
+class _ExtraTypeDraft {
+  final TextEditingController totalRooms;
   int capacity;
 
-  _BlockDraft({
-    required int fromFloor,
-    required int toFloor,
-    required int roomsPerFloor,
-    required this.capacity,
-  }) : fromFloor = TextEditingController(text: '$fromFloor'),
-       toFloor = TextEditingController(text: '$toFloor'),
-       roomsPerFloor = TextEditingController(text: '$roomsPerFloor');
+  _ExtraTypeDraft({required String totalRooms, required this.capacity})
+    : totalRooms = TextEditingController(text: totalRooms);
 
-  void dispose() {
-    fromFloor.dispose();
-    toFloor.dispose();
-    roomsPerFloor.dispose();
-  }
+  void dispose() => totalRooms.dispose();
 }
 
-class _RoomBlockRow extends StatelessWidget {
-  final _BlockDraft draft;
+class _ExtraTypeRow extends StatelessWidget {
+  final _ExtraTypeDraft draft;
   final bool enabled;
-  final bool canRemove;
   final VoidCallback onChanged;
-  final VoidCallback onRemove;
 
-  const _RoomBlockRow({
+  const _ExtraTypeRow({
     required this.draft,
     required this.enabled,
-    required this.canRemove,
     required this.onChanged,
-    required this.onRemove,
   });
 
   @override
-  Widget build(BuildContext context) => Container(
-    padding: const EdgeInsets.all(12),
-    decoration: BoxDecoration(
-      color: AppColors.canvas,
-      borderRadius: BorderRadius.circular(10),
-      border: Border.all(color: AppColors.border),
-    ),
-    child: Row(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        SizedBox(
-          width: 70,
-          child: TextFormField(
-            controller: draft.fromFloor,
-            enabled: enabled,
-            keyboardType: TextInputType.number,
-            onChanged: (_) => onChanged(),
-            decoration: const InputDecoration(
-              labelText: 'From floor',
-              isDense: true,
-            ),
-            validator: (v) {
-              final n = int.tryParse(v ?? '');
-              if (n == null || n < 1) return 'Min 1';
-              if (n > 20) return 'Max 20';
-              return null;
-            },
+  Widget build(BuildContext context) => Row(
+    children: [
+      Expanded(
+        child: TextFormField(
+          controller: draft.totalRooms,
+          enabled: enabled,
+          keyboardType: TextInputType.number,
+          onChanged: (_) => onChanged(),
+          decoration: const InputDecoration(
+            labelText: 'Number of rooms',
+            isDense: true,
           ),
+          validator: (v) {
+            final n = int.tryParse(v ?? '');
+            if (n == null || n < 1) return 'Min 1';
+            if (n > 999) return 'Max 999';
+            return null;
+          },
         ),
-        Padding(
-          padding: const EdgeInsets.only(top: 16, left: 8, right: 8),
-          child: Text('to', style: TextStyle(color: AppColors.textMuted)),
-        ),
-        SizedBox(
-          width: 70,
-          child: TextFormField(
-            controller: draft.toFloor,
-            enabled: enabled,
-            keyboardType: TextInputType.number,
-            onChanged: (_) => onChanged(),
-            decoration: const InputDecoration(
-              labelText: 'To floor',
-              isDense: true,
-            ),
-            validator: (v) {
-              final n = int.tryParse(v ?? '');
-              final from = int.tryParse(draft.fromFloor.text);
-              if (n == null || n < 1) return 'Min 1';
-              if (n > 20) return 'Max 20';
-              if (from != null && n < from) return '< from';
-              return null;
-            },
+      ),
+      const SizedBox(width: 12),
+      Expanded(
+        child: DropdownButtonFormField<int>(
+          initialValue: draft.capacity,
+          decoration: const InputDecoration(
+            labelText: 'Capacity',
+            isDense: true,
           ),
+          items: const [1, 2, 3, 4, 5, 6]
+              .map(
+                (n) => DropdownMenuItem(
+                  value: n,
+                  child: Text(n == 1 ? 'Single' : '$n seater'),
+                ),
+              )
+              .toList(),
+          onChanged: enabled
+              ? (v) {
+                  draft.capacity = v ?? draft.capacity;
+                  onChanged();
+                }
+              : null,
         ),
-        const SizedBox(width: 12),
-        SizedBox(
-          width: 110,
-          child: TextFormField(
-            controller: draft.roomsPerFloor,
-            enabled: enabled,
-            keyboardType: TextInputType.number,
-            onChanged: (_) => onChanged(),
-            decoration: const InputDecoration(
-              labelText: 'Rooms / floor',
-              isDense: true,
-            ),
-            validator: (v) {
-              final n = int.tryParse(v ?? '');
-              if (n == null || n < 1) return 'Min 1';
-              if (n > 99) return 'Max 99';
-              return null;
-            },
-          ),
-        ),
-        const SizedBox(width: 12),
-        SizedBox(
-          width: 120,
-          child: DropdownButtonFormField<int>(
-            initialValue: draft.capacity,
-            decoration: const InputDecoration(
-              labelText: 'Capacity',
-              isDense: true,
-            ),
-            items: const [1, 2, 3, 4, 5, 6]
-                .map(
-                  (n) => DropdownMenuItem(
-                    value: n,
-                    child: Text(n == 1 ? 'Single' : '$n seater'),
-                  ),
-                )
-                .toList(),
-            onChanged: enabled
-                ? (v) {
-                    draft.capacity = v ?? draft.capacity;
-                    onChanged();
-                  }
-                : null,
-          ),
-        ),
-        const Spacer(),
-        IconButton(
-          onPressed: enabled && canRemove ? onRemove : null,
-          icon: const Icon(Icons.close_rounded, size: 18),
-          tooltip: 'Remove this row',
-        ),
-      ],
-    ),
+      ),
+    ],
   );
 }

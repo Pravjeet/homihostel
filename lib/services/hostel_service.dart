@@ -257,6 +257,54 @@ class HostelService {
     });
   }
 
+  /// Deletes every room in the hostel and replaces them with a freshly
+  /// generated plan.
+  ///
+  /// For when the initial room layout was wrong — mistyped floor count,
+  /// wrong capacity — and re-doing it is easier than editing dozens of rooms
+  /// by hand or deleting the whole hostel and starting over.
+  ///
+  /// Refuses if any existing room currently holds a student: replacing the
+  /// room documents would silently strand that allotment. Move everyone out
+  /// first (or leave those rooms as-is and only add/edit around them).
+  Future<void> regenerateRooms({
+    required String collegeId,
+    required String hostelId,
+    required RoomPlan plan,
+  }) async {
+    final existing = await _rooms(collegeId, hostelId).get();
+    final occupied = existing.docs
+        .map((d) => Room.fromMap(d.id, d.data()))
+        .where((r) => r.occupied > 0)
+        .toList();
+    if (occupied.isNotEmpty) {
+      throw Exception(
+        '${occupied.length} room(s) still have students in them (e.g. room '
+        '${occupied.first.number}). Move everyone out before regenerating '
+        'rooms.',
+      );
+    }
+
+    for (var start = 0; start < existing.docs.length; start += _batchLimit) {
+      final end = (start + _batchLimit).clamp(0, existing.docs.length);
+      final batch = _db.batch();
+      for (final d in existing.docs.sublist(start, end)) {
+        batch.delete(d.reference);
+      }
+      await batch.commit();
+    }
+
+    final rooms = plan.build();
+    await _writeRoomsChunked(collegeId, hostelId, rooms);
+    await _hostels(collegeId).doc(hostelId).update({
+      'floors': plan.floors,
+      'roomCount': rooms.length,
+      'bedCount': plan.totalBeds,
+      'occupiedBeds': 0,
+      'updatedAt': FieldValue.serverTimestamp(),
+    });
+  }
+
   /// Recomputes the denormalised counters from the rooms themselves.
   /// Useful if a write ever fails halfway and the numbers drift.
   Future<void> recalculateCounters(String collegeId, String hostelId) async {

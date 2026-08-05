@@ -263,45 +263,33 @@ class Room {
 // Room generation
 // =====================================================================
 
-/// One uniform slab of rooms: some number of rooms, of one capacity, on a
-/// span of floors. A real building is described as a *list* of these — a
-/// girls' hostel with 60 three-seater rooms and 61 singles in the same block
-/// is two [RoomBlock]s, and a building where every floor is laid out
-/// differently is one block per floor. The common case (identical floors)
-/// is still just one block, so the simple hostel isn't punished for the
-/// flexibility.
+/// All the rooms of one seater type — "60 rooms, 3 Seater". A real building
+/// is described as a *list* of these, one per room type: a girls' hostel
+/// with 60 three-seater rooms and 61 singles is two [RoomBlock]s. Floors are
+/// not chosen by hand — [RoomPlan.build] gives each block whole floors of
+/// its own, in order, so the building comes out seater-wise by floor (one
+/// floor of singles, the next of three-seaters) without anyone having to
+/// plan the floor numbers themselves. The common case (one room type) is
+/// still just one block.
 class RoomBlock {
-  final int fromFloor;
-  final int toFloor;
-  final int roomsPerFloor;
   final int capacity;
+  final int totalRooms;
+  final int roomsPerFloor;
   final List<String> features;
 
   const RoomBlock({
-    required this.fromFloor,
-    required this.toFloor,
-    required this.roomsPerFloor,
     required this.capacity,
+    required this.totalRooms,
+    required this.roomsPerFloor,
     this.features = const [],
   });
 
-  int get floorCount => (toFloor - fromFloor + 1).clamp(0, 1 << 20);
-  int get totalRooms => floorCount * roomsPerFloor;
-  int get totalBeds => totalRooms * capacity;
+  /// Whole floors needed, rounding up — the last floor of a block may come
+  /// out short (61 rooms at 25/floor is 3 floors: 25, 25, 11).
+  int get floorCount =>
+      roomsPerFloor <= 0 ? 0 : (totalRooms / roomsPerFloor).ceil();
 
-  RoomBlock copyWith({
-    int? fromFloor,
-    int? toFloor,
-    int? roomsPerFloor,
-    int? capacity,
-    List<String>? features,
-  }) => RoomBlock(
-    fromFloor: fromFloor ?? this.fromFloor,
-    toFloor: toFloor ?? this.toFloor,
-    roomsPerFloor: roomsPerFloor ?? this.roomsPerFloor,
-    capacity: capacity ?? this.capacity,
-    features: features ?? this.features,
-  );
+  int get totalBeds => totalRooms * capacity;
 }
 
 /// The blueprint the "add hostel" form fills in. Kept as a plain value object
@@ -312,28 +300,26 @@ class RoomPlan {
 
   const RoomPlan({this.blocks = const []});
 
-  int get floors => blocks.isEmpty
-      ? 0
-      : blocks.map((b) => b.toFloor).reduce((a, b) => a > b ? a : b);
-
+  int get floors => blocks.fold(0, (acc, b) => acc + b.floorCount);
   int get totalRooms => blocks.fold(0, (acc, b) => acc + b.totalRooms);
   int get totalBeds => blocks.fold(0, (acc, b) => acc + b.totalBeds);
 
   /// Generates every room every block describes, in order.
   ///
-  /// Floor-prefixed numbering: floor 1 -> 101, 102...; floor 2 -> 201... A
-  /// running counter is kept *per floor* rather than per block, so a second
-  /// block that lands on a floor an earlier block already touched (the mixed
-  /// 3-seater/single case) continues the numbering instead of colliding with
-  /// it.
+  /// Floor-prefixed numbering: floor 1 -> 101, 102...; floor 2 -> 201...
+  /// Blocks are laid out back to back — the first block claims floors
+  /// starting at 1, the next block picks up on whatever floor the previous
+  /// one left off, so two blocks never land on the same floor.
   List<Room> build() {
-    final nextOnFloor = <int, int>{};
     final rooms = <Room>[];
+    var floor = 1;
     for (final block in blocks) {
-      for (var floor = block.fromFloor; floor <= block.toFloor; floor++) {
-        var i = nextOnFloor[floor] ?? 0;
-        for (var k = 0; k < block.roomsPerFloor; k++) {
-          i++;
+      var remaining = block.totalRooms;
+      while (remaining > 0) {
+        final onThisFloor = remaining < block.roomsPerFloor
+            ? remaining
+            : block.roomsPerFloor;
+        for (var i = 1; i <= onThisFloor; i++) {
           final number = '${floor * 100 + i}';
           rooms.add(
             Room(
@@ -345,33 +331,29 @@ class RoomPlan {
             ),
           );
         }
-        nextOnFloor[floor] = i;
+        remaining -= onThisFloor;
+        floor++;
       }
     }
     return rooms;
   }
 
   /// Human summary for the confirmation line, e.g.
-  /// "101–130 (3 Seater), 131–145 (Single), 201–230 (3 Seater)".
+  /// "Floors 1–2: 60 rooms (3 Seater), Floors 3–5: 61 rooms (Single)".
   String get rangeSummary {
-    final nextOnFloor = <int, int>{};
+    var floor = 1;
     final parts = <String>[];
-    var truncated = false;
     for (final block in blocks) {
-      if (block.roomsPerFloor <= 0 || block.floorCount <= 0) continue;
-      for (var floor = block.fromFloor; floor <= block.toFloor; floor++) {
-        final start = (nextOnFloor[floor] ?? 0) + 1;
-        final end = start + block.roomsPerFloor - 1;
-        nextOnFloor[floor] = end;
-        if (parts.length >= 6) {
-          truncated = true;
-          continue;
-        }
-        final label = block.capacity == 1 ? 'Single' : '${block.capacity} Seater';
-        parts.add('${floor * 100 + start}–${floor * 100 + end} ($label)');
-      }
+      if (block.totalRooms <= 0 || block.roomsPerFloor <= 0) continue;
+      final startFloor = floor;
+      floor += block.floorCount;
+      final endFloor = floor - 1;
+      final label = block.capacity == 1 ? 'Single' : '${block.capacity} Seater';
+      final where = startFloor == endFloor
+          ? 'Floor $startFloor'
+          : 'Floors $startFloor–$endFloor';
+      parts.add('$where: ${block.totalRooms} rooms ($label)');
     }
-    if (parts.isEmpty) return '—';
-    return truncated ? '${parts.join(', ')}, …' : parts.join(', ');
+    return parts.isEmpty ? '—' : parts.join(', ');
   }
 }

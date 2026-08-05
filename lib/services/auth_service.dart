@@ -166,6 +166,36 @@ class AuthService {
     }
   }
 
+  /// Changes the signed-in user's own password.
+  ///
+  /// This is what lets a student move off the registration-number-derived
+  /// starter password without needing an email inbox — [sendPasswordReset]
+  /// can't reach a synthetic address, but this doesn't go through email at
+  /// all. Requires the current password to reauthenticate first, same as
+  /// [changeOwnEmail].
+  Future<void> changeOwnPassword({
+    required String currentPassword,
+    required String newPassword,
+  }) async {
+    final user = _auth.currentUser;
+    final currentEmail = user?.email;
+    if (user == null || currentEmail == null) {
+      throw AuthFailure('You need to be signed in to do that.');
+    }
+
+    try {
+      await user.reauthenticateWithCredential(
+        EmailAuthProvider.credential(
+          email: currentEmail,
+          password: currentPassword,
+        ),
+      );
+      await user.updatePassword(newPassword);
+    } on FirebaseAuthException catch (e) {
+      throw AuthFailure(_friendly(e));
+    }
+  }
+
   // ---------------------------------------------------------------------
   // Session loading
   // ---------------------------------------------------------------------
