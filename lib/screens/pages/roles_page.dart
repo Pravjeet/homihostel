@@ -359,7 +359,7 @@ class _RoleEditorDialogState extends State<_RoleEditorDialog> {
                 enabled: !_busy && widget.role == null,
                 decoration: const InputDecoration(
                   labelText: 'Role name',
-                  helperText: 'e.g. Warden, Hostel Manager, Mess Supervisor',
+                  helperText: 'e.g. Warden, Caretaker, Mess Supervisor',
                 ),
                 validator: (v) => (v == null || v.trim().length < 2)
                     ? 'Role name is required'

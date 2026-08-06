@@ -10,6 +10,7 @@ import '../../models/hostel.dart';
 import '../../services/auth_service.dart';
 import '../../services/data_service.dart';
 import '../../services/hostel_service.dart';
+import '../../widgets/hostel_picker_chips.dart';
 import 'bulk_delete_users_dialog.dart';
 import 'import_students_dialog.dart';
 import 'user_detail_view.dart';
@@ -511,6 +512,7 @@ class _UsersPageState extends State<UsersPage> {
       builder: (_) => _CreateUserDialog(
         collegeId: Session.of(context).user.collegeId,
         roles: roles,
+        hostels: _hostels,
       ),
     );
     if (created == true && mounted) {
@@ -842,7 +844,12 @@ class _RolePickerDialog extends StatelessWidget {
 class _CreateUserDialog extends StatefulWidget {
   final String collegeId;
   final List<AppRole> roles;
-  const _CreateUserDialog({required this.collegeId, required this.roles});
+  final List<Hostel> hostels;
+  const _CreateUserDialog({
+    required this.collegeId,
+    required this.roles,
+    required this.hostels,
+  });
 
   @override
   State<_CreateUserDialog> createState() => _CreateUserDialogState();
@@ -877,6 +884,7 @@ class _CreateUserDialogState extends State<_CreateUserDialog> {
   int? _sem;
   String? _state;
   String? _bloodGroup;
+  Set<String> _managedHostelIds = {};
 
   /// Once the admin edits the password themselves, stop overwriting it from
   /// the registration number.
@@ -886,6 +894,12 @@ class _CreateUserDialogState extends State<_CreateUserDialog> {
   String? _gender;
   bool _busy = false;
   String? _error;
+
+  /// Student academic/guardian fields make no sense on a hostel-managing
+  /// staff profile — see [Perm.managesHostels]. Checked on the *selected*
+  /// role's permissions, not its name.
+  bool get _managesHostels =>
+      _role != null && Perm.managesHostels(_role!.permissions);
 
   @override
   void initState() {
@@ -943,19 +957,23 @@ class _CreateUserDialogState extends State<_CreateUserDialog> {
         phone: _phone.text.trim().isEmpty ? null : _phone.text.trim(),
         gender: _gender,
         extra: {
-          'course': _val(_course),
-          'year': _val(_year),
-          'trade': _trade,
-          'batch': _val(_batch),
-          'sem': _sem,
-          'state': _state ?? stateFromAddress(_val(_address)),
+          if (_managesHostels)
+            'managedHostelIds': _managedHostelIds.toList()
+          else ...{
+            'course': _val(_course),
+            'year': _val(_year),
+            'trade': _trade,
+            'batch': _val(_batch),
+            'sem': _sem,
+            'state': _state ?? stateFromAddress(_val(_address)),
+            'guardianName': _val(_guardianName),
+            'guardianRelation': _val(_guardianRelation),
+            'guardianPhone': _val(_guardianPhone),
+            'address': _val(_address),
+          },
           'officeRoom': _val(_officeRoom),
           'dateOfBirth': _val(_dateOfBirth),
           'bloodGroup': _bloodGroup,
-          'address': _val(_address),
-          'guardianName': _val(_guardianName),
-          'guardianRelation': _val(_guardianRelation),
-          'guardianPhone': _val(_guardianPhone),
           'notes': _val(_notes),
         }..removeWhere((_, v) => v == null),
       );
@@ -1158,175 +1176,208 @@ class _CreateUserDialogState extends State<_CreateUserDialog> {
                     ),
                   ],
                 ),
-                const SizedBox(height: 18),
-                _SectionLabel('Academic'),
-                const SizedBox(height: 10),
-                Row(
-                  children: [
-                    Expanded(
-                      child: TextFormField(
-                        controller: _course,
-                        enabled: !_busy,
-                        decoration: const InputDecoration(
-                          labelText: 'Course',
-                          hintText: 'B.Tech CSE',
+                if (_managesHostels) ...[
+                  const SizedBox(height: 18),
+                  _SectionLabel('Work'),
+                  const SizedBox(height: 10),
+                  TextFormField(
+                    controller: _officeRoom,
+                    enabled: !_busy,
+                    decoration: const InputDecoration(
+                      labelText: 'Office / staff room (optional)',
+                      hintText: 'Admin Block, Room 12',
+                    ),
+                  ),
+                  const SizedBox(height: 14),
+                  Text(
+                    'Hostels managed',
+                    style: TextStyle(
+                      fontSize: 13,
+                      fontWeight: FontWeight.w700,
+                    ),
+                  ),
+                  const SizedBox(height: 8),
+                  HostelPickerChips(
+                    hostels: widget.hostels,
+                    selectedIds: _managedHostelIds,
+                    enabled: !_busy,
+                    onChanged: (v) => setState(() => _managedHostelIds = v),
+                  ),
+                ] else ...[
+                  const SizedBox(height: 18),
+                  _SectionLabel('Academic'),
+                  const SizedBox(height: 10),
+                  Row(
+                    children: [
+                      Expanded(
+                        child: TextFormField(
+                          controller: _course,
+                          enabled: !_busy,
+                          decoration: const InputDecoration(
+                            labelText: 'Course',
+                            hintText: 'B.Tech CSE',
+                          ),
                         ),
                       ),
-                    ),
-                    const SizedBox(width: 12),
-                    Expanded(
-                      child: TextFormField(
-                        controller: _year,
-                        enabled: !_busy,
-                        decoration: const InputDecoration(
-                          labelText: 'Year',
-                          hintText: '2nd',
+                      const SizedBox(width: 12),
+                      Expanded(
+                        child: TextFormField(
+                          controller: _year,
+                          enabled: !_busy,
+                          decoration: const InputDecoration(
+                            labelText: 'Year',
+                            hintText: '2nd',
+                          ),
                         ),
                       ),
-                    ),
-                    const SizedBox(width: 12),
-                    Expanded(
-                      child: DropdownButtonFormField<int>(
-                        initialValue: _sem,
-                        decoration: const InputDecoration(
-                          labelText: 'Semester',
-                        ),
-                        items: List.generate(8, (i) => i + 1)
-                            .map(
-                              (s) =>
-                                  DropdownMenuItem(value: s, child: Text('$s')),
-                            )
-                            .toList(),
-                        onChanged: _busy
-                            ? null
-                            : (v) => setState(() => _sem = v),
-                      ),
-                    ),
-                  ],
-                ),
-                const SizedBox(height: 14),
-                Row(
-                  children: [
-                    Expanded(
-                      child: DropdownButtonFormField<String>(
-                        initialValue: kTrades.contains(_trade) ? _trade : null,
-                        isExpanded: true,
-                        decoration: const InputDecoration(labelText: 'Trade'),
-                        items: kTrades
-                            .map(
-                              (t) =>
-                                  DropdownMenuItem(value: t, child: Text(t)),
-                            )
-                            .toList(),
-                        onChanged: _busy
-                            ? null
-                            : (v) => setState(() => _trade = v),
-                      ),
-                    ),
-                    const SizedBox(width: 12),
-                    Expanded(
-                      child: TextFormField(
-                        controller: _batch,
-                        enabled: !_busy,
-                        decoration: const InputDecoration(
-                          labelText: 'Batch',
-                          hintText: '2023-24',
+                      const SizedBox(width: 12),
+                      Expanded(
+                        child: DropdownButtonFormField<int>(
+                          initialValue: _sem,
+                          decoration: const InputDecoration(
+                            labelText: 'Semester',
+                          ),
+                          items: List.generate(8, (i) => i + 1)
+                              .map(
+                                (s) => DropdownMenuItem(
+                                  value: s,
+                                  child: Text('$s'),
+                                ),
+                              )
+                              .toList(),
+                          onChanged: _busy
+                              ? null
+                              : (v) => setState(() => _sem = v),
                         ),
                       ),
-                    ),
-                    const SizedBox(width: 12),
-                    Expanded(
-                      child: TextFormField(
-                        controller: _officeRoom,
-                        enabled: !_busy,
-                        decoration: const InputDecoration(
-                          labelText: 'Office / staff room',
-                          hintText: 'Admin Block, Room 12',
+                    ],
+                  ),
+                  const SizedBox(height: 14),
+                  Row(
+                    children: [
+                      Expanded(
+                        child: DropdownButtonFormField<String>(
+                          initialValue: kTrades.contains(_trade)
+                              ? _trade
+                              : null,
+                          isExpanded: true,
+                          decoration: const InputDecoration(labelText: 'Trade'),
+                          items: kTrades
+                              .map(
+                                (t) =>
+                                    DropdownMenuItem(value: t, child: Text(t)),
+                              )
+                              .toList(),
+                          onChanged: _busy
+                              ? null
+                              : (v) => setState(() => _trade = v),
                         ),
                       ),
-                    ),
-                  ],
-                ),
-                const SizedBox(height: 18),
-                _SectionLabel('Guardian & emergency contact'),
-                const SizedBox(height: 10),
-                Row(
-                  children: [
-                    Expanded(
-                      flex: 2,
-                      child: TextFormField(
-                        controller: _guardianName,
-                        enabled: !_busy,
-                        decoration: const InputDecoration(
-                          labelText: 'Guardian name',
+                      const SizedBox(width: 12),
+                      Expanded(
+                        child: TextFormField(
+                          controller: _batch,
+                          enabled: !_busy,
+                          decoration: const InputDecoration(
+                            labelText: 'Batch',
+                            hintText: '2023-24',
+                          ),
                         ),
                       ),
-                    ),
-                    const SizedBox(width: 12),
-                    Expanded(
-                      child: TextFormField(
-                        controller: _guardianRelation,
-                        enabled: !_busy,
-                        decoration: const InputDecoration(
-                          labelText: 'Relation',
-                          hintText: 'Father',
+                      const SizedBox(width: 12),
+                      Expanded(
+                        child: TextFormField(
+                          controller: _officeRoom,
+                          enabled: !_busy,
+                          decoration: const InputDecoration(
+                            labelText: 'Office / staff room',
+                            hintText: 'Admin Block, Room 12',
+                          ),
                         ),
                       ),
-                    ),
-                    const SizedBox(width: 12),
-                    Expanded(
-                      flex: 2,
-                      child: TextFormField(
-                        controller: _guardianPhone,
-                        enabled: !_busy,
-                        keyboardType: TextInputType.phone,
-                        decoration: const InputDecoration(
-                          labelText: 'Guardian phone',
+                    ],
+                  ),
+                  const SizedBox(height: 18),
+                  _SectionLabel('Guardian & emergency contact'),
+                  const SizedBox(height: 10),
+                  Row(
+                    children: [
+                      Expanded(
+                        flex: 2,
+                        child: TextFormField(
+                          controller: _guardianName,
+                          enabled: !_busy,
+                          decoration: const InputDecoration(
+                            labelText: 'Guardian name',
+                          ),
                         ),
                       ),
-                    ),
-                  ],
-                ),
-                const SizedBox(height: 18),
-                _SectionLabel('Other'),
-                const SizedBox(height: 10),
-                Row(
-                  children: [
-                    Expanded(
-                      flex: 2,
-                      child: TextFormField(
-                        controller: _address,
-                        enabled: !_busy,
-                        maxLines: 2,
-                        decoration: const InputDecoration(
-                          labelText: 'Permanent address',
+                      const SizedBox(width: 12),
+                      Expanded(
+                        child: TextFormField(
+                          controller: _guardianRelation,
+                          enabled: !_busy,
+                          decoration: const InputDecoration(
+                            labelText: 'Relation',
+                            hintText: 'Father',
+                          ),
                         ),
                       ),
-                    ),
-                    const SizedBox(width: 12),
-                    Expanded(
-                      child: DropdownButtonFormField<String>(
-                        initialValue: kIndianStates.contains(_state)
-                            ? _state
-                            : null,
-                        isExpanded: true,
-                        decoration: const InputDecoration(
-                          labelText: 'Home state',
-                          helperText: 'Used by the fines dashboard',
+                      const SizedBox(width: 12),
+                      Expanded(
+                        flex: 2,
+                        child: TextFormField(
+                          controller: _guardianPhone,
+                          enabled: !_busy,
+                          keyboardType: TextInputType.phone,
+                          decoration: const InputDecoration(
+                            labelText: 'Guardian phone',
+                          ),
                         ),
-                        items: kIndianStates
-                            .map(
-                              (s) =>
-                                  DropdownMenuItem(value: s, child: Text(s)),
-                            )
-                            .toList(),
-                        onChanged: _busy
-                            ? null
-                            : (v) => setState(() => _state = v),
                       ),
-                    ),
-                  ],
-                ),
+                    ],
+                  ),
+                  const SizedBox(height: 18),
+                  _SectionLabel('Other'),
+                  const SizedBox(height: 10),
+                  Row(
+                    children: [
+                      Expanded(
+                        flex: 2,
+                        child: TextFormField(
+                          controller: _address,
+                          enabled: !_busy,
+                          maxLines: 2,
+                          decoration: const InputDecoration(
+                            labelText: 'Permanent address',
+                          ),
+                        ),
+                      ),
+                      const SizedBox(width: 12),
+                      Expanded(
+                        child: DropdownButtonFormField<String>(
+                          initialValue: kIndianStates.contains(_state)
+                              ? _state
+                              : null,
+                          isExpanded: true,
+                          decoration: const InputDecoration(
+                            labelText: 'Home state',
+                            helperText: 'Used by the fines dashboard',
+                          ),
+                          items: kIndianStates
+                              .map(
+                                (s) =>
+                                    DropdownMenuItem(value: s, child: Text(s)),
+                              )
+                              .toList(),
+                          onChanged: _busy
+                              ? null
+                              : (v) => setState(() => _state = v),
+                        ),
+                      ),
+                    ],
+                  ),
+                ],
                 const SizedBox(height: 14),
                 TextFormField(
                   controller: _notes,

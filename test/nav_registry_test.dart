@@ -252,4 +252,33 @@ void main() {
       });
     });
   });
+
+  group('Perm.managesHostels', () {
+    test('is true for every starter role that runs hostel operations', () {
+      for (final role in ['Chief Warden', 'Warden', 'Caretaker', 'BHS']) {
+        expect(
+          Perm.managesHostels(kRoleTemplates[role]!.toSet()),
+          isTrue,
+          reason: '$role should be treated as a hostel-managing role',
+        );
+      }
+    });
+
+    test('is false for Student — residents don\'t manage hostels', () {
+      expect(
+        Perm.managesHostels(kRoleTemplates['Student']!.toSet()),
+        isFalse,
+      );
+    });
+
+    test('is a permission check, not a name check', () {
+      // A custom role with none of the literal starter names, but holding
+      // the same permission, must be treated identically — this is the
+      // whole point of not branching on role.name in the user-creation form.
+      expect(Perm.managesHostels({Perm.hostelsManage}), isTrue);
+      expect(Perm.managesHostels({Perm.allotmentManage}), isTrue);
+      expect(Perm.managesHostels({Perm.hostelsView}), isFalse);
+      expect(Perm.managesHostels({}), isFalse);
+    });
+  });
 }

@@ -60,8 +60,13 @@ class Fine {
   final String reason;
   final FineStatus status;
 
-  /// Office order this fine was issued under, if any. Free text rather than a
-  /// document reference — an order may predate the app.
+  /// Office order this fine was issued under.
+  ///
+  /// [officeOrderId] is the real document reference — every fine imposed
+  /// through the current flow gets one, created in the same write. A handful
+  /// of fines imposed before that link existed only have [officeOrderNo], the
+  /// free-text order number staff typed by hand; kept for display on those.
+  final String? officeOrderId;
   final String? officeOrderNo;
 
   final String imposedByUid;
@@ -90,6 +95,7 @@ class Fine {
     required this.category,
     this.reason = '',
     this.status = FineStatus.pending,
+    this.officeOrderId,
     this.officeOrderNo,
     required this.imposedByUid,
     required this.imposedByName,
@@ -115,6 +121,7 @@ class Fine {
     category: m['category'] as String? ?? 'Other',
     reason: m['reason'] as String? ?? '',
     status: FineStatusX.parse(m['status'] as String?),
+    officeOrderId: m['officeOrderId'] as String?,
     officeOrderNo: m['officeOrderNo'] as String?,
     imposedByUid: m['imposedByUid'] as String? ?? '',
     imposedByName: m['imposedByName'] as String? ?? 'Unknown',
@@ -139,6 +146,7 @@ class Fine {
     'category': category,
     'reason': reason,
     'status': status.name,
+    'officeOrderId': officeOrderId,
     'officeOrderNo': officeOrderNo,
     'imposedByUid': imposedByUid,
     'imposedByName': imposedByName,

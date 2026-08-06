@@ -271,7 +271,7 @@ firebase deploy --only firestore:rules
 In Firebase Console → Authentication, make sure **Email/Password** is enabled.
 
 Then: Register a new institution → you land in the dashboard as Super Admin →
-Roles & Permissions already has Chief Warden / Warden / Hostel Manager /
+Roles & Permissions already has Chief Warden / Warden / Caretaker / BHS /
 Student templates → User Management → Add user. To see the difference for
 yourself, open a private window and sign in as the student you just made.
 

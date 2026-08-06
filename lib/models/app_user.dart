@@ -76,6 +76,13 @@ class AppUser {
   final String? roomNumber;
   final DateTime? allottedAt;
 
+  /// Hostels this staff member is responsible for — set instead of the
+  /// student academic fields for a role that manages hostels (Chief Warden,
+  /// Warden, Caretaker, BHS, or any custom role with the same permissions).
+  /// See [Perm.managesHostels]. Empty for residents and for staff who
+  /// haven't been assigned one yet.
+  final List<String> managedHostelIds;
+
   const AppUser({
     required this.uid,
     required this.name,
@@ -108,6 +115,7 @@ class AppUser {
     this.roomId,
     this.roomNumber,
     this.allottedAt,
+    this.managedHostelIds = const [],
   });
 
   factory AppUser.fromMap(String uid, Map<String, dynamic> m) {
@@ -145,6 +153,9 @@ class AppUser {
       roomId: m['roomId'] as String?,
       roomNumber: m['roomNumber'] as String?,
       allottedAt: (m['allottedAt'] as Timestamp?)?.toDate(),
+      managedHostelIds: ((m['managedHostelIds'] as List?) ?? const [])
+          .map((e) => e.toString())
+          .toList(),
     );
   }
 
@@ -178,6 +189,7 @@ class AppUser {
     'hostelName': hostelName,
     'roomId': roomId,
     'roomNumber': roomNumber,
+    'managedHostelIds': managedHostelIds,
   };
 
   String get initials {

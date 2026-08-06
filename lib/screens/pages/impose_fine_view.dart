@@ -1,3 +1,6 @@
+import 'dart:typed_data';
+
+import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
 
 import '../../core/identity.dart';
@@ -10,11 +13,27 @@ import '../../services/auth_service.dart';
 import '../../services/data_service.dart';
 import '../../services/fine_service.dart';
 
+/// Largest order photo accepted, in bytes. Base64 adds ~33% on top of this,
+/// and a Firestore document tops out around 1 MB, so this leaves headroom
+/// for the fine and order fields alongside it.
+const int _maxOrderImageBytes = 700 * 1024;
+
+const _monthNames = [
+  'Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun',
+  'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec',
+];
+
 /// Form for staff to impose a fine on a resident.
 ///
 /// The student is chosen from a live search rather than typed, so the fine
 /// always lands on a real uid — a fine attached to a mistyped name would be
 /// invisible to the student it was meant for.
+///
+/// Every fine here comes with the office order it was issued under — the two
+/// are created together in one write ([FineService.imposeWithOfficeOrder]),
+/// so this form collects both: the fine's amount/category/reason, and the
+/// order's number/date/photo. There is no path to impose a fine without an
+/// order behind it.
 class ImposeFineView extends StatefulWidget {
   final VoidCallback onBack;
   final VoidCallback onDone;
@@ -37,8 +56,15 @@ class _ImposeFineViewState extends State<ImposeFineView> {
   final _formKey = GlobalKey<FormState>();
   final _amount = TextEditingController();
   final _reason = TextEditingController();
-  final _officeOrderNo = TextEditingController();
   final _search = TextEditingController();
+
+  final _orderNo = TextEditingController();
+  final _orderTitle = TextEditingController();
+  final _orderDescription = TextEditingController();
+  DateTime _orderDate = DateTime.now();
+  Uint8List? _orderImageBytes;
+  String? _orderImageMimeType;
+  String? _orderImageName;
 
   AppUser? _student;
 
@@ -70,9 +96,58 @@ class _ImposeFineViewState extends State<ImposeFineView> {
   void dispose() {
     _amount.dispose();
     _reason.dispose();
-    _officeOrderNo.dispose();
     _search.dispose();
+    _orderNo.dispose();
+    _orderTitle.dispose();
+    _orderDescription.dispose();
     super.dispose();
+  }
+
+  static const _mimeByExt = {
+    'jpg': 'image/jpeg',
+    'jpeg': 'image/jpeg',
+    'png': 'image/png',
+    'webp': 'image/webp',
+  };
+
+  Future<void> _pickOrderImage() async {
+    final result = await FilePicker.platform.pickFiles(
+      type: FileType.custom,
+      allowedExtensions: ['jpg', 'jpeg', 'png', 'webp'],
+      withData: true,
+    );
+    final file = result?.files.single;
+    if (file == null || file.bytes == null) return;
+
+    if (file.bytes!.lengthInBytes > _maxOrderImageBytes) {
+      setState(() {
+        _error = 'That photo is too large '
+            '(${(file.bytes!.lengthInBytes / 1024).round()} KB). Please '
+            'keep it under ${_maxOrderImageBytes ~/ 1024} KB — a phone camera '
+            'shot usually compresses well below that.';
+      });
+      return;
+    }
+
+    final ext = file.extension?.toLowerCase() ?? '';
+    setState(() {
+      _error = null;
+      _orderImageBytes = file.bytes;
+      _orderImageMimeType = _mimeByExt[ext] ?? 'image/jpeg';
+      _orderImageName = file.name;
+    });
+  }
+
+  Future<void> _pickOrderDate() async {
+    final now = DateTime.now();
+    final picked = await showDatePicker(
+      context: context,
+      initialDate: _orderDate,
+      firstDate: DateTime(now.year - 15),
+      lastDate: DateTime(now.year + 1, 12, 31),
+    );
+    if (picked == null) return;
+    setState(() => _orderDate = picked);
   }
 
   Future<void> _submit() async {
@@ -81,6 +156,10 @@ class _ImposeFineViewState extends State<ImposeFineView> {
       return;
     }
     if (!_formKey.currentState!.validate()) return;
+    if (_orderImageBytes == null) {
+      setState(() => _error = 'Add a photo of the office order before submitting');
+      return;
+    }
 
     setState(() {
       _busy = true;
@@ -90,14 +169,19 @@ class _ImposeFineViewState extends State<ImposeFineView> {
     final session = Session.of(context);
     final messenger = ScaffoldMessenger.of(context);
     try {
-      await FineService.instance.impose(
+      await FineService.instance.imposeWithOfficeOrder(
         collegeId: session.user.collegeId,
         student: _student!,
         imposedBy: session.user,
         amount: num.parse(_amount.text.trim()),
         category: _category ?? kFineCategories.first,
         reason: _reason.text,
-        officeOrderNo: _officeOrderNo.text,
+        orderNo: _orderNo.text,
+        orderTitle: _orderTitle.text,
+        orderImageBytes: _orderImageBytes!,
+        orderImageMimeType: _orderImageMimeType!,
+        orderDescription: _orderDescription.text,
+        orderDate: _orderDate,
       );
       messenger.showSnackBar(
         SnackBar(content: Text('Fine imposed on ${_student!.name}')),
@@ -291,14 +375,156 @@ class _ImposeFineViewState extends State<ImposeFineView> {
                         ? 'Say what the fine is for (at least 5 characters)'
                         : null,
                   ),
+                ],
+              ),
+            ),
+            const SizedBox(height: 18),
+
+            // --------------------- office order ---------------------
+            AppCard(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    'Office order',
+                    style: TextStyle(
+                      fontSize: 12,
+                      fontWeight: FontWeight.w700,
+                      color: AppColors.textMuted,
+                      letterSpacing: 0.4,
+                    ),
+                  ),
+                  const SizedBox(height: 2),
+                  Text(
+                    'Every fine is issued under an order — fill in what was '
+                    'printed and attach a photo of it.',
+                    style: TextStyle(fontSize: 12.5, color: AppColors.textMuted),
+                  ),
+                  const SizedBox(height: 14),
+                  Row(
+                    children: [
+                      Expanded(
+                        child: TextFormField(
+                          controller: _orderNo,
+                          enabled: !_busy,
+                          decoration: const InputDecoration(
+                            labelText: 'Office order number',
+                            hintText: 'SLIET/HM/2026/17',
+                          ),
+                          validator: (v) => (v == null || v.trim().isEmpty)
+                              ? 'Order number is required'
+                              : null,
+                        ),
+                      ),
+                      const SizedBox(width: 14),
+                      Expanded(
+                        child: InkWell(
+                          onTap: _busy ? null : _pickOrderDate,
+                          borderRadius: BorderRadius.circular(10),
+                          child: InputDecorator(
+                            decoration: const InputDecoration(
+                              labelText: 'Order date',
+                              suffixIcon: Icon(
+                                Icons.calendar_today_rounded,
+                                size: 17,
+                              ),
+                            ),
+                            child: Text(
+                              '${_orderDate.day} '
+                              '${_monthNames[_orderDate.month - 1]} '
+                              '${_orderDate.year}',
+                              style: const TextStyle(fontSize: 14),
+                            ),
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
                   const SizedBox(height: 18),
                   TextFormField(
-                    controller: _officeOrderNo,
+                    controller: _orderTitle,
                     enabled: !_busy,
                     decoration: const InputDecoration(
-                      labelText: 'Office order number (optional)',
-                      hintText: 'SLIET/HM/2026/17',
-                      helperText: 'If this fine was issued under an order',
+                      labelText: 'Subject',
+                      hintText: 'e.g., Disciplinary action for curfew violation',
+                    ),
+                    validator: (v) => (v == null || v.trim().length < 3)
+                        ? 'Subject is required (at least 3 characters)'
+                        : null,
+                  ),
+                  const SizedBox(height: 18),
+                  Text(
+                    'Photo of the order',
+                    style: TextStyle(
+                      fontSize: 12.5,
+                      fontWeight: FontWeight.w600,
+                      color: AppColors.textMuted,
+                    ),
+                  ),
+                  const SizedBox(height: 8),
+                  if (_orderImageBytes != null)
+                    Row(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        ClipRRect(
+                          borderRadius: BorderRadius.circular(10),
+                          child: Image.memory(
+                            _orderImageBytes!,
+                            height: 120,
+                            width: 120,
+                            fit: BoxFit.cover,
+                          ),
+                        ),
+                        const SizedBox(width: 14),
+                        Expanded(
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Text(
+                                _orderImageName ?? 'Photo selected',
+                                overflow: TextOverflow.ellipsis,
+                                style: const TextStyle(
+                                  fontSize: 13.5,
+                                  fontWeight: FontWeight.w600,
+                                ),
+                              ),
+                              Text(
+                                '${(_orderImageBytes!.lengthInBytes / 1024).round()} KB',
+                                style: TextStyle(
+                                  fontSize: 12.5,
+                                  color: AppColors.textMuted,
+                                ),
+                              ),
+                              const SizedBox(height: 8),
+                              OutlinedButton.icon(
+                                onPressed: _busy ? null : _pickOrderImage,
+                                icon: const Icon(
+                                  Icons.image_outlined,
+                                  size: 16,
+                                ),
+                                label: const Text('Choose a different photo'),
+                              ),
+                            ],
+                          ),
+                        ),
+                      ],
+                    )
+                  else
+                    OutlinedButton.icon(
+                      onPressed: _busy ? null : _pickOrderImage,
+                      icon: const Icon(Icons.add_photo_alternate_outlined),
+                      label: const Text('Choose a photo (JPG/PNG, under 700 KB)'),
+                    ),
+                  const SizedBox(height: 18),
+                  TextFormField(
+                    controller: _orderDescription,
+                    enabled: !_busy,
+                    maxLines: 4,
+                    decoration: const InputDecoration(
+                      labelText: 'Summary (optional)',
+                      alignLabelWithHint: true,
+                      hintText: 'A line or two on what the order says, so '
+                          'people can find it without opening the photo.',
                     ),
                   ),
                   const SizedBox(height: 20),

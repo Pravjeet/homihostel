@@ -112,6 +112,18 @@ class Perm {
 
   static List<String> get all =>
       catalogue.values.expand((l) => l).map((p) => p.key).toList();
+
+  /// True for a role whose job is hostel/room operations — Chief Warden,
+  /// Warden, Caretaker, BHS in the starter templates, and anything a
+  /// SuperAdmin builds later that grants the same access.
+  ///
+  /// Deliberately a permission check, not a role-name check — a custom role
+  /// called "Block Supervisor" with [hostelsManage] gets the same treatment
+  /// as one literally named "Caretaker". This is what the user-creation form
+  /// asks to decide whether to show student academic fields or a "hostels
+  /// managed" picker.
+  static bool managesHostels(Set<String> perms) =>
+      perms.contains(hostelsManage) || perms.contains(allotmentManage);
 }
 
 class PermissionDef {
@@ -158,7 +170,7 @@ const Map<String, List<String>> kRoleTemplates = {
     Perm.feesManage,
     Perm.noticesView,
   ],
-  'Hostel Manager': [
+  'Caretaker': [
     Perm.usersView,
     Perm.hostelsView,
     Perm.hostelsManage,
@@ -171,6 +183,17 @@ const Map<String, List<String>> kRoleTemplates = {
     Perm.officeOrdersManage,
     Perm.feesViewAll,
     Perm.feesManage,
+    Perm.noticesView,
+  ],
+
+  /// Reports to the Caretaker — day-to-day room/allotment work on the ground,
+  /// without the user-management, mess, fees or office-order authority a
+  /// Caretaker has.
+  'BHS': [
+    Perm.hostelsView,
+    Perm.hostelsManage,
+    Perm.allotmentManage,
+    Perm.requestsViewAll,
     Perm.noticesView,
   ],
   'Student': [

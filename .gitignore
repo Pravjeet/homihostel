@@ -1,3 +1,6 @@
+# Firebase CLI's local deploy cache — regenerated on every `firebase deploy`.
+.firebase/
+
 # Miscellaneous
 *.class
 *.log
@@ -60,3 +63,6 @@ serviceAccountKey.json
 **/serviceAccountKey.json
 *-firebase-adminsdk-*.json
 tools/node_modules/
+tools/backups/
+rules-tests/node_modules/
+rules-tests/firestore-debug.log

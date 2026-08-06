@@ -49,6 +49,7 @@ class _ImportStudentsDialogState extends State<ImportStudentsDialog> {
   String _defaultRole = '';
 
   bool _running = false;
+  bool _stopRequested = false;
   int _done = 0;
   int _total = 0;
   String _currentLabel = '';
@@ -121,6 +122,7 @@ class _ImportStudentsDialogState extends State<ImportStudentsDialog> {
     setState(() {
       _step = 2;
       _running = true;
+      _stopRequested = false;
       _fatalError = null;
       _done = 0;
       _total = plan.rows.where((r) => r.isValid).length;
@@ -139,6 +141,7 @@ class _ImportStudentsDialogState extends State<ImportStudentsDialog> {
             });
           }
         },
+        isCancelled: () => _stopRequested,
       );
       if (mounted) setState(() => _outcome = outcome);
     } catch (e, st) {
@@ -176,6 +179,7 @@ class _ImportStudentsDialogState extends State<ImportStudentsDialog> {
           1 => _PreviewStep(plan: _plan!),
           _ => _RunStep(
             running: _running,
+            stopRequested: _stopRequested,
             done: _done,
             total: _total,
             label: _currentLabel,
@@ -216,10 +220,18 @@ class _ImportStudentsDialogState extends State<ImportStudentsDialog> {
           ),
         ],
         _ => [
-          TextButton(
-            onPressed: _running ? null : () => Navigator.pop(context),
-            child: Text(_running ? 'Working…' : 'Done'),
-          ),
+          if (_running)
+            TextButton(
+              onPressed: _stopRequested
+                  ? null
+                  : () => setState(() => _stopRequested = true),
+              child: Text(_stopRequested ? 'Stopping…' : 'Stop'),
+            )
+          else
+            TextButton(
+              onPressed: () => Navigator.pop(context),
+              child: const Text('Done'),
+            ),
         ],
       },
     );
@@ -613,6 +625,7 @@ class _RowTile extends StatelessWidget {
 
 class _RunStep extends StatelessWidget {
   final bool running;
+  final bool stopRequested;
   final int done;
   final int total;
   final String label;
@@ -621,6 +634,7 @@ class _RunStep extends StatelessWidget {
 
   const _RunStep({
     required this.running,
+    required this.stopRequested,
     required this.done,
     required this.total,
     required this.label,
@@ -700,8 +714,14 @@ class _RunStep extends StatelessWidget {
           ),
           const SizedBox(height: 22),
           Text(
-            'Please leave this window open until it finishes.',
-            style: TextStyle(color: AppColors.textMuted, fontSize: 12.5),
+            stopRequested
+                ? 'Stopping after the student currently being imported…'
+                : 'Please leave this window open until it finishes.',
+            style: TextStyle(
+              color: stopRequested ? AppColors.warning : AppColors.textMuted,
+              fontSize: 12.5,
+              fontWeight: stopRequested ? FontWeight.w600 : FontWeight.normal,
+            ),
           ),
         ],
       );
@@ -725,6 +745,27 @@ class _RunStep extends StatelessWidget {
           ],
         ),
         const SizedBox(height: 18),
+        if (o.stoppedEarly)
+          Container(
+            width: double.infinity,
+            margin: const EdgeInsets.only(bottom: 14),
+            padding: const EdgeInsets.all(13),
+            decoration: BoxDecoration(
+              color: AppColors.warningSoft,
+              borderRadius: BorderRadius.circular(10),
+            ),
+            child: Text(
+              'Stopped early — ${o.remaining} row(s) were never attempted. '
+              'Re-run the same file to pick up where this left off; rows '
+              'already imported are matched by email and updated, not '
+              'duplicated.',
+              style: TextStyle(
+                fontSize: 12.5,
+                color: AppColors.warning,
+                height: 1.45,
+              ),
+            ),
+          ),
         if (o.created > 0)
           Container(
             width: double.infinity,

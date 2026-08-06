@@ -473,13 +473,22 @@ class ImportOutcome {
   final int allotted;
   final List<String> failures;
   final List<String> allotmentIssues;
+
+  /// True when [isCancelled] stopped the run before every row was processed.
+  final bool stoppedEarly;
+
+  /// How many rows in the plan were never attempted because of that stop.
+  final int remaining;
+
   const ImportOutcome(
     this.created,
     this.updated,
     this.allotted,
     this.failures,
-    this.allotmentIssues,
-  );
+    this.allotmentIssues, {
+    this.stoppedEarly = false,
+    this.remaining = 0,
+  });
 }
 
 /// How long one account creation may take before we give up on that row.
@@ -513,15 +522,23 @@ bool _isThrottle(Object e) {
 /// from a browser. A failure on one row is recorded and the run continues — an
 /// import that aborts halfway leaves you worse off than one that tells you
 /// which six rows need attention.
+///
+/// [isCancelled] is polled between rows, never mid-row — a "Stop" click takes
+/// effect after whichever student is currently being written finishes, not
+/// before. Re-running the same file afterwards is safe and picks up where it
+/// left off, same as recovering from a failure: rows already created are
+/// matched by email and updated, not duplicated.
 Future<ImportOutcome> runImport({
   required ImportPlan plan,
   required String collegeId,
   required void Function(int done, int total, String label) onProgress,
+  bool Function()? isCancelled,
 }) async {
   final work = plan.rows.where((r) => r.isValid).toList();
   final failures = <String>[];
   final allotIssues = <String>[];
   var created = 0, updated = 0, allotted = 0, done = 0;
+  var stoppedEarly = false;
 
   // Cache rooms per hostel so a 30-row import doesn't re-read the same
   // collection 30 times.
@@ -538,6 +555,13 @@ Future<ImportOutcome> runImport({
     }
 
     for (final row in work) {
+      // Checked between rows only — never mid-write. Stopping never leaves a
+      // row half-imported, only the ones after it un-attempted.
+      if (isCancelled?.call() ?? false) {
+        stoppedEarly = true;
+        break;
+      }
+
       // Report before the work, so the label moves the moment a row starts
       // rather than only once it finishes.
       onProgress(done, work.length, row.name);
@@ -679,7 +703,15 @@ Future<ImportOutcome> runImport({
     }
   }
 
-  return ImportOutcome(created, updated, allotted, failures, allotIssues);
+  return ImportOutcome(
+    created,
+    updated,
+    allotted,
+    failures,
+    allotIssues,
+    stoppedEarly: stoppedEarly,
+    remaining: work.length - done,
+  );
 }
 
 Map<String, dynamic> _detailFields(ImportRow row) {

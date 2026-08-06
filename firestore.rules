@@ -269,6 +269,7 @@ service cloud.firestore {
       // defeated.
       allow update: if sameCollege(collegeId)
                     && hasPerm('requests.approve')
+                    && resource.data.raisedByUid != request.auth.uid
                     && request.resource.data.raisedByUid
                        == resource.data.raisedByUid
                     && request.resource.data.status != 'pending';
@@ -402,11 +403,19 @@ service cloud.firestore {
                   );
 
       // Imposing. Must be in your own name and must start unpaid — nobody
-      // files a fine as already settled.
+      // files a fine as already settled. Every fine is issued under an office
+      // order (the two are written in the same batch by the app — see
+      // FineService.imposeWithOfficeOrder), so officeOrderId is required too.
+      //
+      // This only checks the field is present, not that it points at a real
+      // document: a batch write can't `exists()`-check a sibling write still
+      // in the same batch, since rules evaluate each write against committed
+      // state, not the rest of the in-flight batch.
       allow create: if sameCollege(collegeId)
                     && hasPerm('fines.manage')
                     && request.resource.data.imposedByUid == request.auth.uid
-                    && request.resource.data.status == 'pending';
+                    && request.resource.data.status == 'pending'
+                    && request.resource.data.officeOrderId is string;
 
       // Settling. The amount and who it is against are immutable — marking a
       // fine paid must not be a back door to editing what was owed.
@@ -428,10 +437,17 @@ service cloud.firestore {
     match /colleges/{collegeId}/officeOrders/{orderId} {
       allow read: if sameCollege(collegeId) && hasPerm('officeOrders.view');
 
-      // Published in your own name only — the issuer can't be spoofed.
+      // Published in your own name only — the issuer can't be spoofed. Every
+      // order now comes from imposing a fine (see the fines match block
+      // above), so this checks fines.manage rather than officeOrders.manage,
+      // and requires the student it's against to be named. Same reasoning as
+      // the fine's officeOrderId: a shape check, not a cross-batch exists()
+      // check against the fine being written alongside it.
       allow create: if sameCollege(collegeId)
-                    && hasPerm('officeOrders.manage')
-                    && request.resource.data.postedByUid == request.auth.uid;
+                    && hasPerm('fines.manage')
+                    && request.resource.data.postedByUid == request.auth.uid
+                    && request.resource.data.studentUid is string
+                    && request.resource.data.fineId is string;
 
       // No updates: an office order printed wrong is deleted and re-published,
       // same as a notice.

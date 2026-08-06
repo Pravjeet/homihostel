@@ -9,14 +9,16 @@ import '../../core/theme.dart';
 import '../../models/office_order.dart';
 import '../../services/auth_service.dart';
 import '../../services/office_order_service.dart';
-import 'publish_office_order_view.dart';
 
-/// Office orders: the register of orders issued by the institute.
+/// Office orders: the register of disciplinary orders issued against
+/// residents. Every order here exists because a fine was imposed under it —
+/// see `ImposeFineView`, which is the only place one is created.
 ///
 /// Everyone with `officeOrders.view` can search and open them; staff with
-/// `officeOrders.manage` can publish new ones. Two searches are offered
+/// `officeOrders.manage` can delete their own. Two searches are offered
 /// because they answer different questions — "find order SLIET/HM/2024/17"
-/// and "what was issued on 12 March".
+/// (which also matches on the student it was issued to) and "what was
+/// issued on 12 March".
 class OfficeOrdersPage extends StatefulWidget {
   const OfficeOrdersPage({super.key});
 
@@ -25,7 +27,6 @@ class OfficeOrdersPage extends StatefulWidget {
 }
 
 class _OfficeOrdersPageState extends State<OfficeOrdersPage> {
-  bool _publishing = false;
   String _query = '';
   DateTime? _onDate;
 
@@ -41,7 +42,7 @@ class _OfficeOrdersPageState extends State<OfficeOrdersPage> {
         await showDialog<void>(
           context: context,
           barrierColor: Colors.black.withValues(alpha: 0.86),
-          builder: (_) => _OrderViewer(order: order, bytes: bytes),
+          builder: (_) => OfficeOrderViewer(order: order, bytes: bytes),
         );
         return;
       }
@@ -127,13 +128,6 @@ class _OfficeOrdersPageState extends State<OfficeOrdersPage> {
     final collegeId = session.user.collegeId;
     final canManage = session.can(Perm.officeOrdersManage);
 
-    if (_publishing) {
-      return PublishOfficeOrderView(
-        onBack: () => setState(() => _publishing = false),
-        onDone: () => setState(() => _publishing = false),
-      );
-    }
-
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
@@ -141,26 +135,13 @@ class _OfficeOrdersPageState extends State<OfficeOrdersPage> {
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              SectionHeader(
-                'Office Orders',
-                trailing: canManage
-                    ? ElevatedButton.icon(
-                        onPressed: () => setState(() => _publishing = true),
-                        icon: const Icon(Icons.add_rounded, size: 18),
-                        label: const Text('Add office order'),
-                        style: ElevatedButton.styleFrom(
-                          padding: const EdgeInsets.symmetric(
-                            horizontal: 18,
-                            vertical: 14,
-                          ),
-                        ),
-                      )
-                    : null,
-              ),
+              const SectionHeader('Office Orders'),
               const SizedBox(height: 4),
               Text(
-                'Orders issued by the institute. Search by order number or '
-                'by the date printed on the order.',
+                'Disciplinary orders issued against residents, one per fine. '
+                'Search by order number, student, or the date printed on the '
+                'order. To add one, impose a fine — every fine is issued '
+                'under an order.',
                 style: TextStyle(fontSize: 13, color: AppColors.textMuted),
               ),
               const SizedBox(height: 16),
@@ -280,12 +261,14 @@ String _labelFor(DateTime d) {
   return '${d.day} ${months[d.month - 1]} ${d.year}';
 }
 
-/// The order's own photo as a 42px square, so the register is scannable by
+/// The order's own photo as a small square, so the register is scannable by
 /// sight — most people recognise the letterhead faster than they read the
 /// order number. Falls back to an icon for the older link-based orders.
-class _Thumb extends StatelessWidget {
+/// Shared with the office-orders section on a student's detail page.
+class OfficeOrderThumb extends StatelessWidget {
   final OfficeOrder order;
-  const _Thumb({required this.order});
+  final double size;
+  const OfficeOrderThumb({super.key, required this.order, this.size = 42});
 
   @override
   Widget build(BuildContext context) {
@@ -293,8 +276,8 @@ class _Thumb extends StatelessWidget {
 
     if (bytes == null) {
       return Container(
-        height: 42,
-        width: 42,
+        height: size,
+        width: size,
         alignment: Alignment.center,
         decoration: BoxDecoration(
           color: AppColors.primarySoft,
@@ -312,8 +295,8 @@ class _Thumb extends StatelessWidget {
       borderRadius: BorderRadius.circular(12),
       child: Image.memory(
         bytes,
-        height: 42,
-        width: 42,
+        height: size,
+        width: size,
         fit: BoxFit.cover,
         // Decoded down to roughly the size actually painted. Without this
         // Flutter holds the full-resolution bitmap in memory for every row.
@@ -338,16 +321,17 @@ class _Thumb extends StatelessWidget {
   }
 }
 
-/// Full-size viewer for a photographed order.
+/// Full-size viewer for a photographed order, shared with the office-orders
+/// section on a student's detail page.
 ///
 /// [InteractiveViewer] is the point of this screen: a phone photo of an A4
 /// order is unreadable at fit-to-screen, so pinch and drag to zoom is what
 /// makes the feature usable at all.
-class _OrderViewer extends StatelessWidget {
+class OfficeOrderViewer extends StatelessWidget {
   final OfficeOrder order;
   final Uint8List bytes;
 
-  const _OrderViewer({required this.order, required this.bytes});
+  const OfficeOrderViewer({super.key, required this.order, required this.bytes});
 
   @override
   Widget build(BuildContext context) {
@@ -449,7 +433,7 @@ class _OrderRow extends StatelessWidget {
         padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 14),
         child: Row(
           children: [
-            _Thumb(order: order),
+            OfficeOrderThumb(order: order),
             const SizedBox(width: 14),
             Expanded(
               child: Column(
@@ -476,6 +460,23 @@ class _OrderRow extends StatelessWidget {
                       color: AppColors.textMuted,
                     ),
                   ),
+                  if (order.studentName != null) ...[
+                    const SizedBox(height: 3),
+                    Text(
+                      [
+                        'For ${order.studentName}',
+                        if (order.studentRegNo != null) order.studentRegNo!,
+                        if (order.fineAmount != null)
+                          '₹${order.fineAmount} · ${order.fineCategory ?? ''}',
+                      ].join(' · '),
+                      overflow: TextOverflow.ellipsis,
+                      style: TextStyle(
+                        fontSize: 12.5,
+                        fontWeight: FontWeight.w600,
+                        color: AppColors.primary,
+                      ),
+                    ),
+                  ],
                   if (order.description != null) ...[
                     const SizedBox(height: 6),
                     Text(

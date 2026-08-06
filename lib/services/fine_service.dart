@@ -1,7 +1,11 @@
+import 'dart:convert';
+import 'dart:typed_data';
+
 import 'package:cloud_firestore/cloud_firestore.dart';
 
 import '../models/app_user.dart';
 import '../models/fine.dart';
+import '../models/office_order.dart';
 import 'audit_service.dart';
 
 /// Fines live under their college:
@@ -20,6 +24,9 @@ class FineService {
 
   CollectionReference<Map<String, dynamic>> _col(String collegeId) =>
       _db.collection('colleges').doc(collegeId).collection('fines');
+
+  CollectionReference<Map<String, dynamic>> _ordersCol(String collegeId) =>
+      _db.collection('colleges').doc(collegeId).collection('officeOrders');
 
   // ------------------------------ reads ------------------------------
 
@@ -49,23 +56,36 @@ class FineService {
 
   // ------------------------------ writes -----------------------------
 
-  /// Imposes a fine, snapshotting who the student was at this moment.
-  Future<String> impose({
+  /// Imposes a fine and publishes its office order together, in one batch.
+  ///
+  /// The two documents are created with pre-generated ids so each can carry
+  /// the other's: `fine.officeOrderId` and `order.fineId`. Every fine raised
+  /// this way has a real order behind it — there is no path to impose a fine
+  /// without one, because in this college a fine only exists because an order
+  /// was issued for it.
+  Future<({String fineId, String orderId})> imposeWithOfficeOrder({
     required String collegeId,
     required AppUser student,
     required AppUser imposedBy,
     required num amount,
     required String category,
     String reason = '',
-    String? officeOrderNo,
+    required String orderNo,
+    required String orderTitle,
+    required Uint8List orderImageBytes,
+    required String orderImageMimeType,
+    String? orderDescription,
+    DateTime? orderDate,
   }) async {
     if (amount <= 0) {
       throw ArgumentError('A fine must be for more than zero.');
     }
 
-    final ref = _col(collegeId).doc();
+    final fineRef = _col(collegeId).doc();
+    final orderRef = _ordersCol(collegeId).doc();
+
     final fine = Fine(
-      id: ref.id,
+      id: fineRef.id,
       studentUid: student.uid,
       studentName: student.name,
       studentRegNo: student.enrollmentNo,
@@ -81,30 +101,50 @@ class FineService {
       amount: amount,
       category: category,
       reason: reason.trim(),
-      officeOrderNo: (officeOrderNo == null || officeOrderNo.trim().isEmpty)
-          ? null
-          : officeOrderNo.trim(),
+      officeOrderId: orderRef.id,
+      officeOrderNo: orderNo.trim(),
       imposedByUid: imposedBy.uid,
       imposedByName: imposedBy.name,
     );
 
-    await ref.set({
-      ...fine.toMap(),
-      'createdAt': FieldValue.serverTimestamp(),
-    });
+    final order = OfficeOrder(
+      id: orderRef.id,
+      orderNo: orderNo.trim(),
+      title: orderTitle.trim(),
+      description: (orderDescription == null || orderDescription.trim().isEmpty)
+          ? null
+          : orderDescription.trim(),
+      orderDate: orderDate,
+      imageBase64: base64Encode(orderImageBytes),
+      imageMimeType: orderImageMimeType,
+      postedByUid: imposedBy.uid,
+      postedByName: imposedBy.name,
+      studentUid: student.uid,
+      studentName: student.name,
+      studentRegNo: student.enrollmentNo,
+      fineId: fineRef.id,
+      fineAmount: amount,
+      fineCategory: category,
+    );
+
+    final batch = _db.batch();
+    batch.set(fineRef, {...fine.toMap(), 'createdAt': FieldValue.serverTimestamp()});
+    batch.set(orderRef, {...order.toMap(), 'createdAt': FieldValue.serverTimestamp()});
+    await batch.commit();
 
     // No `before` — the fine did not exist, so undo deletes it.
     await AuditService.instance.record(
       collegeId: collegeId,
       actor: imposedBy,
       action: 'fine.impose',
-      summary: 'Fined ${student.name} ₹$amount for $category',
+      summary: 'Fined ${student.name} ₹$amount for $category '
+          '(order $orderNo)',
       targetLabel: student.name,
-      path: 'colleges/$collegeId/fines/${ref.id}',
+      path: 'colleges/$collegeId/fines/${fineRef.id}',
       reversible: true,
     );
 
-    return ref.id;
+    return (fineId: fineRef.id, orderId: orderRef.id);
   }
 
   /// Marks a fine paid or waived, recording who decided.

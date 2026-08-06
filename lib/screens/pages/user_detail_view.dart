@@ -4,15 +4,22 @@ import '../../core/identity.dart';
 import '../../core/permissions.dart';
 import '../../core/session.dart';
 import '../../core/theme.dart';
+import '../../models/app_role.dart';
 import '../../models/app_user.dart';
 import '../../models/fine.dart';
+import '../../models/hostel.dart';
+import '../../models/office_order.dart';
 import '../../services/allotment_service.dart';
 import '../../services/auth_service.dart';
 import '../../services/data_service.dart';
 import '../../services/fine_service.dart';
+import '../../services/hostel_service.dart';
+import '../../services/office_order_service.dart';
+import '../../widgets/hostel_picker_chips.dart';
 import 'allot_room_view.dart';
 import 'fines_shared.dart' show FineRow, compactAmount;
 import 'impose_fine_view.dart';
+import 'office_orders_page.dart' show OfficeOrderThumb, OfficeOrderViewer;
 
 /// The full record for one person: everything that wasn't asked for at
 /// account creation, plus their room.
@@ -103,6 +110,8 @@ class _UserDetailViewState extends State<UserDetailView> {
               user: user,
               onImpose: () => setState(() => _imposingFine = true),
             ),
+            const SizedBox(height: 18),
+            _OfficeOrdersSection(user: user),
             const SizedBox(height: 18),
             // Keyed on uid so switching users rebuilds the controllers with
             // the new person's values instead of keeping the old text.
@@ -306,6 +315,138 @@ class _FinesSection extends StatelessWidget {
   }
 }
 
+// ---------------------------- office orders -----------------------------
+
+/// The disciplinary orders issued for this student's fines, on their own
+/// record. Every order shown here was created alongside a fine — see
+/// [ImposeFineView] — so there is exactly one row per fine that had one.
+class _OfficeOrdersSection extends StatelessWidget {
+  final AppUser user;
+
+  const _OfficeOrdersSection({required this.user});
+
+  Future<void> _open(BuildContext context, OfficeOrder order) async {
+    final bytes = decodedOrderImage(order);
+    if (bytes == null) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('That photo could not be read')),
+      );
+      return;
+    }
+    await showDialog<void>(
+      context: context,
+      barrierColor: Colors.black.withValues(alpha: 0.86),
+      builder: (_) => OfficeOrderViewer(order: order, bytes: bytes),
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final session = Session.of(context);
+    final collegeId = session.user.collegeId;
+    final isSelf = session.user.uid == user.uid;
+
+    if (!session.can(Perm.officeOrdersView) && !isSelf) {
+      return const SizedBox.shrink();
+    }
+
+    return StreamBuilder<List<OfficeOrder>>(
+      stream: OfficeOrderService.instance.watchForStudent(collegeId, user.uid),
+      builder: (context, snap) {
+        if (snap.hasError) {
+          return AppCard(child: Text(AuthService.describeError(snap.error!)));
+        }
+
+        final orders = snap.data ?? const <OfficeOrder>[];
+
+        return AppCard(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              const SectionHeader('Office Orders'),
+              const SizedBox(height: 14),
+              if (!snap.hasData)
+                const Padding(
+                  padding: EdgeInsets.symmetric(vertical: 24),
+                  child: Center(child: CircularProgressIndicator()),
+                )
+              else if (orders.isEmpty)
+                Padding(
+                  padding: const EdgeInsets.symmetric(vertical: 18),
+                  child: Text(
+                    isSelf
+                        ? 'No office orders have been issued against you.'
+                        : '${user.name.split(' ').first} has no office '
+                              'orders.',
+                    style: TextStyle(
+                      color: AppColors.textMuted,
+                      fontSize: 13.5,
+                    ),
+                  ),
+                )
+              else
+                for (var i = 0; i < orders.length; i++) ...[
+                  if (i != 0) Divider(height: 1, color: AppColors.border),
+                  InkWell(
+                    onTap: () => _open(context, orders[i]),
+                    child: Padding(
+                      padding: const EdgeInsets.symmetric(vertical: 10),
+                      child: Row(
+                        children: [
+                          OfficeOrderThumb(order: orders[i], size: 36),
+                          const SizedBox(width: 12),
+                          Expanded(
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Text(
+                                  orders[i].title.isEmpty
+                                      ? orders[i].orderNo
+                                      : orders[i].title,
+                                  overflow: TextOverflow.ellipsis,
+                                  style: const TextStyle(
+                                    fontSize: 13.5,
+                                    fontWeight: FontWeight.w700,
+                                  ),
+                                ),
+                                const SizedBox(height: 2),
+                                Text(
+                                  [
+                                    if (orders[i].orderNo.isNotEmpty)
+                                      orders[i].orderNo,
+                                    if (orders[i].dateLabel != null)
+                                      orders[i].dateLabel!,
+                                    if (orders[i].fineAmount != null)
+                                      '₹${orders[i].fineAmount} · '
+                                          '${orders[i].fineCategory ?? ''}',
+                                  ].join(' · '),
+                                  overflow: TextOverflow.ellipsis,
+                                  style: TextStyle(
+                                    fontSize: 12,
+                                    color: AppColors.textMuted,
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
+                          Icon(
+                            Icons.zoom_in_rounded,
+                            size: 16,
+                            color: AppColors.textMuted,
+                          ),
+                        ],
+                      ),
+                    ),
+                  ),
+                ],
+            ],
+          ),
+        );
+      },
+    );
+  }
+}
+
 class _FineStat extends StatelessWidget {
   final String label;
   final String value;
@@ -358,13 +499,20 @@ class _DetailFormState extends State<_DetailForm> {
   String? _trade;
   int? _sem;
   String? _state;
+  late Set<String> _managedHostelIds;
   bool _busy = false;
   String? _error;
+
+  /// Cached from the most recent build, so [_save] — called from a button
+  /// callback, not from inside the stream builder — knows which section was
+  /// actually on screen when the user hit save.
+  bool _currentManagesHostels = false;
 
   @override
   void initState() {
     super.initState();
     final u = widget.user;
+    _managedHostelIds = u.managedHostelIds.toSet();
     _c = {
       'name': TextEditingController(text: u.name),
       'phone': TextEditingController(text: u.phone ?? ''),
@@ -415,19 +563,23 @@ class _DetailFormState extends State<_DetailForm> {
         'phone': _val('phone'),
         'gender': _gender,
         'enrollmentNo': _val('enrollmentNo'),
-        'course': _val('course'),
-        'year': _val('year'),
-        'trade': _trade,
-        'batch': _val('batch'),
-        'sem': _sem,
-        'state': _state,
+        if (_currentManagesHostels)
+          'managedHostelIds': _managedHostelIds.toList()
+        else ...{
+          'course': _val('course'),
+          'year': _val('year'),
+          'trade': _trade,
+          'batch': _val('batch'),
+          'sem': _sem,
+          'state': _state,
+          'address': _val('address'),
+          'guardianName': _val('guardianName'),
+          'guardianPhone': _val('guardianPhone'),
+          'guardianRelation': _val('guardianRelation'),
+        },
         'officeRoom': _val('officeRoom'),
         'dateOfBirth': _val('dateOfBirth'),
         'bloodGroup': _bloodGroup,
-        'address': _val('address'),
-        'guardianName': _val('guardianName'),
-        'guardianPhone': _val('guardianPhone'),
-        'guardianRelation': _val('guardianRelation'),
         'notes': _val('notes'),
       });
       messenger.showSnackBar(const SnackBar(content: Text('Details saved')));
@@ -440,6 +592,36 @@ class _DetailFormState extends State<_DetailForm> {
 
   @override
   Widget build(BuildContext context) {
+    final u = widget.user;
+    if (u.roleId == null) {
+      return _buildCard(context, managesHostels: false, hostels: const []);
+    }
+    return StreamBuilder<AppRole?>(
+      stream: AuthService.instance.watchRole(u.collegeId, u.roleId!),
+      builder: (context, roleSnap) {
+        final managesHostels = roleSnap.data != null &&
+            Perm.managesHostels(roleSnap.data!.permissions);
+        if (!managesHostels) {
+          return _buildCard(context, managesHostels: false, hostels: const []);
+        }
+        return StreamBuilder<List<Hostel>>(
+          stream: HostelService.instance.watchHostels(u.collegeId),
+          builder: (context, hostelSnap) => _buildCard(
+            context,
+            managesHostels: true,
+            hostels: hostelSnap.data ?? const [],
+          ),
+        );
+      },
+    );
+  }
+
+  Widget _buildCard(
+    BuildContext context, {
+    required bool managesHostels,
+    required List<Hostel> hostels,
+  }) {
+    _currentManagesHostels = managesHostels;
     final canEdit = Session.of(context).can(Perm.usersEdit);
     final on = canEdit && !_busy;
 
@@ -538,7 +720,7 @@ class _DetailFormState extends State<_DetailForm> {
             ),
 
             const SizedBox(height: 8),
-            const _SectionLabel('Academic'),
+            _SectionLabel(managesHostels ? 'Work' : 'Academic'),
             Row(
               children: [
                 Expanded(
@@ -550,67 +732,7 @@ class _DetailFormState extends State<_DetailForm> {
                 ),
                 const SizedBox(width: 12),
                 Expanded(
-                  child: _Field(
-                    _c['course']!,
-                    'Course',
-                    hint: 'B.Tech CSE',
-                    enabled: on,
-                  ),
-                ),
-                const SizedBox(width: 12),
-                Expanded(
-                  child: _Field(_c['year']!, 'Year', hint: '2nd', enabled: on),
-                ),
-              ],
-            ),
-            Row(
-              children: [
-                Expanded(
-                  child: Padding(
-                    padding: const EdgeInsets.only(bottom: 14),
-                    child: DropdownButtonFormField<String>(
-                      initialValue: kTrades.contains(_trade) ? _trade : null,
-                      isExpanded: true,
-                      decoration: const InputDecoration(labelText: 'Trade'),
-                      items: kTrades
-                          .map((t) => DropdownMenuItem(value: t, child: Text(t)))
-                          .toList(),
-                      onChanged: on ? (v) => setState(() => _trade = v) : null,
-                    ),
-                  ),
-                ),
-                const SizedBox(width: 12),
-                Expanded(
-                  child: _Field(
-                    _c['batch']!,
-                    'Batch',
-                    hint: '2023-24',
-                    enabled: on,
-                  ),
-                ),
-                const SizedBox(width: 12),
-                Expanded(
-                  child: Padding(
-                    padding: const EdgeInsets.only(bottom: 14),
-                    child: DropdownButtonFormField<int>(
-                      initialValue: _sem,
-                      decoration: const InputDecoration(labelText: 'Semester'),
-                      items: List.generate(8, (i) => i + 1)
-                          .map(
-                            (s) => DropdownMenuItem(value: s, child: Text('$s')),
-                          )
-                          .toList(),
-                      onChanged: on ? (v) => setState(() => _sem = v) : null,
-                    ),
-                  ),
-                ),
-              ],
-            ),
-            // Staff sit in an office, not a hostel bed — this is the
-            // equivalent of the room a resident gets allotted.
-            Row(
-              children: [
-                Expanded(
+                  flex: 2,
                   child: _Field(
                     _c['officeRoom']!,
                     'Office / staff room',
@@ -618,84 +740,173 @@ class _DetailFormState extends State<_DetailForm> {
                     enabled: on,
                   ),
                 ),
-                const SizedBox(width: 12),
-                const Expanded(child: SizedBox.shrink()),
-                const SizedBox(width: 12),
-                const Expanded(child: SizedBox.shrink()),
               ],
             ),
-
-            const SizedBox(height: 8),
-            const _SectionLabel('Guardian & emergency contact'),
-            Row(
-              children: [
-                Expanded(
-                  flex: 2,
-                  child: _Field(
-                    _c['guardianName']!,
-                    'Guardian name',
-                    enabled: on,
-                  ),
-                ),
-                const SizedBox(width: 12),
-                Expanded(
-                  child: _Field(
-                    _c['guardianRelation']!,
-                    'Relation',
-                    hint: 'Father',
-                    enabled: on,
-                  ),
-                ),
-                const SizedBox(width: 12),
-                Expanded(
-                  flex: 2,
-                  child: _Field(
-                    _c['guardianPhone']!,
-                    'Guardian phone',
-                    enabled: on,
-                    keyboard: TextInputType.phone,
-                  ),
-                ),
-              ],
-            ),
-
-            const SizedBox(height: 8),
-            const _SectionLabel('Other'),
-            Row(
-              children: [
-                Expanded(
-                  flex: 2,
-                  child: _Field(
-                    _c['address']!,
-                    'Permanent address',
-                    enabled: on,
-                    lines: 2,
-                  ),
-                ),
-                const SizedBox(width: 12),
-                Expanded(
-                  child: Padding(
-                    padding: const EdgeInsets.only(bottom: 14),
-                    child: DropdownButtonFormField<String>(
-                      initialValue: kIndianStates.contains(_state)
-                          ? _state
-                          : null,
-                      isExpanded: true,
-                      decoration: const InputDecoration(
-                        labelText: 'Home state',
-                        helperText: 'Used by the fines dashboard',
-                      ),
-                      items: kIndianStates
-                          .map(
-                            (s) => DropdownMenuItem(value: s, child: Text(s)),
-                          )
-                          .toList(),
-                      onChanged: on ? (v) => setState(() => _state = v) : null,
+            if (managesHostels) ...[
+              const SizedBox(height: 4),
+              Text(
+                'Hostels managed',
+                style: TextStyle(fontSize: 13, fontWeight: FontWeight.w700),
+              ),
+              const SizedBox(height: 8),
+              HostelPickerChips(
+                hostels: hostels,
+                selectedIds: _managedHostelIds,
+                enabled: on,
+                onChanged: (v) => setState(() => _managedHostelIds = v),
+              ),
+              const SizedBox(height: 18),
+            ] else ...[
+              Row(
+                children: [
+                  Expanded(
+                    child: _Field(
+                      _c['course']!,
+                      'Course',
+                      hint: 'B.Tech CSE',
+                      enabled: on,
                     ),
                   ),
-                ),
-              ],
-            ),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: _Field(
+                      _c['year']!,
+                      'Year',
+                      hint: '2nd',
+                      enabled: on,
+                    ),
+                  ),
+                ],
+              ),
+              Row(
+                children: [
+                  Expanded(
+                    child: Padding(
+                      padding: const EdgeInsets.only(bottom: 14),
+                      child: DropdownButtonFormField<String>(
+                        initialValue: kTrades.contains(_trade) ? _trade : null,
+                        isExpanded: true,
+                        decoration: const InputDecoration(labelText: 'Trade'),
+                        items: kTrades
+                            .map(
+                              (t) =>
+                                  DropdownMenuItem(value: t, child: Text(t)),
+                            )
+                            .toList(),
+                        onChanged: on
+                            ? (v) => setState(() => _trade = v)
+                            : null,
+                      ),
+                    ),
+                  ),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: _Field(
+                      _c['batch']!,
+                      'Batch',
+                      hint: '2023-24',
+                      enabled: on,
+                    ),
+                  ),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: Padding(
+                      padding: const EdgeInsets.only(bottom: 14),
+                      child: DropdownButtonFormField<int>(
+                        initialValue: _sem,
+                        decoration: const InputDecoration(
+                          labelText: 'Semester',
+                        ),
+                        items: List.generate(8, (i) => i + 1)
+                            .map(
+                              (s) => DropdownMenuItem(
+                                value: s,
+                                child: Text('$s'),
+                              ),
+                            )
+                            .toList(),
+                        onChanged: on ? (v) => setState(() => _sem = v) : null,
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+
+              const SizedBox(height: 8),
+              const _SectionLabel('Guardian & emergency contact'),
+              Row(
+                children: [
+                  Expanded(
+                    flex: 2,
+                    child: _Field(
+                      _c['guardianName']!,
+                      'Guardian name',
+                      enabled: on,
+                    ),
+                  ),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: _Field(
+                      _c['guardianRelation']!,
+                      'Relation',
+                      hint: 'Father',
+                      enabled: on,
+                    ),
+                  ),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    flex: 2,
+                    child: _Field(
+                      _c['guardianPhone']!,
+                      'Guardian phone',
+                      enabled: on,
+                      keyboard: TextInputType.phone,
+                    ),
+                  ),
+                ],
+              ),
+
+              const SizedBox(height: 8),
+              const _SectionLabel('Other'),
+              Row(
+                children: [
+                  Expanded(
+                    flex: 2,
+                    child: _Field(
+                      _c['address']!,
+                      'Permanent address',
+                      enabled: on,
+                      lines: 2,
+                    ),
+                  ),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: Padding(
+                      padding: const EdgeInsets.only(bottom: 14),
+                      child: DropdownButtonFormField<String>(
+                        initialValue: kIndianStates.contains(_state)
+                            ? _state
+                            : null,
+                        isExpanded: true,
+                        decoration: const InputDecoration(
+                          labelText: 'Home state',
+                          helperText: 'Used by the fines dashboard',
+                        ),
+                        items: kIndianStates
+                            .map(
+                              (s) =>
+                                  DropdownMenuItem(value: s, child: Text(s)),
+                            )
+                            .toList(),
+                        onChanged: on
+                            ? (v) => setState(() => _state = v)
+                            : null,
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            ],
             _Field(
               _c['notes']!,
               'Internal notes',

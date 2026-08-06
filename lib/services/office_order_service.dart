@@ -1,18 +1,16 @@
-import 'dart:convert';
-import 'dart:typed_data';
-
 import 'package:cloud_firestore/cloud_firestore.dart';
 
-import '../models/app_user.dart';
 import '../models/office_order.dart';
 
 /// Office orders live under their college:
 ///   colleges/{collegeId}/officeOrders/{orderId}
 ///
-/// Read by anyone with `officeOrders.view`, published by anyone with
-/// `officeOrders.manage`. There is no update path — an order printed wrong is
-/// deleted and re-published, same as notices, because an "edited" office order
-/// is not a thing that exists on paper.
+/// Read by anyone with `officeOrders.view`. Writing one is not exposed here
+/// — every order now exists because a fine was imposed under it, so creation
+/// happens in [FineService.imposeWithOfficeOrder], which writes both
+/// documents in one batch. There is no update path either — an order printed
+/// wrong is deleted and the fine re-imposed, same as notices, because an
+/// "edited" office order is not a thing that exists on paper.
 class OfficeOrderService {
   OfficeOrderService._();
   static final OfficeOrderService instance = OfficeOrderService._();
@@ -33,43 +31,25 @@ class OfficeOrderService {
         (s) => s.docs.map((d) => OfficeOrder.fromMap(d.id, d.data())).toList(),
       );
 
+  /// One student's own orders, for their detail page. Not ordered in the
+  /// query — same reasoning as [FineService.watchMine]: an extra composite
+  /// index isn't worth it for sorting a handful of documents client-side.
+  Stream<List<OfficeOrder>> watchForStudent(String collegeId, String uid) =>
+      _col(collegeId).where('studentUid', isEqualTo: uid).snapshots().map((s) {
+        final list = s.docs
+            .map((d) => OfficeOrder.fromMap(d.id, d.data()))
+            .toList();
+        list.sort((a, b) {
+          final at = a.orderDate, bt = b.orderDate;
+          if (at == null && bt == null) return 0;
+          if (at == null) return 1;
+          if (bt == null) return -1;
+          return bt.compareTo(at);
+        });
+        return list;
+      });
+
   // ------------------------------ writes -----------------------------
-
-  /// Publishes an order as a photo, base64-encoded into the document itself
-  /// — there's no Firebase Storage on the free plan. [imageBytes] should
-  /// already be under the ~700 KB cap the publish form enforces; base64 adds
-  /// ~33% on top of that, and a Firestore document tops out around 1 MB.
-  Future<String> publish({
-    required String collegeId,
-    required AppUser author,
-    required String orderNo,
-    required String title,
-    required Uint8List imageBytes,
-    required String imageMimeType,
-    String? description,
-    DateTime? orderDate,
-  }) async {
-    final ref = _col(collegeId).doc();
-    final order = OfficeOrder(
-      id: ref.id,
-      orderNo: orderNo.trim(),
-      title: title.trim(),
-      description: (description == null || description.trim().isEmpty)
-          ? null
-          : description.trim(),
-      orderDate: orderDate,
-      imageBase64: base64Encode(imageBytes),
-      imageMimeType: imageMimeType,
-      postedByUid: author.uid,
-      postedByName: author.name,
-    );
-
-    await ref.set({
-      ...order.toMap(),
-      'createdAt': FieldValue.serverTimestamp(),
-    });
-    return ref.id;
-  }
 
   Future<void> delete({
     required String collegeId,

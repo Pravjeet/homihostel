@@ -38,6 +38,19 @@ class OfficeOrder {
   final String postedByName;
   final DateTime? createdAt;
 
+  // --- the student and fine this order was issued for ---
+  //
+  // Null only for orders published before this link existed (see
+  // ARCHITECTURE.md-style note in fine.dart) — every order created going
+  // forward carries all six. Denormalised rather than a bare id so the
+  // register and the student's detail page render without a second read.
+  final String? studentUid;
+  final String? studentName;
+  final String? studentRegNo;
+  final String? fineId;
+  final num? fineAmount;
+  final String? fineCategory;
+
   const OfficeOrder({
     required this.id,
     required this.orderNo,
@@ -50,6 +63,12 @@ class OfficeOrder {
     required this.postedByUid,
     required this.postedByName,
     this.createdAt,
+    this.studentUid,
+    this.studentName,
+    this.studentRegNo,
+    this.fineId,
+    this.fineAmount,
+    this.fineCategory,
   });
 
   factory OfficeOrder.fromMap(String id, Map<String, dynamic> m) => OfficeOrder(
@@ -64,6 +83,12 @@ class OfficeOrder {
     postedByUid: m['postedByUid'] as String? ?? '',
     postedByName: m['postedByName'] as String? ?? 'Unknown',
     createdAt: (m['createdAt'] as Timestamp?)?.toDate(),
+    studentUid: m['studentUid'] as String?,
+    studentName: m['studentName'] as String?,
+    studentRegNo: m['studentRegNo'] as String?,
+    fineId: m['fineId'] as String?,
+    fineAmount: m['fineAmount'] as num?,
+    fineCategory: m['fineCategory'] as String?,
   );
 
   Map<String, dynamic> toMap() => {
@@ -76,7 +101,17 @@ class OfficeOrder {
     'imageMimeType': imageMimeType,
     'postedByUid': postedByUid,
     'postedByName': postedByName,
+    'studentUid': studentUid,
+    'studentName': studentName,
+    'studentRegNo': studentRegNo,
+    'fineId': fineId,
+    'fineAmount': fineAmount,
+    'fineCategory': fineCategory,
   };
+
+  /// False only for orders published before every order required a student —
+  /// see the "leave legacy orders unlinked" call in the office-orders restructure.
+  bool get hasFine => fineId != null;
 
   bool get hasImage => imageBase64 != null && imageBase64!.isNotEmpty;
 
@@ -93,6 +128,8 @@ class OfficeOrder {
     if (q.isEmpty) return true;
     if (title.toLowerCase().contains(q)) return true;
     if (orderNo.toLowerCase().contains(q)) return true;
+    if ((studentName ?? '').toLowerCase().contains(q)) return true;
+    if ((studentRegNo ?? '').toLowerCase().contains(q)) return true;
     return _loose(orderNo).contains(_loose(q));
   }
 
