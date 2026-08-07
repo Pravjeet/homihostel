@@ -30,6 +30,13 @@ import {
 
 const args = parseArgs(process.argv.slice(2));
 const commit = args.commit === true;
+
+// Only used below for freeing rooms — the account deletes further down
+// already go through Admin SDK bulk calls (one auth.deleteUsers() RPC per
+// 1000 uids, one Firestore batch per 400 docs), so there's no per-row loop
+// there to parallelise. This is the one part of the script that was still
+// reading one room at a time.
+const CONCURRENCY = Number(args.concurrency) > 0 ? Number(args.concurrency) : 10;
 const fromCsv = typeof args['from-csv'] === 'string' ? args['from-csv'] : null;
 const allStudents = args['all-students'] === true;
 const orphans = args.orphans === true;
@@ -173,20 +180,25 @@ for (const u of targets) {
   byRoom.get(key).push(u.uid);
 }
 
-for (const [key, uids] of byRoom) {
-  const [hostelId, roomId] = key.split('/');
-  const ref = db.collection('colleges').doc(college.id)
-    .collection('hostels').doc(hostelId).collection('rooms').doc(roomId);
-  const snap = await ref.get();
-  if (!snap.exists) continue;
+// bedDelta is a Map and roomWrites an array — both fine to mutate from
+// concurrent closures below since Node is single-threaded; the awaits are
+// what overlap, not the pushes/sets themselves.
+for (const group of chunk([...byRoom], CONCURRENCY)) {
+  await Promise.all(group.map(async ([key, uids]) => {
+    const [hostelId, roomId] = key.split('/');
+    const ref = db.collection('colleges').doc(college.id)
+      .collection('hostels').doc(hostelId).collection('rooms').doc(roomId);
+    const snap = await ref.get();
+    if (!snap.exists) return;
 
-  const occupants = snap.data().occupantUids ?? [];
-  const remaining = occupants.filter((id) => !uids.includes(id));
-  const removed = occupants.length - remaining.length;
-  if (!removed) continue;
+    const occupants = snap.data().occupantUids ?? [];
+    const remaining = occupants.filter((id) => !uids.includes(id));
+    const removed = occupants.length - remaining.length;
+    if (!removed) return;
 
-  roomWrites.push({ ref, data: { occupantUids: remaining } });
-  bedDelta.set(hostelId, (bedDelta.get(hostelId) ?? 0) + removed);
+    roomWrites.push({ ref, data: { occupantUids: remaining } });
+    bedDelta.set(hostelId, (bedDelta.get(hostelId) ?? 0) + removed);
+  }));
 }
 
 for (const [hostelId, delta] of bedDelta) {

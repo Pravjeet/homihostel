@@ -1,6 +1,7 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/material.dart';
 
+import 'app_user.dart';
 import 'fine.dart';
 
 /// Everything an admin can configure about their workspace.
@@ -19,6 +20,11 @@ class CollegeSettings {
   /// Overrides [kFineCategories]. Empty means "use the built-in list".
   final List<FineCategory> fineCategories;
 
+  /// The college's own trade/branch list. Empty means "use [kTrades]", so a
+  /// workspace that has never opened this screen still gets a sensible
+  /// dropdown. Once edited, this is the authoritative list everywhere.
+  final List<Trade> trades;
+
   final DateTime? updatedAt;
   final String? updatedByName;
 
@@ -27,6 +33,7 @@ class CollegeSettings {
     this.theming = const AppTheming(),
     this.session = const AcademicSession(),
     this.fineCategories = const [],
+    this.trades = const [],
     this.updatedAt,
     this.updatedByName,
   });
@@ -45,6 +52,10 @@ class CollegeSettings {
         .whereType<Map>()
         .map((e) => FineCategory.fromMap(e.cast<String, dynamic>()))
         .toList(),
+    trades: ((m['trades'] as List?) ?? const [])
+        .whereType<Map>()
+        .map((e) => Trade.fromMap(e.cast<String, dynamic>()))
+        .toList(),
     updatedAt: (m['updatedAt'] as Timestamp?)?.toDate(),
     updatedByName: m['updatedByName'] as String?,
   );
@@ -54,6 +65,7 @@ class CollegeSettings {
     'theming': theming.toMap(),
     'session': session.toMap(),
     'fineCategories': fineCategories.map((c) => c.toMap()).toList(),
+    'trades': trades.map((t) => t.toMap()).toList(),
   };
 
   /// The category names the impose-fine form should offer. Falls back to the
@@ -61,6 +73,21 @@ class CollegeSettings {
   List<String> get categoryNames => fineCategories.isEmpty
       ? kFineCategories
       : fineCategories.map((c) => c.name).toList();
+
+  /// The trade codes every dropdown in the app should offer. Falls back to
+  /// [kTrades] so the form is never empty.
+  List<String> get tradeCodes =>
+      trades.isEmpty ? kTrades : trades.map((t) => t.code).toList();
+
+  /// "GIN — Instrumentation & Control", using the college's own name for it
+  /// where they've set one, otherwise the built-in name, otherwise the bare
+  /// code.
+  String tradeLabelFor(String code) {
+    for (final t in trades) {
+      if (t.code == code) return t.label;
+    }
+    return tradeLabel(code);
+  }
 
   num? defaultAmountFor(String category) {
     for (final c in fineCategories) {
@@ -74,14 +101,55 @@ class CollegeSettings {
     AppTheming? theming,
     AcademicSession? session,
     List<FineCategory>? fineCategories,
+    List<Trade>? trades,
   }) => CollegeSettings(
     institution: institution ?? this.institution,
     theming: theming ?? this.theming,
     session: session ?? this.session,
     fineCategories: fineCategories ?? this.fineCategories,
+    trades: trades ?? this.trades,
     updatedAt: updatedAt,
     updatedByName: updatedByName,
   );
+}
+
+// =====================================================================
+// Trades
+// =====================================================================
+
+/// One trade/branch a college runs — the short code students are recorded
+/// under, plus an optional human name for it.
+///
+/// The code is what gets stored on a student and snapshotted onto a fine, so
+/// it must stay stable; the name is presentation only and can be reworded
+/// freely without touching a single existing record.
+class Trade {
+  final String code;
+
+  /// Optional. Null falls back to the built-in name for a known code, or to
+  /// showing the bare code.
+  final String? name;
+
+  const Trade({required this.code, this.name});
+
+  factory Trade.fromMap(Map<String, dynamic> m) => Trade(
+    code: (m['code'] as String? ?? '').trim(),
+    name: (m['name'] as String?)?.trim().isEmpty == true
+        ? null
+        : m['name'] as String?,
+  );
+
+  Map<String, dynamic> toMap() => {'code': code, 'name': name};
+
+  String get label {
+    final n = name?.trim();
+    if (n != null && n.isNotEmpty) return '$code — $n';
+    return tradeLabel(code);
+  }
+
+  /// The built-in list, as editable rows to start from.
+  static List<Trade> get defaults =>
+      kTrades.map((c) => Trade(code: c, name: kTradeNames[c])).toList();
 }
 
 // =====================================================================
@@ -162,6 +230,10 @@ class ThemePreset {
 }
 
 const List<ThemePreset> kThemePresets = [
+  // The app's default accent. Not the first preset historically (that was
+  // indigo, kept below for workspaces that already picked it) — this is a
+  // deliberate choice, not a placeholder that never got revisited.
+  ThemePreset('navy', 'Navy', Color(0xFF394A6C)),
   ThemePreset('indigo', 'Indigo', Color(0xFF4F46E5)),
   ThemePreset('violet', 'Violet', Color(0xFF7C3AED)),
   ThemePreset('blue', 'Blue', Color(0xFF2563EB)),
@@ -210,12 +282,12 @@ class AppTheming {
   final AppBrightness brightness;
 
   const AppTheming({
-    this.presetId = 'indigo',
+    this.presetId = 'navy',
     this.brightness = AppBrightness.light,
   });
 
   factory AppTheming.fromMap(Map<String, dynamic> m) => AppTheming(
-    presetId: m['presetId'] as String? ?? 'indigo',
+    presetId: m['presetId'] as String? ?? 'navy',
     brightness: AppBrightnessX.parse(m['brightness'] as String?),
   );
 

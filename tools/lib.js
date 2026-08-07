@@ -137,12 +137,23 @@ export function stateFromAddress(address) {
   return null;
 }
 
-/** Mirrors kTrades in lib/models/app_user.dart. */
+/**
+ * Mirrors kTrades in lib/models/app_user.dart — the *defaults* only.
+ *
+ * A college edits its own list under System Settings, stored on the settings
+ * document. These scripts don't read that, so a workspace that has added its
+ * own trades will see them flagged as unknown here even though the app knows
+ * about them. That's a warning, never a rejection.
+ */
 export const TRADES = [
-  'DCE-CBM', 'DEC-CSME', 'DEE-CEN', 'DFT-CFP', 'DME-CAF', 'DME-CFF',
-  'DME-CTD', 'DCS-CDF', 'DCE-CTV', 'DCE-CEP',
-  'GCS', 'GCT', 'GEC', 'GEE', 'GIN', 'GME', 'GCC', 'GEB',
-  'PGMATH', 'PGWLF', 'PGFET', 'PGWD',
+  // Diploma (ICD)
+  'DCE', 'DME', 'DEE', 'DIN', 'DEC', 'DCS', 'DCT', 'DFT',
+  // B.E.
+  'GCS', 'GME', 'GCT', 'GEE', 'GEC', 'GFT', 'GIN', 'GCE', 'GAI',
+  // M.Tech
+  'PGCE', 'PGCSE', 'PGICE', 'PGECE', 'PGFET', 'PGMSE', 'PGWLF', 'PGVLSI',
+  // M.Sc
+  'PGPHY', 'PGCHY', 'PGMATH',
 ];
 
 // ---------------------------------------------------------------------
@@ -357,3 +368,34 @@ export const chunk = (arr, n) => {
   for (let i = 0; i < arr.length; i += n) out.push(arr.slice(i, i + n));
   return out;
 };
+
+/**
+ * Same backoff the in-app importer uses (see kThrottleBackoff in
+ * lib/services/csv_import.dart) — mirrored here so a script run at high
+ * concurrency degrades the same way the browser path does instead of just
+ * failing rows outright.
+ */
+export const THROTTLE_BACKOFF_MS = [3000, 8000, 20000];
+
+export function isThrottle(e) {
+  const code = e?.code ?? '';
+  if (code === 'auth/too-many-requests' || code === 'auth/quota-exceeded') {
+    return true;
+  }
+  const msg = String(e?.message ?? e).toLowerCase();
+  return msg.includes('too-many-requests') ||
+    msg.includes('too many requests') ||
+    msg.includes('quota');
+}
+
+/** Retries `fn` on a Firebase throttle response, backing off between tries. */
+export async function withThrottleRetry(fn) {
+  for (let attempt = 0; ; attempt++) {
+    try {
+      return await fn();
+    } catch (e) {
+      if (attempt >= THROTTLE_BACKOFF_MS.length || !isThrottle(e)) throw e;
+      await new Promise((r) => setTimeout(r, THROTTLE_BACKOFF_MS[attempt]));
+    }
+  }
+}

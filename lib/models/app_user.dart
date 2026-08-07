@@ -209,40 +209,97 @@ class AppUser {
       isAllotted ? '$hostelName · Room $roomNumber' : null;
 }
 
-/// SLIET trade/branch codes, as they appear on the institute's own sheets.
+/// Trade/branch codes a workspace starts with, taken from SLIET's own
+/// programme listings (academic.sliet.ac.in).
 ///
-/// A plain list rather than an enum so adding next year's programme is a
-/// one-line edit. Grouped by level: D* = Diploma (ICD), G* = Degree (B.E.),
-/// PG* = postgraduate. An unrecognised code isn't rejected on import — it is
-/// saved as typed and flagged, because a sheet inventing a code is far more
-/// likely than a student not existing.
+/// This is only the **starting point**. A college edits its own list under
+/// System Settings, which is stored on the settings document and read through
+/// `CollegeSettings.tradeCodes` — that is what every dropdown in the app
+/// actually shows. These defaults exist so a brand-new workspace isn't
+/// staring at an empty dropdown, and so an install that never opens the
+/// settings screen still behaves sensibly.
+///
+/// Grouped by level: D* = Diploma (ICD), G* = B.E., PG* = postgraduate. An
+/// unrecognised code isn't rejected on import — it is saved as typed and
+/// flagged, because a sheet inventing a code is far more likely than a
+/// student not existing.
 const List<String> kTrades = [
-  // Diploma
-  'DCE-CBM',
-  'DEC-CSME',
-  'DEE-CEN',
-  'DFT-CFP',
-  'DME-CAF',
-  'DME-CFF',
-  'DME-CTD',
-  'DCS-CDF',
-  'DCE-CTV',
-  'DCE-CEP',
-  // Degree
+  // Diploma (ICD)
+  'DCE',
+  'DME',
+  'DEE',
+  'DIN',
+  'DEC',
+  'DCS',
+  'DCT',
+  'DFT',
+  // B.E.
   'GCS',
-  'GCT',
-  'GEC',
-  'GEE',
-  'GIN',
   'GME',
-  'GCC',
-  'GEB',
-  // Postgraduate
-  'PGMATH',
-  'PGWLF',
+  'GCT',
+  'GEE',
+  'GEC',
+  'GFT',
+  'GIN',
+  'GCE',
+  'GAI',
+  // M.Tech
+  'PGCE',
+  'PGCSE',
+  'PGICE',
+  'PGECE',
   'PGFET',
-  'PGWD',
+  'PGMSE',
+  'PGWLF',
+  'PGVLSI',
+  // M.Sc
+  'PGPHY',
+  'PGCHY',
+  'PGMATH',
 ];
+
+/// Human-readable names for [kTrades], shown beside the code so nobody has to
+/// remember that "GIN" is Instrumentation & Control.
+///
+/// Only covers the built-in codes — a college-invented code simply shows as
+/// itself, which is the honest thing to do rather than inventing a label.
+const Map<String, String> kTradeNames = {
+  'DCE': 'Civil Technology',
+  'DME': 'Mechanical Technology',
+  'DEE': 'Electrical Engineering',
+  'DIN': 'Instrumentation & Control Engineering',
+  'DEC': 'Electronics & Communication Engineering',
+  'DCS': 'Computer Science & Engineering',
+  'DCT': 'Chemical Technology',
+  'DFT': 'Food Technology',
+  'GCS': 'Computer Science & Engineering',
+  'GME': 'Mechanical Engineering',
+  'GCT': 'Chemical Engineering',
+  'GEE': 'Electrical Engineering',
+  'GEC': 'Electronics & Communication Engineering',
+  'GFT': 'Food Technology',
+  'GIN': 'Instrumentation & Control Engineering',
+  'GCE': 'Civil Engineering',
+  'GAI': 'Artificial Intelligence & Data Science',
+  'PGCE': 'M.Tech Chemical Engineering',
+  'PGCSE': 'M.Tech Computer Science & Engineering',
+  'PGICE': 'M.Tech Instrumentation & Control Engineering',
+  'PGECE': 'M.Tech Electronics & Communication Engineering',
+  'PGFET': 'M.Tech Food Engineering & Technology',
+  'PGMSE': 'M.Tech Manufacturing Systems Engineering',
+  'PGWLF': 'M.Tech Welding & Sheet Metal Engineering',
+  'PGVLSI': 'M.Tech VLSI Design',
+  'PGPHY': 'M.Sc Physics',
+  'PGCHY': 'M.Sc Chemistry',
+  'PGMATH': 'M.Sc Mathematics',
+};
+
+/// "GIN — Instrumentation & Control Engineering", or just the code when it
+/// isn't one of the built-ins.
+String tradeLabel(String code) {
+  final name = kTradeNames[code];
+  return name == null ? code : '$code — $name';
+}
 
 /// States and union territories, as the dashboard should label them.
 const List<String> kIndianStates = [

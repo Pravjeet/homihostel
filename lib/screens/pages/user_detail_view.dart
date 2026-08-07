@@ -622,8 +622,10 @@ class _DetailFormState extends State<_DetailForm> {
     required List<Hostel> hostels,
   }) {
     _currentManagesHostels = managesHostels;
-    final canEdit = Session.of(context).can(Perm.usersEdit);
+    final session = Session.of(context);
+    final canEdit = session.can(Perm.usersEdit);
     final on = canEdit && !_busy;
+    final tradeCodes = session.settings.tradeCodes;
 
     return AppCard(
       child: Form(
@@ -784,13 +786,20 @@ class _DetailFormState extends State<_DetailForm> {
                     child: Padding(
                       padding: const EdgeInsets.only(bottom: 14),
                       child: DropdownButtonFormField<String>(
-                        initialValue: kTrades.contains(_trade) ? _trade : null,
+                        initialValue: tradeCodes.contains(_trade)
+                            ? _trade
+                            : null,
                         isExpanded: true,
                         decoration: const InputDecoration(labelText: 'Trade'),
-                        items: kTrades
+                        items: tradeCodes
                             .map(
-                              (t) =>
-                                  DropdownMenuItem(value: t, child: Text(t)),
+                              (t) => DropdownMenuItem(
+                                value: t,
+                                child: Text(
+                                  session.settings.tradeLabelFor(t),
+                                  overflow: TextOverflow.ellipsis,
+                                ),
+                              ),
                             )
                             .toList(),
                         onChanged: on

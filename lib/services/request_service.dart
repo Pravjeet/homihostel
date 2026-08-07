@@ -131,4 +131,52 @@ class RequestService {
     }
     await _col(collegeId).doc(request.id).delete();
   }
+
+  /// Deletes every request raised by one person.
+  ///
+  /// A request pointing at a uid that no longer exists is an orphaned record,
+  /// not a preserved one — the same reasoning as
+  /// `FineService.deleteForStudent`. Best-effort chunking because a Firestore
+  /// batch caps at 500 operations.
+  Future<int> deleteForStudent(String collegeId, String uid) async {
+    final snap = await _col(
+      collegeId,
+    ).where('raisedByUid', isEqualTo: uid).get();
+    if (snap.docs.isEmpty) return 0;
+
+    for (var i = 0; i < snap.docs.length; i += 400) {
+      final end = (i + 400).clamp(0, snap.docs.length);
+      final batch = _db.batch();
+      for (final d in snap.docs.sublist(i, end)) {
+        batch.delete(d.reference);
+      }
+      await batch.commit();
+    }
+    return snap.docs.length;
+  }
+
+  /// Removes requests whose author is no longer in [liveUids].
+  ///
+  /// Filtered client-side because Firestore has no "not-in a set of N"
+  /// operator, and the request collection is small enough to read whole.
+  /// For clearing the backlog left behind before user deletion cleaned up
+  /// after itself.
+  Future<int> deleteOrphaned(String collegeId, Set<String> liveUids) async {
+    final snap = await _col(collegeId).get();
+    final orphaned = snap.docs.where((d) {
+      final uid = d.data()['raisedByUid'] as String?;
+      return uid == null || uid.isEmpty || !liveUids.contains(uid);
+    }).toList();
+    if (orphaned.isEmpty) return 0;
+
+    for (var i = 0; i < orphaned.length; i += 400) {
+      final end = (i + 400).clamp(0, orphaned.length);
+      final batch = _db.batch();
+      for (final d in orphaned.sublist(i, end)) {
+        batch.delete(d.reference);
+      }
+      await batch.commit();
+    }
+    return orphaned.length;
+  }
 }

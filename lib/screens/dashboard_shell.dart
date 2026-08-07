@@ -66,27 +66,32 @@ class _DashboardShellState extends State<DashboardShell> {
               onToggle: () => setState(() => _expanded = !_expanded),
             ),
           Expanded(
-            child: Column(
-              children: [
-                _TopBar(title: current.label, showMenuButton: isNarrow),
-                Expanded(
-                  child: SingleChildScrollView(
-                    padding: const EdgeInsets.fromLTRB(24, 8, 24, 32),
-                    child: ConstrainedBox(
-                      constraints: const BoxConstraints(maxWidth: 1400),
-                      // KeyedSubtree forces a fresh state when the page
-                      // changes, so stale form state never leaks across pages.
-                      child: DashboardNav(
-                        // Lets a page send the user somewhere else in the
-                        // sidebar — a "Raise a request" button on the
-                        // dashboard should actually open Requests, not just
-                        // name it.
-                        goTo: (id) {
-                          if (items.any((i) => i.id == id)) {
-                            setState(() => _selectedId = id);
-                          }
-                        },
-                        canReach: (id) => items.any((i) => i.id == id),
+            // Wraps the top bar too, not just the page content below it — the
+            // bell in _TopBar depends on this to navigate to Requests, and a
+            // DashboardNav scoped to only the content area is invisible to a
+            // sibling widget, which previously left the bell permanently
+            // unpressable no matter who was signed in.
+            child: DashboardNav(
+              // Lets a page send the user somewhere else in the sidebar — a
+              // "Raise a request" button on the dashboard should actually
+              // open Requests, not just name it.
+              goTo: (id) {
+                if (items.any((i) => i.id == id)) {
+                  setState(() => _selectedId = id);
+                }
+              },
+              canReach: (id) => items.any((i) => i.id == id),
+              child: Column(
+                children: [
+                  _TopBar(title: current.label, showMenuButton: isNarrow),
+                  Expanded(
+                    child: SingleChildScrollView(
+                      padding: const EdgeInsets.fromLTRB(24, 8, 24, 32),
+                      child: ConstrainedBox(
+                        constraints: const BoxConstraints(maxWidth: 1400),
+                        // KeyedSubtree forces a fresh state when the page
+                        // changes, so stale form state never leaks across
+                        // pages.
                         child: KeyedSubtree(
                           key: ValueKey(current.id),
                           child: Builder(builder: current.builder),
@@ -94,8 +99,8 @@ class _DashboardShellState extends State<DashboardShell> {
                       ),
                     ),
                   ),
-                ),
-              ],
+                ],
+              ),
             ),
           ),
         ],
@@ -450,10 +455,7 @@ class _TopBar extends StatelessWidget {
                   subtitle,
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,
-                  style: TextStyle(
-                    color: AppColors.textMuted,
-                    fontSize: 12.5,
-                  ),
+                  style: TextStyle(color: AppColors.textMuted, fontSize: 12.5),
                 ),
               ],
             ),
@@ -530,8 +532,18 @@ class _TopBar extends StatelessWidget {
   }
 
   static String _month(int m) => const [
-    'Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun',
-    'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec',
+    'Jan',
+    'Feb',
+    'Mar',
+    'Apr',
+    'May',
+    'Jun',
+    'Jul',
+    'Aug',
+    'Sep',
+    'Oct',
+    'Nov',
+    'Dec',
   ][m - 1];
 }
 
@@ -587,8 +599,23 @@ class _Pill extends StatelessWidget {
 /// Wired to open requests rather than a generic "notifications" collection
 /// that does not exist — a badge showing a number nobody can act on is worse
 /// than no badge.
-class _Bell extends StatelessWidget {
+class _Bell extends StatefulWidget {
   const _Bell();
+
+  @override
+  State<_Bell> createState() => _BellState();
+}
+
+class _BellState extends State<_Bell> {
+  // Cached rather than created inline in build(): this widget sits in the
+  // top bar on *every* page, so it rebuilds on every single sidebar click.
+  // Handing StreamBuilder a fresh `watchAll(...)` each time looks harmless
+  // but isn't — a new Stream instance makes it tear down the old Firestore
+  // listener and open a new one, and a new listener re-reads every document
+  // in the collection for its initial snapshot. That turned ordinary
+  // navigation into a full re-read of `requests` on every click.
+  String? _collegeId;
+  Stream<List<HostelRequest>>? _stream;
 
   @override
   Widget build(BuildContext context) {
@@ -597,8 +624,13 @@ class _Bell extends StatelessWidget {
 
     if (!session.can(Perm.requestsViewAll)) return const SizedBox.shrink();
 
+    if (_collegeId != session.user.collegeId) {
+      _collegeId = session.user.collegeId;
+      _stream = RequestService.instance.watchAll(_collegeId!);
+    }
+
     return StreamBuilder<List<HostelRequest>>(
-      stream: RequestService.instance.watchAll(session.user.collegeId),
+      stream: _stream,
       builder: (context, snap) {
         final open = (snap.data ?? const <HostelRequest>[])
             .where((r) => r.status.isOpen)
@@ -609,50 +641,55 @@ class _Bell extends StatelessWidget {
               ? () => nav!.goTo('requests')
               : null,
           borderRadius: BorderRadius.circular(8),
-          child: Stack(
-            clipBehavior: Clip.none,
-            children: [
-              Container(
-                height: 34,
-                width: 34,
-                alignment: Alignment.center,
-                decoration: BoxDecoration(
-                  color: AppColors.card,
-                  borderRadius: BorderRadius.circular(8),
-                  border: Border.all(color: AppColors.border),
+          child: Tooltip(
+            message: open > 0
+                ? '$open request(s) waiting on a decision'
+                : 'Open requests',
+            child: Stack(
+              clipBehavior: Clip.none,
+              children: [
+                Container(
+                  height: 34,
+                  width: 34,
+                  alignment: Alignment.center,
+                  decoration: BoxDecoration(
+                    color: AppColors.card,
+                    borderRadius: BorderRadius.circular(8),
+                    border: Border.all(color: AppColors.border),
+                  ),
+                  child: Icon(
+                    Icons.notifications_none_rounded,
+                    size: 17,
+                    color: AppColors.textStrong,
+                  ),
                 ),
-                child: Icon(
-                  Icons.notifications_none_rounded,
-                  size: 17,
-                  color: AppColors.textStrong,
-                ),
-              ),
-              if (open > 0)
-                Positioned(
-                  top: -5,
-                  right: -5,
-                  child: Container(
-                    constraints: const BoxConstraints(minWidth: 17),
-                    height: 17,
-                    padding: const EdgeInsets.symmetric(horizontal: 4),
-                    alignment: Alignment.center,
-                    decoration: BoxDecoration(
-                      color: AppColors.danger,
-                      borderRadius: BorderRadius.circular(9),
-                      border: Border.all(color: AppColors.canvas, width: 2),
-                    ),
-                    child: Text(
-                      open > 99 ? '99+' : '$open',
-                      style: const TextStyle(
-                        color: Colors.white,
-                        fontSize: 10,
-                        fontWeight: FontWeight.w700,
-                        height: 1,
+                if (open > 0)
+                  Positioned(
+                    top: -5,
+                    right: -5,
+                    child: Container(
+                      constraints: const BoxConstraints(minWidth: 17),
+                      height: 17,
+                      padding: const EdgeInsets.symmetric(horizontal: 4),
+                      alignment: Alignment.center,
+                      decoration: BoxDecoration(
+                        color: AppColors.danger,
+                        borderRadius: BorderRadius.circular(9),
+                        border: Border.all(color: AppColors.canvas, width: 2),
+                      ),
+                      child: Text(
+                        open > 99 ? '99+' : '$open',
+                        style: const TextStyle(
+                          color: Colors.white,
+                          fontSize: 10,
+                          fontWeight: FontWeight.w700,
+                          height: 1,
+                        ),
                       ),
                     ),
                   ),
-                ),
-            ],
+              ],
+            ),
           ),
         );
       },

@@ -297,6 +297,8 @@ class _Result extends StatelessWidget {
           _Tally('Profiles deleted', outcome.deleted, AppColors.success),
           _Tally('Logins removed', outcome.authDeleted, AppColors.success),
           _Tally('Beds freed', outcome.vacated, AppColors.info),
+          _Tally('Fines removed', outcome.finesDeleted, AppColors.info),
+          _Tally('Requests removed', outcome.requestsDeleted, AppColors.info),
           _Tally('Problems', outcome.failures.length, AppColors.danger),
         ],
       ),

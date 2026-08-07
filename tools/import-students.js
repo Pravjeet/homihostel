@@ -22,7 +22,7 @@ import { resolve } from 'node:path';
 import {
   initAdmin, resolveCollege, parseArgs, parseDelimited, rowToValues,
   profileFor, toAuthEmail, derivedPassword, isValidRegistrationNumber,
-  normaliseGender, parseSem, TRADES, chunk, IMPORT_COLUMNS,
+  normaliseGender, parseSem, TRADES, chunk, IMPORT_COLUMNS, withThrottleRetry,
 } from './lib.js';
 
 import { FieldValue } from 'firebase-admin/firestore';
@@ -31,11 +31,21 @@ const args = parseArgs(process.argv.slice(2));
 const csvPath = args._[0];
 const commit = args.commit === true;
 
+// How many accounts to create at once. Sequential (1) is what the in-app
+// importer is stuck with — it has to look like a browser. This script has a
+// service-account key, so it doesn't: 10 concurrent `createUser` calls finish
+// in roughly a tenth of the time and, per Firebase, stay well under the
+// threshold that trips the "unusual activity" block. Push it higher at your
+// own risk — that block is a project-wide quota, not a per-row retry.
+const CONCURRENCY = Number(args.concurrency) > 0 ? Number(args.concurrency) : 10;
+
 if (!csvPath) {
   console.error(
     'Usage: node import-students.js <file.csv> [--commit] [--college <id>] ' +
-    '[--role <name>]\n\n' +
-    'Without --commit it prints what WOULD happen and writes nothing.'
+    '[--role <name>] [--concurrency <n>]\n\n' +
+    'Without --commit it prints what WOULD happen and writes nothing.\n' +
+    '--concurrency controls how many accounts are created in parallel ' +
+    '(default 10).'
   );
   process.exit(1);
 }
@@ -180,23 +190,26 @@ if (!creates.length && !updates.length) {
 
 // --- write ---------------------------------------------------------------
 
-console.log('\nWriting…');
+console.log(`\nWriting (${CONCURRENCY} at a time)…`);
 
 const failures = [];
 const imported = [];      // {uid, values, line}
 let madeAccounts = 0;
 let updatedProfiles = 0;
 
-for (const row of [...creates, ...updates]) {
+/** One row, start to finish. Never throws — a bad row records itself as a
+ * failure and lets the rest of its batch keep going, same as the old
+ * sequential loop did row by row. */
+async function importOne(row) {
   try {
     let uid;
     if (row.action === 'create') {
       try {
-        const rec = await auth.createUser({
+        const rec = await withThrottleRetry(() => auth.createUser({
           email: row.authEmail,
           password: derivedPassword(row.values.registrationNo || row.authEmail),
           displayName: (row.values.name ?? '').trim(),
-        });
+        }));
         uid = rec.uid;
       } catch (e) {
         // The Firestore profile was missing but the Auth account already
@@ -236,6 +249,12 @@ for (const row of [...creates, ...updates]) {
     failures.push(`line ${row.line} (${row.authEmail}): ${e.message}`);
     process.stdout.write('x');
   }
+}
+
+// Waves of CONCURRENCY, not a sliding pool: the whole batch finishes before
+// the next one starts, which is what keeps Auth from seeing a steady flood.
+for (const group of chunk([...creates, ...updates], CONCURRENCY)) {
+  await Promise.all(group.map(importOne));
 }
 console.log('');
 

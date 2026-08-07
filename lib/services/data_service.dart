@@ -7,6 +7,8 @@ import '../models/app_user.dart';
 import 'allotment_service.dart';
 import 'audit_service.dart';
 import 'auth_service.dart';
+import 'fine_service.dart';
+import 'request_service.dart';
 
 /// Firestore reads/writes for roles and users.
 class DataService {
@@ -224,6 +226,29 @@ class DataService {
       }
     }
 
+    // A fine pointing at a uid that no longer exists is an orphaned record,
+    // not a preserved one — see FineService.deleteForStudent. Best-effort:
+    // whoever can delete a user may not hold fines.manage, and either way a
+    // fines cleanup failure must not block removing the person.
+    var finesDeleted = 0;
+    try {
+      finesDeleted = await FineService.instance.deleteForStudent(
+        collegeId,
+        user.uid,
+      );
+    } catch (_) {}
+
+    // Same reasoning as fines above: a request pointing at a uid that no
+    // longer exists is an orphaned record, not a preserved one. Best-effort
+    // so a requests cleanup failure never blocks removing the person.
+    var requestsDeleted = 0;
+    try {
+      requestsDeleted = await RequestService.instance.deleteForStudent(
+        collegeId,
+        user.uid,
+      );
+    } catch (_) {}
+
     await deleteUserProfile(user.uid);
 
     if (actor != null && before != null) {
@@ -245,7 +270,12 @@ class DataService {
       );
     }
 
-    return UserDeleteOutcome(auth: auth, vacated: vacated);
+    return UserDeleteOutcome(
+      auth: auth,
+      vacated: vacated,
+      finesDeleted: finesDeleted,
+      requestsDeleted: requestsDeleted,
+    );
   }
 
   /// Bulk-removes profiles, freeing any rooms they held first.
@@ -270,6 +300,8 @@ class DataService {
     final authLeftBehind = <String>[];
     var deleted = 0;
     var vacated = 0;
+    var finesDeleted = 0;
+    var requestsDeleted = 0;
     var authDeleted = 0;
     var done = 0;
 
@@ -296,6 +328,8 @@ class DataService {
           );
           deleted++;
           if (outcome.vacated) vacated++;
+          finesDeleted += outcome.finesDeleted;
+          requestsDeleted += outcome.requestsDeleted;
           if (outcome.auth == AuthDeleteResult.deleted) {
             authDeleted++;
           } else if (!outcome.auth.isGone) {
@@ -317,6 +351,8 @@ class DataService {
     return BulkDeleteOutcome(
       deleted: deleted,
       vacated: vacated,
+      finesDeleted: finesDeleted,
+      requestsDeleted: requestsDeleted,
       authDeleted: authDeleted,
       authLeftBehind: authLeftBehind,
       failures: failures,
@@ -327,12 +363,21 @@ class DataService {
 class UserDeleteOutcome {
   final AuthDeleteResult auth;
   final bool vacated;
-  const UserDeleteOutcome({required this.auth, required this.vacated});
+  final int finesDeleted;
+  final int requestsDeleted;
+  const UserDeleteOutcome({
+    required this.auth,
+    required this.vacated,
+    this.finesDeleted = 0,
+    this.requestsDeleted = 0,
+  });
 }
 
 class BulkDeleteOutcome {
   final int deleted;
   final int vacated;
+  final int finesDeleted;
+  final int requestsDeleted;
 
   /// Sign-in accounts actually removed. Can be lower than [deleted] — see
   /// [authLeftBehind].
@@ -346,6 +391,8 @@ class BulkDeleteOutcome {
   const BulkDeleteOutcome({
     required this.deleted,
     required this.vacated,
+    this.finesDeleted = 0,
+    this.requestsDeleted = 0,
     this.authDeleted = 0,
     this.authLeftBehind = const [],
     required this.failures,

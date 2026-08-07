@@ -275,9 +275,15 @@ service cloud.firestore {
                     && request.resource.data.status != 'pending';
 
       // Withdrawing your own, but only while untouched.
-      allow delete: if sameCollege(collegeId)
-                    && resource.data.raisedByUid == request.auth.uid
-                    && resource.data.status == 'pending';
+      // Staff who triage requests may also remove any request outright —
+      // needed to clear records left behind by a deleted author, which the
+      // clause above can never match (no author left to be, and often not
+      // pending).
+      allow delete: if sameCollege(collegeId) && (
+                      (resource.data.raisedByUid == request.auth.uid
+                       && resource.data.status == 'pending')
+                      || hasPerm('requests.approve')
+                    );
     }
 
     // ---------------- notices ----------------
@@ -426,10 +432,15 @@ service cloud.firestore {
                     && request.resource.data.amount == resource.data.amount
                     && request.resource.data.status != 'pending';
 
-      // Undoing a fine raised in error, only while nothing has been settled.
-      allow delete: if sameCollege(collegeId)
-                    && hasPerm('fines.manage')
-                    && resource.data.status == 'pending';
+      // Deleting. The app itself only ever offers this for a fine raised in
+      // error (still pending) — FineService.remove enforces that in code —
+      // but the rule can't tell an accidental single delete apart from the
+      // two administrative bulk paths (FineService.deleteAll, used to reset
+      // test data, and FineService.deleteForStudent, run when the student's
+      // own account is deleted). Both of those must be able to clear settled
+      // fines too, so the rule only checks who is asking, not the fine's
+      // status.
+      allow delete: if sameCollege(collegeId) && hasPerm('fines.manage');
     }
 
     // ---------------- office orders ----------------

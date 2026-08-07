@@ -5,7 +5,7 @@ import 'package:flutter/material.dart';
 /// These are deliberately **mutable statics**, not constants. A `const`
 /// colour is baked into the widget at compile time, which is precisely why an
 /// accent picker that only changed `ThemeData` left 570 hardcoded references
-/// still rendering indigo — and why a dark mode was impossible.
+/// still rendering the old default — and why a dark mode was impossible.
 ///
 /// [apply] rewrites every token for a given accent and brightness;
 /// [PaletteScope] calls it and rebuilds the tree beneath. The cost of this
@@ -34,7 +34,7 @@ class AppColors {
   static Color info = const Color(0xFF0EA5E9);
   static Color infoSoft = const Color(0xFFE0F2FE);
 
-  static const _lightPrimary = Color(0xFF4F46E5);
+  static const _lightPrimary = Color(0xFF394A6C);
 
   /// True when the dark palette is currently loaded.
   static bool isDark = false;

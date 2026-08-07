@@ -212,6 +212,29 @@ class FineService {
     }
   }
 
+  /// Deletes every fine belonging to one student.
+  ///
+  /// Called when the student's own account is deleted — a fine pointing at a
+  /// uid that no longer exists is an orphaned record nobody can act on, not a
+  /// preserved one. Unlike [remove] this does NOT spare settled fines, same
+  /// reasoning as [deleteAll]: the person the money was owed by is gone, so
+  /// there is nothing left to collect against.
+  Future<int> deleteForStudent(String collegeId, String uid) async {
+    final snap =
+        await _col(collegeId).where('studentUid', isEqualTo: uid).get();
+    if (snap.docs.isEmpty) return 0;
+
+    for (var i = 0; i < snap.docs.length; i += 400) {
+      final end = (i + 400).clamp(0, snap.docs.length);
+      final batch = _db.batch();
+      for (final d in snap.docs.sublist(i, end)) {
+        batch.delete(d.reference);
+      }
+      await batch.commit();
+    }
+    return snap.docs.length;
+  }
+
   /// Deletes every fine in the college. For clearing test data.
   ///
   /// Unlike [remove] this does NOT spare settled fines — the point is a clean

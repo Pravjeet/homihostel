@@ -1,6 +1,7 @@
 import 'package:fl_chart/fl_chart.dart';
 import 'package:flutter/material.dart';
 
+import '../../core/session.dart';
 import '../../core/theme.dart';
 import '../../models/fine.dart';
 import '../../models/hostel.dart';
@@ -54,6 +55,13 @@ class _FinesOverviewViewState extends State<FinesOverviewView> {
   /// documents that would go stale the moment a block is renamed.
   Map<String, String> _codes = const {};
 
+  /// Every hostel currently in the college, labelled the same way the chart
+  /// and filters are — so "Hostel" always offers every hostel that exists,
+  /// not just the ones that happen to already have a fine recorded against
+  /// them. A hostel with zero fines is still a real filter choice; it should
+  /// show an empty result, not be missing from the list entirely.
+  List<String> _allHostelLabels = const [];
+
   String _hostelLabel(String? name) {
     if (name == null || name.trim().isEmpty) return 'None';
     return _codes[name] ?? name;
@@ -92,10 +100,15 @@ class _FinesOverviewViewState extends State<FinesOverviewView> {
     return StreamBuilder<List<Hostel>>(
       stream: HostelService.instance.watchHostels(widget.collegeId),
       builder: (context, hostelSnap) {
+        final hostels = hostelSnap.data ?? const <Hostel>[];
         _codes = {
-          for (final h in hostelSnap.data ?? const <Hostel>[])
+          for (final h in hostels)
             if (h.code.trim().isNotEmpty) h.name: h.code,
         };
+        _allHostelLabels = hostels
+            .map((h) => h.code.trim().isNotEmpty ? h.code : h.name)
+            .toList()
+          ..sort();
         return _buildBody(context);
       },
     );
@@ -118,6 +131,23 @@ class _FinesOverviewViewState extends State<FinesOverviewView> {
         final all = FineSummary(snap.data!);
         final shown = FineSummary(snap.data!.where(_keep).toList());
 
+        // Every hostel that exists, plus any hostel name a fine still points
+        // at even if that hostel has since been deleted — a filter option
+        // must never disappear out from under a fine that references it.
+        final hostelOptions =
+            ({..._allHostelLabels, ...all.valuesOf((f) => _hostelLabel(f.hostelName))}
+                .toList()
+              ..sort());
+
+        // Same reasoning for trades: every trade the college runs, plus any
+        // still referenced by an existing fine even if it was since removed
+        // from the list.
+        final tradeOptions =
+            ({
+              ...Session.of(context).settings.tradeCodes,
+              ...all.valuesOf((f) => f.trade),
+            }.toList()..sort());
+
         return Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
@@ -130,7 +160,7 @@ class _FinesOverviewViewState extends State<FinesOverviewView> {
             const SizedBox(height: 14),
             _Filters(
               all: all,
-              hostelLabel: _hostelLabel,
+              hostelOptions: hostelOptions,
               regNo: _regNo,
               hostel: _hostel,
               officeOrder: _officeOrder,
@@ -162,7 +192,8 @@ class _FinesOverviewViewState extends State<FinesOverviewView> {
                   width: 232,
                   child: _SlicerRail(
                     all: all,
-                    hostelLabel: _hostelLabel,
+                    hostelOptions: hostelOptions,
+                    tradeOptions: tradeOptions,
                     sem: _sem,
                     trade: _trade,
                     batch: _batch,
@@ -322,7 +353,7 @@ class _Headline extends StatelessWidget {
 
 class _Filters extends StatelessWidget {
   final FineSummary all;
-  final String Function(String?) hostelLabel;
+  final List<String> hostelOptions;
   final String? regNo;
   final String? hostel;
   final String? officeOrder;
@@ -338,7 +369,7 @@ class _Filters extends StatelessWidget {
 
   const _Filters({
     required this.all,
-    required this.hostelLabel,
+    required this.hostelOptions,
     required this.regNo,
     required this.hostel,
     required this.officeOrder,
@@ -375,7 +406,7 @@ class _Filters extends StatelessWidget {
           _Drop(
             label: 'Hostel',
             value: hostel,
-            options: all.valuesOf((f) => hostelLabel(f.hostelName)),
+            options: hostelOptions,
             onChanged: onHostel,
             width: 150,
           ),
@@ -924,7 +955,8 @@ class _NoData extends StatelessWidget {
 
 class _SlicerRail extends StatelessWidget {
   final FineSummary all;
-  final String Function(String?) hostelLabel;
+  final List<String> hostelOptions;
+  final List<String> tradeOptions;
   final String? sem;
   final String? trade;
   final String? batch;
@@ -938,7 +970,8 @@ class _SlicerRail extends StatelessWidget {
 
   const _SlicerRail({
     required this.all,
-    required this.hostelLabel,
+    required this.hostelOptions,
+    required this.tradeOptions,
     required this.sem,
     required this.trade,
     required this.batch,
@@ -972,7 +1005,7 @@ class _SlicerRail extends StatelessWidget {
         const SizedBox(height: 14),
         _SlicerBox(
           title: 'Trade',
-          options: all.valuesOf((f) => f.trade),
+          options: tradeOptions,
           selected: trade,
           onTap: onTrade,
           columns: 2,
@@ -989,7 +1022,7 @@ class _SlicerRail extends StatelessWidget {
         const SizedBox(height: 14),
         _SlicerBox(
           title: 'Hostel Number',
-          options: all.valuesOf((f) => hostelLabel(f.hostelName))..sort(),
+          options: hostelOptions,
           selected: hostel,
           onTap: onHostel,
           columns: 2,

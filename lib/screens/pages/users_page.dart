@@ -6,6 +6,7 @@ import '../../core/session.dart';
 import '../../core/theme.dart';
 import '../../models/app_role.dart';
 import '../../models/app_user.dart';
+import '../../models/college_settings.dart';
 import '../../models/hostel.dart';
 import '../../services/auth_service.dart';
 import '../../services/data_service.dart';
@@ -493,6 +494,7 @@ class _UsersPageState extends State<UsersPage> {
     // Read the session HERE, from the page's context — inside the builder the
     // context belongs to the dialog's route, which sits above SessionScope.
     final collegeId = Session.of(context).user.collegeId;
+    final knownTrades = Session.of(context).settings.tradeCodes;
     await showDialog(
       context: context,
       barrierDismissible: false,
@@ -501,6 +503,7 @@ class _UsersPageState extends State<UsersPage> {
         existingUsers: existing,
         roles: roles,
         hostels: _hostels,
+        knownTrades: knownTrades,
       ),
     );
   }
@@ -513,6 +516,7 @@ class _UsersPageState extends State<UsersPage> {
         collegeId: Session.of(context).user.collegeId,
         roles: roles,
         hostels: _hostels,
+        settings: Session.of(context).settings,
       ),
     );
     if (created == true && mounted) {
@@ -776,7 +780,8 @@ class _UserRow extends StatelessWidget {
             messenger.showSnackBar(
               SnackBar(
                 content: Text(
-                  'Profile deleted · ${outcome.auth.explanation}',
+                  'Profile deleted · ${outcome.auth.explanation}'
+                  '${outcome.finesDeleted == 0 ? '' : ' · ${outcome.finesDeleted} fine(s) removed'}',
                 ),
                 duration: outcome.auth.isGone
                     ? const Duration(seconds: 3)
@@ -845,10 +850,18 @@ class _CreateUserDialog extends StatefulWidget {
   final String collegeId;
   final List<AppRole> roles;
   final List<Hostel> hostels;
+
+  /// Passed in rather than read from the context: showDialog pushes onto the
+  /// root Navigator, so this dialog sits *above* SessionScope and
+  /// `Session.of(context)` would throw. Same reasoning as
+  /// [ImportStudentsDialog.collegeId].
+  final CollegeSettings settings;
+
   const _CreateUserDialog({
     required this.collegeId,
     required this.roles,
     required this.hostels,
+    required this.settings,
   });
 
   @override
@@ -1257,15 +1270,21 @@ class _CreateUserDialogState extends State<_CreateUserDialog> {
                     children: [
                       Expanded(
                         child: DropdownButtonFormField<String>(
-                          initialValue: kTrades.contains(_trade)
+                          initialValue:
+                              widget.settings.tradeCodes.contains(_trade)
                               ? _trade
                               : null,
                           isExpanded: true,
                           decoration: const InputDecoration(labelText: 'Trade'),
-                          items: kTrades
+                          items: widget.settings.tradeCodes
                               .map(
-                                (t) =>
-                                    DropdownMenuItem(value: t, child: Text(t)),
+                                (t) => DropdownMenuItem(
+                                  value: t,
+                                  child: Text(
+                                    widget.settings.tradeLabelFor(t),
+                                    overflow: TextOverflow.ellipsis,
+                                  ),
+                                ),
                               )
                               .toList(),
                           onChanged: _busy
@@ -1281,17 +1300,6 @@ class _CreateUserDialogState extends State<_CreateUserDialog> {
                           decoration: const InputDecoration(
                             labelText: 'Batch',
                             hintText: '2023-24',
-                          ),
-                        ),
-                      ),
-                      const SizedBox(width: 12),
-                      Expanded(
-                        child: TextFormField(
-                          controller: _officeRoom,
-                          enabled: !_busy,
-                          decoration: const InputDecoration(
-                            labelText: 'Office / staff room',
-                            hintText: 'Admin Block, Room 12',
                           ),
                         ),
                       ),

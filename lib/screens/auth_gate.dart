@@ -10,6 +10,7 @@ import '../models/college_settings.dart';
 import '../services/auth_service.dart';
 import '../services/data_service.dart';
 import '../services/settings_service.dart';
+import '../services/theme_cache.dart';
 import 'dashboard_shell.dart';
 import 'login_screen.dart';
 
@@ -118,6 +119,14 @@ class _SessionLoader extends StatelessWidget {
                   builder: (context, settingsSnap) {
                     final settings =
                         settingsSnap.data ?? const CollegeSettings();
+                    // Mirrors this workspace's real theme locally, so next
+                    // time the app opens — including the login screen, before
+                    // anyone has signed in — it starts on this instead of the
+                    // hardcoded default. See ThemeCache and the apply() call
+                    // in main().
+                    if (settingsSnap.hasData) {
+                      ThemeCache.instance.write(settings.theming);
+                    }
                     final dark = settings.theming.brightness.isDark(
                       MediaQuery.platformBrightnessOf(context),
                     );

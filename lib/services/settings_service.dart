@@ -85,6 +85,16 @@ class SettingsService {
     if (byName != null) 'updatedByName': byName,
   }, SetOptions(merge: true));
 
+  Future<void> saveTrades(
+    String collegeId,
+    List<Trade> v, {
+    String? byName,
+  }) => _doc(collegeId).set({
+    'trades': v.map((t) => t.toMap()).toList(),
+    'updatedAt': FieldValue.serverTimestamp(),
+    if (byName != null) 'updatedByName': byName,
+  }, SetOptions(merge: true));
+
   /// Renames the college itself. Stored on the college document, not in
   /// settings, because that is what every user's session reads at login.
   Future<void> renameCollege(String collegeId, String name) =>

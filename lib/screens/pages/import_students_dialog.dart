@@ -28,12 +28,16 @@ class ImportStudentsDialog extends StatefulWidget {
   final List<AppRole> roles;
   final List<Hostel> hostels;
 
+  /// The college's trade list, passed in for the same reason as [collegeId].
+  final List<String> knownTrades;
+
   const ImportStudentsDialog({
     super.key,
     required this.collegeId,
     required this.existingUsers,
     required this.roles,
     this.hostels = const [],
+    this.knownTrades = kTrades,
   });
 
   @override
@@ -104,6 +108,7 @@ class _ImportStudentsDialogState extends State<ImportStudentsDialog> {
         roles: widget.roles,
         hostels: widget.hostels,
         defaultRoleName: _defaultRole,
+        knownTrades: widget.knownTrades,
       );
       _step = 1;
     });

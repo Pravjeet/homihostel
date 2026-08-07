@@ -3,7 +3,9 @@ import 'package:flutter/material.dart';
 
 import 'core/theme.dart';
 import 'firebase_options.dart';
+import 'models/college_settings.dart' show AppBrightnessX;
 import 'screens/auth_gate.dart';
+import 'services/theme_cache.dart';
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -18,6 +20,19 @@ Future<void> main() async {
   } catch (e) {
     startupError = e;
   }
+
+  // Apply the workspace's last-known theme before the first frame, so the
+  // login screen matches instead of showing the hardcoded default. AuthGate
+  // re-applies the authoritative copy from Firestore the moment it loads
+  // (see PaletteScope in auth_gate.dart) and refreshes this cache for next
+  // time.
+  final cachedTheme = await ThemeCache.instance.read();
+  AppColors.apply(
+    accent: cachedTheme.seed,
+    dark: cachedTheme.brightness.isDark(
+      WidgetsBinding.instance.platformDispatcher.platformBrightness,
+    ),
+  );
 
   runApp(HostelApp(startupError: startupError));
 }

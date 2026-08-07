@@ -54,12 +54,36 @@ const Set<String> kRequiredColumns = {'name'};
 String templateHeaderRow({String delimiter = ','}) =>
     kImportColumns.join(delimiter);
 
-String templateWithExample() =>
-    '${kImportColumns.join(',')}\n'
-    'Aarav Sharma,2040353,,Student,Male,9876543210,B.Tech CSE,2nd,'
-    'DCE-CBM,2023-24,3,'
-    'BH-01,101,14/03/2004,O+,"Ludhiana, Punjab",Rajesh Sharma,Father,'
-    '9812345678,';
+/// One example row, in the same column order as [kImportColumns].
+///
+/// Split one field per line rather than run together: the previous version
+/// was two commas short, so every value from `state` onwards sat under the
+/// wrong header — the template itself taught people the wrong shape.
+String templateWithExample() => '${kImportColumns.join(',')}\n'
+    '${[
+      'Aarav Sharma', // name
+      '2040353', // registrationNo
+      '', // email
+      'Student', // role
+      'Male', // gender
+      '9876543210', // phone
+      'B.Tech', // course
+      '2nd', // year
+      'GCS', // trade
+      '2023-24', // batch
+      '3', // sem
+      'Punjab', // state
+      'BH-01', // hostel
+      '101', // room
+      '', // officeRoom
+      '14/03/2004', // dateOfBirth
+      'O+', // bloodGroup
+      '"Ludhiana, Punjab"', // address
+      'Rajesh Sharma', // guardianName
+      'Father', // guardianRelation
+      '9812345678', // guardianPhone
+      '', // notes
+    ].join(',')}';
 
 // =====================================================================
 // Parsing
@@ -272,6 +296,11 @@ ImportPlan analyseImport({
   required List<AppRole> roles,
   required List<Hostel> hostels,
   required String defaultRoleName,
+
+  /// The college's own trade list (see `CollegeSettings.tradeCodes`). A code
+  /// outside it is still imported, just flagged — see below. Defaults to the
+  /// built-ins so a caller that hasn't got settings to hand still works.
+  List<String> knownTrades = kTrades,
 }) {
   final known = kImportColumns.toSet();
   final unknown = table.headers.where((h) => !known.contains(h)).toList();
@@ -341,17 +370,20 @@ ImportPlan analyseImport({
       }
     }
 
-    // Trade: match the catalogue case-insensitively so "dce-cbm" lands on the
-    // same value the dropdown writes, otherwise the dashboard would show two
-    // separate bars for the same programme.
+    // Trade: match the college's catalogue case-insensitively so "gcs" lands
+    // on the same value the dropdown writes, otherwise the dashboard would
+    // show two separate bars for the same programme.
     final rawTrade = values['trade'];
     if (rawTrade != null) {
-      final match = kTrades.firstWhere(
+      final match = knownTrades.firstWhere(
         (t) => t.toLowerCase() == rawTrade.trim().toLowerCase(),
         orElse: () => '',
       );
       if (match.isEmpty) {
-        warnings.add('Trade "$rawTrade" isn\'t a known code — saved as typed');
+        warnings.add(
+          'Trade "$rawTrade" isn\'t in your trade list — saved as typed. '
+          'Add it under System Settings to have it appear in dropdowns.',
+        );
       } else {
         values['trade'] = match;
       }

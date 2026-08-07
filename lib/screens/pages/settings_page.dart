@@ -12,6 +12,7 @@ import '../../models/college_settings.dart';
 import '../../services/auth_service.dart';
 import '../../services/data_service.dart';
 import '../../services/fine_service.dart';
+import '../../services/request_service.dart';
 import '../../services/settings_service.dart';
 
 /// Largest logo photo accepted, in bytes. Base64 adds ~33% on top, and this
@@ -107,6 +108,8 @@ class SettingsPage extends StatelessWidget {
               collegeId: collegeId,
               value: s.fineCategories,
             ),
+            const SizedBox(height: 18),
+            _TradesSection(collegeId: collegeId, value: s.trades),
             const SizedBox(height: 18),
             _DangerZone(collegeId: collegeId),
           ],
@@ -987,6 +990,133 @@ class _FineCategoriesSectionState extends State<_FineCategoriesSection>
   }
 }
 
+// ---------------------------------------------------------------- trades
+
+class _TradesSection extends StatefulWidget {
+  final String collegeId;
+  final List<Trade> value;
+
+  const _TradesSection({required this.collegeId, required this.value});
+
+  @override
+  State<_TradesSection> createState() => _TradesSectionState();
+}
+
+class _TradesSectionState extends State<_TradesSection> with _Saving {
+  late final List<Trade> _rows = widget.value.isEmpty
+      ? Trade.defaults
+      : List.of(widget.value);
+
+  @override
+  Widget build(BuildContext context) {
+    final name = Session.of(context).user.name;
+
+    return _Section(
+      title: 'Trades & branches',
+      blurb: 'The programmes students can be recorded under. Offered '
+          'everywhere a trade is picked, and used to group the fines '
+          'dashboard.',
+      busy: busy,
+      error: error,
+      onSave: () => save(() {
+        final clean = <Trade>[];
+        final seen = <String>{};
+        for (final r in _rows) {
+          final code = r.code.trim();
+          if (code.isEmpty) continue;
+          // Codes are the stored value on every student and fine, so a
+          // duplicate would make two rows fight over the same records.
+          if (!seen.add(code.toUpperCase())) {
+            throw Exception('"$code" is listed twice — codes must be unique.');
+          }
+          clean.add(Trade(code: code, name: r.name?.trim()));
+        }
+        if (clean.isEmpty) {
+          throw Exception('Keep at least one trade.');
+        }
+        return SettingsService.instance.saveTrades(
+          widget.collegeId,
+          clean,
+          byName: name,
+        );
+      }, 'Trades saved'),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          for (var i = 0; i < _rows.length; i++)
+            Padding(
+              padding: const EdgeInsets.only(bottom: 10),
+              child: Row(
+                children: [
+                  SizedBox(
+                    width: 130,
+                    child: TextFormField(
+                      key: ValueKey('trade-code-$i'),
+                      initialValue: _rows[i].code,
+                      enabled: !busy,
+                      textCapitalization: TextCapitalization.characters,
+                      decoration: const InputDecoration(
+                        labelText: 'Code',
+                        hintText: 'GCS',
+                        isDense: true,
+                      ),
+                      onChanged: (v) => _rows[i] = Trade(
+                        code: v,
+                        name: _rows[i].name,
+                      ),
+                    ),
+                  ),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: TextFormField(
+                      key: ValueKey('trade-name-$i'),
+                      initialValue: _rows[i].name ?? '',
+                      enabled: !busy,
+                      decoration: const InputDecoration(
+                        labelText: 'Name (optional)',
+                        hintText: 'Computer Science & Engineering',
+                        isDense: true,
+                      ),
+                      onChanged: (v) => _rows[i] = Trade(
+                        code: _rows[i].code,
+                        name: v,
+                      ),
+                    ),
+                  ),
+                  IconButton(
+                    onPressed: busy || _rows.length == 1
+                        ? null
+                        : () => setState(() => _rows.removeAt(i)),
+                    icon: const Icon(Icons.close_rounded, size: 18),
+                    tooltip: 'Remove',
+                  ),
+                ],
+              ),
+            ),
+          Align(
+            alignment: Alignment.centerLeft,
+            child: TextButton.icon(
+              onPressed: busy
+                  ? null
+                  : () => setState(() => _rows.add(const Trade(code: ''))),
+              icon: const Icon(Icons.add_rounded, size: 17),
+              label: const Text('Add trade'),
+            ),
+          ),
+          const SizedBox(height: 4),
+          Text(
+            'The code is what gets stored on a student and snapshotted onto '
+            'their fines, so changing one does not rewrite existing records — '
+            'they keep the code they were saved with. Renaming is always '
+            'safe; re-coding is not.',
+            style: TextStyle(fontSize: 12, color: AppColors.textMuted),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
 // ------------------------------------------------------------ danger zone
 
 class _DangerZone extends StatefulWidget {
@@ -1148,7 +1278,35 @@ class _DangerZoneState extends State<_DangerZone> {
                   users: targets,
                 );
                 return 'Deleted ${outcome.deleted} profile(s), '
-                    'freed ${outcome.vacated} bed(s)';
+                    'freed ${outcome.vacated} bed(s), '
+                    'removed ${outcome.finesDeleted} fine(s), '
+                    '${outcome.requestsDeleted} request(s)';
+              },
+            ),
+          ),
+          Divider(height: 26, color: AppColors.border),
+          _DangerRow(
+            label: 'Delete orphaned requests',
+            detail: 'Removes requests raised by people who no longer exist. '
+                'Current students\' requests are untouched.',
+            busy: _busy,
+            onTap: () => _confirm(
+              title: 'Delete orphaned requests?',
+              body: 'Leave applications, complaints and room-change requests '
+                  'whose author no longer has an account will be removed. '
+                  'Requests from anyone still in the system — pending or '
+                  'already decided — are not touched.',
+              phrase: 'DELETE ORPHANS',
+              run: () async {
+                final all = await DataService.instance
+                    .watchUsers(widget.collegeId)
+                    .first;
+                final liveUids = all.map((u) => u.uid).toSet();
+                final n = await RequestService.instance.deleteOrphaned(
+                  widget.collegeId,
+                  liveUids,
+                );
+                return 'Deleted $n orphaned request(s)';
               },
             ),
           ),
