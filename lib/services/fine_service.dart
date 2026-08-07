@@ -181,19 +181,13 @@ class FineService {
     );
   }
 
-  /// Removes a fine raised in error. Only while it's still unpaid — once money
-  /// has changed hands the record stays.
+  /// Removes a fine, paid or unpaid. Once removed there is no record it was
+  /// ever collected — the caller decides that's acceptable, this doesn't.
   Future<void> remove({
     required String collegeId,
     required Fine fine,
     AppUser? actor,
   }) async {
-    if (!fine.status.isOutstanding) {
-      throw StateError(
-        'This fine has already been settled and can no longer be removed.',
-      );
-    }
-
     final ref = _col(collegeId).doc(fine.id);
     final before = (await ref.get()).data();
     await ref.delete();
@@ -233,6 +227,32 @@ class FineService {
       await batch.commit();
     }
     return snap.docs.length;
+  }
+
+  /// Removes fines whose student is no longer in [liveUids].
+  ///
+  /// Filtered client-side because Firestore has no "not-in a set of N"
+  /// operator, and the fine collection is small enough to read whole. For
+  /// clearing the backlog left behind before the delete rule allowed removing
+  /// a settled fine — see the note on `deleteForStudent`'s call site in
+  /// `DataService.deleteUserCompletely`.
+  Future<int> deleteOrphaned(String collegeId, Set<String> liveUids) async {
+    final snap = await _col(collegeId).get();
+    final orphaned = snap.docs.where((d) {
+      final uid = d.data()['studentUid'] as String?;
+      return uid == null || uid.isEmpty || !liveUids.contains(uid);
+    }).toList();
+    if (orphaned.isEmpty) return 0;
+
+    for (var i = 0; i < orphaned.length; i += 400) {
+      final end = (i + 400).clamp(0, orphaned.length);
+      final batch = _db.batch();
+      for (final d in orphaned.sublist(i, end)) {
+        batch.delete(d.reference);
+      }
+      await batch.commit();
+    }
+    return orphaned.length;
   }
 
   /// Deletes every fine in the college. For clearing test data.

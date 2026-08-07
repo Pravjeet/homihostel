@@ -34,6 +34,76 @@ class _FinesPageState extends State<FinesPage> {
   String _query = '';
   String? _status;
 
+  Future<void> _deleteAllFines(String collegeId) async {
+    const phrase = 'DELETE FINES';
+    final controller = TextEditingController();
+    final messenger = ScaffoldMessenger.of(context);
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (c) => StatefulBuilder(
+        builder: (c, setLocal) => AlertDialog(
+          title: const Text('Delete every fine?'),
+          content: SizedBox(
+            width: 440,
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                const Text(
+                  'Every fine in this workspace will be removed — including '
+                  'ones already marked paid. This cannot be undone.',
+                  style: TextStyle(fontSize: 13, height: 1.5),
+                ),
+                const SizedBox(height: 16),
+                Text(
+                  'Type $phrase to confirm',
+                  style: const TextStyle(
+                    fontSize: 12.5,
+                    fontWeight: FontWeight.w700,
+                  ),
+                ),
+                const SizedBox(height: 6),
+                TextField(
+                  controller: controller,
+                  autofocus: true,
+                  decoration: const InputDecoration(
+                    hintText: phrase,
+                    isDense: true,
+                  ),
+                  onChanged: (_) => setLocal(() {}),
+                ),
+              ],
+            ),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(c, false),
+              child: const Text('Cancel'),
+            ),
+            FilledButton(
+              style: FilledButton.styleFrom(backgroundColor: AppColors.danger),
+              onPressed: controller.text.trim().toUpperCase() == phrase
+                  ? () => Navigator.pop(c, true)
+                  : null,
+              child: const Text('Delete all'),
+            ),
+          ],
+        ),
+      ),
+    );
+    controller.dispose();
+    if (ok != true) return;
+
+    try {
+      final n = await FineService.instance.deleteAll(collegeId);
+      messenger.showSnackBar(SnackBar(content: Text('Deleted $n fine(s)')));
+    } catch (e) {
+      messenger.showSnackBar(
+        SnackBar(content: Text(AuthService.describeError(e))),
+      );
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     final session = Session.of(context);
@@ -81,6 +151,28 @@ class _FinesPageState extends State<FinesPage> {
                 trailing: Row(
                   mainAxisSize: MainAxisSize.min,
                   children: [
+                    if (canManage) ...[
+                      OutlinedButton.icon(
+                        onPressed: () => _deleteAllFines(collegeId),
+                        icon: Icon(
+                          Icons.delete_sweep_rounded,
+                          size: 18,
+                          color: AppColors.danger,
+                        ),
+                        label: Text(
+                          'Delete all',
+                          style: TextStyle(color: AppColors.danger),
+                        ),
+                        style: OutlinedButton.styleFrom(
+                          side: BorderSide(color: AppColors.dangerSoft),
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: 16,
+                            vertical: 14,
+                          ),
+                        ),
+                      ),
+                      const SizedBox(width: 10),
+                    ],
                     if (canViewAll) ...[
                       OutlinedButton.icon(
                         onPressed: () => setState(() => _overview = true),

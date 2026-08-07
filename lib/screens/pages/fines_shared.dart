@@ -59,8 +59,13 @@ class FineRow extends StatelessWidget {
           builder: (c) => AlertDialog(
             title: const Text('Remove this fine?'),
             content: Text(
-              'The ₹${fine.amount} fine on ${fine.studentName} will be '
-              'deleted. Use this only for a fine raised in error.',
+              fine.status.isOutstanding
+                  ? 'The ₹${fine.amount} fine on ${fine.studentName} will '
+                        'be deleted. Use this only for a fine raised in '
+                        'error.'
+                  : 'The ₹${fine.amount} fine on ${fine.studentName} will '
+                        'be deleted permanently — including the record '
+                        'that it was ${fine.status.label.toLowerCase()}.',
             ),
             actions: [
               TextButton(
@@ -179,19 +184,14 @@ class FineRow extends StatelessWidget {
                 if (fine.status.isOutstanding) ...[
                   const PopupMenuItem(value: 'paid', child: Text('Mark paid')),
                   const PopupMenuItem(value: 'waived', child: Text('Waive')),
-                  PopupMenuItem(
-                    value: 'delete',
-                    child: Text(
-                      'Remove',
-                      style: TextStyle(color: AppColors.danger),
-                    ),
+                ],
+                PopupMenuItem(
+                  value: 'delete',
+                  child: Text(
+                    'Remove',
+                    style: TextStyle(color: AppColors.danger),
                   ),
-                ] else
-                  const PopupMenuItem(
-                    enabled: false,
-                    value: 'none',
-                    child: Text('Already settled'),
-                  ),
+                ),
               ],
               onSelected: (v) => _act(context, v),
               child: const Padding(

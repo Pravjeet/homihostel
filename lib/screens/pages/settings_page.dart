@@ -12,6 +12,7 @@ import '../../models/college_settings.dart';
 import '../../services/auth_service.dart';
 import '../../services/data_service.dart';
 import '../../services/fine_service.dart';
+import '../../services/hostel_service.dart';
 import '../../services/request_service.dart';
 import '../../services/settings_service.dart';
 
@@ -1252,6 +1253,31 @@ class _DangerZoneState extends State<_DangerZone> {
           ),
           Divider(height: 26, color: AppColors.border),
           _DangerRow(
+            label: 'Delete orphaned fines',
+            detail: 'Removes fines belonging to students who no longer '
+                'exist. Current students\' fines are untouched.',
+            busy: _busy,
+            onTap: () => _confirm(
+              title: 'Delete orphaned fines?',
+              body: 'Fines whose student no longer has an account — paid or '
+                  'unpaid — will be removed. Fines from anyone still in the '
+                  'system are not touched.',
+              phrase: 'DELETE ORPHAN FINES',
+              run: () async {
+                final all = await DataService.instance
+                    .watchUsers(widget.collegeId)
+                    .first;
+                final liveUids = all.map((u) => u.uid).toSet();
+                final n = await FineService.instance.deleteOrphaned(
+                  widget.collegeId,
+                  liveUids,
+                );
+                return 'Deleted $n orphaned fine(s)';
+              },
+            ),
+          ),
+          Divider(height: 26, color: AppColors.border),
+          _DangerRow(
             label: 'Delete every non-admin account',
             detail: 'Removes all student and staff profiles, freeing their '
                 'rooms. Super Admins and you are kept.',
@@ -1307,6 +1333,29 @@ class _DangerZoneState extends State<_DangerZone> {
                   liveUids,
                 );
                 return 'Deleted $n orphaned request(s)';
+              },
+            ),
+          ),
+          Divider(height: 26, color: AppColors.border),
+          _DangerRow(
+            label: 'Empty all rooms',
+            detail: 'Clears every room\'s occupants and resets occupancy to '
+                'zero. Use if deleted students are still shown occupying a '
+                'room.',
+            busy: _busy,
+            onTap: () => _confirm(
+              title: 'Empty all rooms?',
+              body: 'Every room in every hostel will be marked unoccupied, '
+                  'and each hostel\'s occupied-bed count reset to zero. Do '
+                  'this only when nobody actually holds a room — it does not '
+                  'check who still needs one.',
+              phrase: 'EMPTY ROOMS',
+              run: () async {
+                final result = await HostelService.instance.emptyAllRooms(
+                  widget.collegeId,
+                );
+                return 'Cleared ${result.roomsCleared} room(s), freed '
+                    '${result.bedsFreed} bed(s)';
               },
             ),
           ),

@@ -132,6 +132,15 @@ class RequestService {
     await _col(collegeId).doc(request.id).delete();
   }
 
+  /// Staff permanently clearing a handled request. Unlike [withdraw] this
+  /// isn't limited to the author or to pending requests — the rules gate it
+  /// on requests.approve instead, so a warden can clear an old decision the
+  /// same way they clear a stray one left behind by a deleted student.
+  Future<void> remove({
+    required String collegeId,
+    required HostelRequest request,
+  }) => _col(collegeId).doc(request.id).delete();
+
   /// Deletes every request raised by one person.
   ///
   /// A request pointing at a uid that no longer exists is an orphaned record,

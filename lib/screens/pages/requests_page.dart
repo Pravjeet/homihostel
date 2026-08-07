@@ -25,6 +25,45 @@ class _RequestsPageState extends State<RequestsPage> {
   int _tab = 0;
   bool _raising = false;
   HostelRequest? _open;
+
+  Future<void> _deleteRequest(HostelRequest request) async {
+    final messenger = ScaffoldMessenger.of(context);
+    final collegeId = Session.of(context).user.collegeId;
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (c) => AlertDialog(
+        title: const Text('Delete this request?'),
+        content: Text(
+          '${request.raisedByName}\'s ${request.type.label.toLowerCase()} '
+          'will be removed permanently. This cannot be undone.',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(c, false),
+            child: const Text('Keep it'),
+          ),
+          FilledButton(
+            style: FilledButton.styleFrom(backgroundColor: AppColors.danger),
+            onPressed: () => Navigator.pop(c, true),
+            child: const Text('Delete'),
+          ),
+        ],
+      ),
+    );
+    if (ok != true) return;
+
+    try {
+      await RequestService.instance.remove(
+        collegeId: collegeId,
+        request: request,
+      );
+      messenger.showSnackBar(const SnackBar(content: Text('Request deleted')));
+    } catch (e) {
+      messenger.showSnackBar(
+        SnackBar(content: Text(AuthService.describeError(e))),
+      );
+    }
+  }
   _Queue _queue = _Queue.open;
   String _query = '';
 
@@ -123,9 +162,11 @@ class _RequestsPageState extends State<RequestsPage> {
             collegeId: collegeId,
             filter: _queue,
             query: _query,
+            canDelete: canApprove,
             onFilter: (q) => setState(() => _queue = q),
             onQuery: (q) => setState(() => _query = q),
             onOpen: (r) => setState(() => _open = r),
+            onDelete: _deleteRequest,
           )
         else if (showsMine)
           _MineSection(
@@ -158,17 +199,21 @@ class _QueueSection extends StatelessWidget {
   final String collegeId;
   final _Queue filter;
   final String query;
+  final bool canDelete;
   final ValueChanged<_Queue> onFilter;
   final ValueChanged<String> onQuery;
   final ValueChanged<HostelRequest> onOpen;
+  final ValueChanged<HostelRequest> onDelete;
 
   const _QueueSection({
     required this.collegeId,
     required this.filter,
     required this.query,
+    required this.canDelete,
     required this.onFilter,
     required this.onQuery,
     required this.onOpen,
+    required this.onDelete,
   });
 
   @override
@@ -299,6 +344,9 @@ class _QueueSection extends StatelessWidget {
                         request: shown[i],
                         showWho: true,
                         onTap: () => onOpen(shown[i]),
+                        onDelete: canDelete && !shown[i].status.isOpen
+                            ? () => onDelete(shown[i])
+                            : null,
                       ),
                       if (i != shown.length - 1)
                         Divider(
@@ -469,11 +517,13 @@ class _RequestRow extends StatelessWidget {
   final HostelRequest request;
   final bool showWho;
   final VoidCallback onTap;
+  final VoidCallback? onDelete;
 
   const _RequestRow({
     required this.request,
     required this.showWho,
     required this.onTap,
+    this.onDelete,
   });
 
   @override
@@ -538,7 +588,19 @@ class _RequestRow extends StatelessWidget {
             ),
             const SizedBox(width: 10),
             StatusPill(request.status.label.toUpperCase(), c.fg, c.bg),
-            const SizedBox(width: 6),
+            if (onDelete != null)
+              IconButton(
+                onPressed: onDelete,
+                icon: Icon(
+                  Icons.delete_outline_rounded,
+                  size: 19,
+                  color: AppColors.danger,
+                ),
+                tooltip: 'Delete this request',
+                visualDensity: VisualDensity.compact,
+              )
+            else
+              const SizedBox(width: 6),
             Icon(
               Icons.chevron_right_rounded,
               size: 20,

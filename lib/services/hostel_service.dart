@@ -305,6 +305,47 @@ class HostelService {
     });
   }
 
+  /// Clears every room's occupants and resets every hostel's occupied-bed
+  /// counter to zero, across the whole college.
+  ///
+  /// For when residents left some other way than [AllotmentService.vacate] —
+  /// a bulk account deletion where the vacate step failed silently, or a
+  /// direct console edit — and rooms are left listing uids that no longer
+  /// exist. `vacate` only ever clears one student's own room; nothing else
+  /// repairs a room that's gone stale on its own. Skips rooms that are
+  /// already empty, so re-running this after a partial run is cheap.
+  Future<({int roomsCleared, int bedsFreed})> emptyAllRooms(
+    String collegeId,
+  ) async {
+    final hostels = await _hostels(collegeId).get();
+    var roomsCleared = 0;
+    var bedsFreed = 0;
+
+    for (final hostelDoc in hostels.docs) {
+      final roomsSnap = await _rooms(collegeId, hostelDoc.id).get();
+      final occupied = roomsSnap.docs.where((d) {
+        final list = d.data()['occupantUids'] as List?;
+        return list != null && list.isNotEmpty;
+      }).toList();
+      if (occupied.isEmpty) continue;
+
+      for (var start = 0; start < occupied.length; start += _batchLimit) {
+        final end = (start + _batchLimit).clamp(0, occupied.length);
+        final batch = _db.batch();
+        for (final d in occupied.sublist(start, end)) {
+          bedsFreed += (d.data()['occupantUids'] as List).length;
+          batch.update(d.reference, {'occupantUids': <String>[]});
+        }
+        await batch.commit();
+      }
+      roomsCleared += occupied.length;
+
+      await _hostels(collegeId).doc(hostelDoc.id).update({'occupiedBeds': 0});
+    }
+
+    return (roomsCleared: roomsCleared, bedsFreed: bedsFreed);
+  }
+
   /// Recomputes the denormalised counters from the rooms themselves.
   /// Useful if a write ever fails halfway and the numbers drift.
   Future<void> recalculateCounters(String collegeId, String hostelId) async {
