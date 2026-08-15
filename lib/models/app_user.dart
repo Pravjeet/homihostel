@@ -64,6 +64,16 @@ class AppUser {
   final String? guardianRelation;
   final String? notes;
 
+  // --- Additional profile detail (from bulk import) ---
+  final String? category;
+  final String? religion;
+  final String? admissionYear;
+  final String? motherName;
+  final String? permanentMobile;
+  final String? section;
+  final String? city;
+  final String? pinCode;
+
   // --- Room allotment (denormalised from the room document) ---
   //
   // The room also stores this student's uid in `occupantUids`. Both sides are
@@ -110,6 +120,14 @@ class AppUser {
     this.guardianPhone,
     this.guardianRelation,
     this.notes,
+    this.category,
+    this.religion,
+    this.admissionYear,
+    this.motherName,
+    this.permanentMobile,
+    this.section,
+    this.city,
+    this.pinCode,
     this.hostelId,
     this.hostelName,
     this.roomId,
@@ -148,6 +166,14 @@ class AppUser {
       guardianPhone: m['guardianPhone'] as String?,
       guardianRelation: m['guardianRelation'] as String?,
       notes: m['notes'] as String?,
+      category: m['category'] as String?,
+      religion: m['religion'] as String?,
+      admissionYear: m['admissionYear'] as String?,
+      motherName: m['motherName'] as String?,
+      permanentMobile: m['permanentMobile'] as String?,
+      section: m['section'] as String?,
+      city: m['city'] as String?,
+      pinCode: m['pinCode'] as String?,
       hostelId: m['hostelId'] as String?,
       hostelName: m['hostelName'] as String?,
       roomId: m['roomId'] as String?,
@@ -185,6 +211,14 @@ class AppUser {
     'guardianPhone': guardianPhone,
     'guardianRelation': guardianRelation,
     'notes': notes,
+    'category': category,
+    'religion': religion,
+    'admissionYear': admissionYear,
+    'motherName': motherName,
+    'permanentMobile': permanentMobile,
+    'section': section,
+    'city': city,
+    'pinCode': pinCode,
     'hostelId': hostelId,
     'hostelName': hostelName,
     'roomId': roomId,

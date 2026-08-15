@@ -869,6 +869,14 @@ class _CreateUserDialogState extends State<_CreateUserDialog> {
   final _guardianRelation = TextEditingController();
   final _guardianPhone = TextEditingController();
   final _notes = TextEditingController();
+  final _admissionYear = TextEditingController();
+  final _section = TextEditingController();
+  final _motherName = TextEditingController();
+  final _category = TextEditingController();
+  final _religion = TextEditingController();
+  final _city = TextEditingController();
+  final _pinCode = TextEditingController();
+  final _permanentMobile = TextEditingController();
 
   String? _trade;
   int? _sem;
@@ -915,6 +923,14 @@ class _CreateUserDialogState extends State<_CreateUserDialog> {
       _guardianRelation,
       _guardianPhone,
       _notes,
+      _admissionYear,
+      _section,
+      _motherName,
+      _category,
+      _religion,
+      _city,
+      _pinCode,
+      _permanentMobile,
     ]) {
       c.dispose();
     }
@@ -960,6 +976,14 @@ class _CreateUserDialogState extends State<_CreateUserDialog> {
             'guardianRelation': _val(_guardianRelation),
             'guardianPhone': _val(_guardianPhone),
             'address': _val(_address),
+            'admissionYear': _val(_admissionYear),
+            'section': _val(_section),
+            'motherName': _val(_motherName),
+            'category': _val(_category),
+            'religion': _val(_religion),
+            'city': _val(_city),
+            'pinCode': _val(_pinCode),
+            'permanentMobile': _val(_permanentMobile),
           },
           'officeRoom': _val(_officeRoom),
           'dateOfBirth': _val(_dateOfBirth),
@@ -1282,6 +1306,32 @@ class _CreateUserDialogState extends State<_CreateUserDialog> {
                       ),
                     ],
                   ),
+                  const SizedBox(height: 14),
+                  Row(
+                    children: [
+                      Expanded(
+                        child: TextFormField(
+                          controller: _admissionYear,
+                          enabled: !_busy,
+                          decoration: const InputDecoration(
+                            labelText: 'Admission year',
+                            hintText: '2023-24',
+                          ),
+                        ),
+                      ),
+                      const SizedBox(width: 12),
+                      Expanded(
+                        child: TextFormField(
+                          controller: _section,
+                          enabled: !_busy,
+                          decoration: const InputDecoration(
+                            labelText: 'Section',
+                            hintText: 'Sec-A',
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
                   const SizedBox(height: 18),
                   _SectionLabel('Guardian & emergency contact'),
                   const SizedBox(height: 10),
@@ -1322,6 +1372,14 @@ class _CreateUserDialogState extends State<_CreateUserDialog> {
                       ),
                     ],
                   ),
+                  const SizedBox(height: 14),
+                  TextFormField(
+                    controller: _motherName,
+                    enabled: !_busy,
+                    decoration: const InputDecoration(
+                      labelText: 'Mother\'s name',
+                    ),
+                  ),
                   const SizedBox(height: 18),
                   _SectionLabel('Other'),
                   const SizedBox(height: 10),
@@ -1361,6 +1419,65 @@ class _CreateUserDialogState extends State<_CreateUserDialog> {
                         ),
                       ),
                     ],
+                  ),
+                  const SizedBox(height: 14),
+                  Row(
+                    children: [
+                      Expanded(
+                        child: TextFormField(
+                          controller: _city,
+                          enabled: !_busy,
+                          decoration: const InputDecoration(
+                            labelText: 'City',
+                          ),
+                        ),
+                      ),
+                      const SizedBox(width: 12),
+                      Expanded(
+                        child: TextFormField(
+                          controller: _pinCode,
+                          enabled: !_busy,
+                          keyboardType: TextInputType.number,
+                          decoration: const InputDecoration(
+                            labelText: 'PIN code',
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 14),
+                  Row(
+                    children: [
+                      Expanded(
+                        child: TextFormField(
+                          controller: _category,
+                          enabled: !_busy,
+                          decoration: const InputDecoration(
+                            labelText: 'Category',
+                            hintText: 'GENERAL',
+                          ),
+                        ),
+                      ),
+                      const SizedBox(width: 12),
+                      Expanded(
+                        child: TextFormField(
+                          controller: _religion,
+                          enabled: !_busy,
+                          decoration: const InputDecoration(
+                            labelText: 'Religion',
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 14),
+                  TextFormField(
+                    controller: _permanentMobile,
+                    enabled: !_busy,
+                    keyboardType: TextInputType.phone,
+                    decoration: const InputDecoration(
+                      labelText: 'Permanent mobile (optional)',
+                    ),
                   ),
                 ],
                 const SizedBox(height: 14),

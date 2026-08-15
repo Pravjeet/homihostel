@@ -165,6 +165,8 @@ export const IMPORT_COLUMNS = [
   'course', 'year', 'trade', 'batch', 'sem', 'state',
   'hostel', 'room', 'officeRoom', 'dateOfBirth', 'bloodGroup', 'address',
   'guardianName', 'guardianRelation', 'guardianPhone', 'notes',
+  'category', 'religion', 'admissionYear', 'motherName', 'permanentMobile',
+  'section', 'city', 'pinCode',
 ];
 
 const HEADER_ALIASES = {
@@ -286,6 +288,14 @@ export function profileFor(values, { uid, collegeId, roleId, roleName }) {
     guardianPhone: values.guardianPhone ?? null,
     guardianRelation: values.guardianRelation ?? null,
     notes: values.notes ?? null,
+    category: values.category ?? null,
+    religion: values.religion ?? null,
+    admissionYear: values.admissionYear ?? null,
+    motherName: values.motherName ?? null,
+    permanentMobile: values.permanentMobile ?? null,
+    section: values.section ?? null,
+    city: values.city ?? null,
+    pinCode: values.pinCode ?? null,
   };
 }
 

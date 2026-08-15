@@ -80,8 +80,10 @@ Same file the in-app importer takes. Only `name` plus either
 ```
 name, registrationNo, email, role, gender, phone,
 course, year, trade, batch, sem,
-hostel, room, dateOfBirth, bloodGroup, address,
-guardianName, guardianRelation, guardianPhone, notes
+hostel, room, officeRoom, dateOfBirth, bloodGroup, address,
+guardianName, guardianRelation, guardianPhone, notes,
+category, religion, admissionYear, motherName, permanentMobile,
+section, city, pinCode
 ```
 
 Header names are forgiving — `Student Name`, `Registration Number`,

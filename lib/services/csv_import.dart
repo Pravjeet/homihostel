@@ -45,6 +45,14 @@ const List<String> kImportColumns = [
   'guardianRelation',
   'guardianPhone',
   'notes',
+  'category',
+  'religion',
+  'admissionYear',
+  'motherName',
+  'permanentMobile',
+  'section',
+  'city',
+  'pinCode',
 ];
 
 /// A row needs a name, and *some* way to log in — either a registration
@@ -83,6 +91,14 @@ String templateWithExample() => '${kImportColumns.join(',')}\n'
       'Father', // guardianRelation
       '9812345678', // guardianPhone
       '', // notes
+      'GENERAL', // category
+      'Hindu', // religion
+      '2023-24', // admissionYear
+      'Sunita Sharma', // motherName
+      '9876500000', // permanentMobile
+      'Sec-A', // section
+      'Ludhiana', // city
+      '141001', // pinCode
     ].join(',')}';
 
 // =====================================================================
@@ -760,6 +776,14 @@ Map<String, dynamic> _detailFields(ImportRow row) {
     'guardianRelation',
     'guardianPhone',
     'notes',
+    'category',
+    'religion',
+    'admissionYear',
+    'motherName',
+    'permanentMobile',
+    'section',
+    'city',
+    'pinCode',
   ];
   final out = <String, dynamic>{};
   for (final k in keys) {

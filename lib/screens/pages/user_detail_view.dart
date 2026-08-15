@@ -527,6 +527,14 @@ class _DetailFormState extends State<_DetailForm> {
       'guardianPhone': TextEditingController(text: u.guardianPhone ?? ''),
       'guardianRelation': TextEditingController(text: u.guardianRelation ?? ''),
       'notes': TextEditingController(text: u.notes ?? ''),
+      'admissionYear': TextEditingController(text: u.admissionYear ?? ''),
+      'section': TextEditingController(text: u.section ?? ''),
+      'motherName': TextEditingController(text: u.motherName ?? ''),
+      'category': TextEditingController(text: u.category ?? ''),
+      'religion': TextEditingController(text: u.religion ?? ''),
+      'city': TextEditingController(text: u.city ?? ''),
+      'pinCode': TextEditingController(text: u.pinCode ?? ''),
+      'permanentMobile': TextEditingController(text: u.permanentMobile ?? ''),
     };
     _gender = u.gender;
     _bloodGroup = u.bloodGroup;
@@ -576,6 +584,14 @@ class _DetailFormState extends State<_DetailForm> {
           'guardianName': _val('guardianName'),
           'guardianPhone': _val('guardianPhone'),
           'guardianRelation': _val('guardianRelation'),
+          'admissionYear': _val('admissionYear'),
+          'section': _val('section'),
+          'motherName': _val('motherName'),
+          'category': _val('category'),
+          'religion': _val('religion'),
+          'city': _val('city'),
+          'pinCode': _val('pinCode'),
+          'permanentMobile': _val('permanentMobile'),
         },
         'officeRoom': _val('officeRoom'),
         'dateOfBirth': _val('dateOfBirth'),
@@ -840,6 +856,27 @@ class _DetailFormState extends State<_DetailForm> {
                   ),
                 ],
               ),
+              Row(
+                children: [
+                  Expanded(
+                    child: _Field(
+                      _c['admissionYear']!,
+                      'Admission year',
+                      hint: '2023-24',
+                      enabled: on,
+                    ),
+                  ),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: _Field(
+                      _c['section']!,
+                      'Section',
+                      hint: 'Sec-A',
+                      enabled: on,
+                    ),
+                  ),
+                ],
+              ),
 
               const SizedBox(height: 8),
               const _SectionLabel('Guardian & emergency contact'),
@@ -873,6 +910,11 @@ class _DetailFormState extends State<_DetailForm> {
                     ),
                   ),
                 ],
+              ),
+              _Field(
+                _c['motherName']!,
+                "Mother's name",
+                enabled: on,
               ),
 
               const SizedBox(height: 8),
@@ -914,6 +956,44 @@ class _DetailFormState extends State<_DetailForm> {
                     ),
                   ),
                 ],
+              ),
+              Row(
+                children: [
+                  Expanded(
+                    child: _Field(_c['city']!, 'City', enabled: on),
+                  ),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: _Field(
+                      _c['pinCode']!,
+                      'PIN code',
+                      enabled: on,
+                      keyboard: TextInputType.number,
+                    ),
+                  ),
+                ],
+              ),
+              Row(
+                children: [
+                  Expanded(
+                    child: _Field(
+                      _c['category']!,
+                      'Category',
+                      hint: 'GENERAL',
+                      enabled: on,
+                    ),
+                  ),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: _Field(_c['religion']!, 'Religion', enabled: on),
+                  ),
+                ],
+              ),
+              _Field(
+                _c['permanentMobile']!,
+                'Permanent mobile',
+                enabled: on,
+                keyboard: TextInputType.phone,
               ),
             ],
             _Field(
