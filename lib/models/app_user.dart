@@ -226,13 +226,20 @@ class AppUser {
 const List<String> kTrades = [
   // Diploma (ICD)
   'DCE',
+  'DCE-CBM',
   'DME',
+  'DME-CAF',
+  'DME-CFF',
+  'DME-CTD',
   'DEE',
+  'DEE-CEN',
   'DIN',
   'DEC',
+  'DEC-CSME',
   'DCS',
   'DCT',
   'DFT',
+  'DFT-CFP',
   // B.E.
   'GCS',
   'GME',

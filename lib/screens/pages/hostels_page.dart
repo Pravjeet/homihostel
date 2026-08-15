@@ -64,19 +64,48 @@ class _HostelsPageState extends State<HostelsPage> {
                 children: [
                   SectionHeader(
                     'Hostels  (${hostels.length})',
-                    trailing: session.can(Perm.hostelsManage)
-                        ? ElevatedButton.icon(
-                            onPressed: () => _openEditor(collegeId, null),
-                            icon: const Icon(Icons.add_rounded, size: 18),
-                            label: const Text('Add hostel'),
-                            style: ElevatedButton.styleFrom(
-                              padding: const EdgeInsets.symmetric(
-                                horizontal: 18,
-                                vertical: 14,
+                    trailing: !session.can(Perm.hostelsManage)
+                        ? null
+                        : Row(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              if (hostels.isNotEmpty) ...[
+                                OutlinedButton.icon(
+                                  onPressed: () => _emptyAllRooms(collegeId),
+                                  icon: Icon(
+                                    Icons.meeting_room_outlined,
+                                    size: 18,
+                                    color: AppColors.danger,
+                                  ),
+                                  label: Text(
+                                    'Empty all rooms',
+                                    style: TextStyle(color: AppColors.danger),
+                                  ),
+                                  style: OutlinedButton.styleFrom(
+                                    side: BorderSide(
+                                      color: AppColors.dangerSoft,
+                                    ),
+                                    padding: const EdgeInsets.symmetric(
+                                      horizontal: 16,
+                                      vertical: 14,
+                                    ),
+                                  ),
+                                ),
+                                const SizedBox(width: 10),
+                              ],
+                              ElevatedButton.icon(
+                                onPressed: () => _openEditor(collegeId, null),
+                                icon: const Icon(Icons.add_rounded, size: 18),
+                                label: const Text('Add hostel'),
+                                style: ElevatedButton.styleFrom(
+                                  padding: const EdgeInsets.symmetric(
+                                    horizontal: 18,
+                                    vertical: 14,
+                                  ),
+                                ),
                               ),
-                            ),
-                          )
-                        : null,
+                            ],
+                          ),
                   ),
                   if (hostels.isNotEmpty) ...[
                     const SizedBox(height: 18),
@@ -151,6 +180,85 @@ class _HostelsPageState extends State<HostelsPage> {
       context: context,
       builder: (_) => HostelEditorDialog(collegeId: collegeId, hostel: hostel),
     );
+  }
+
+  Future<void> _emptyAllRooms(String collegeId) async {
+    const phrase = 'EMPTY ROOMS';
+    final controller = TextEditingController();
+    final messenger = ScaffoldMessenger.of(context);
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (c) => StatefulBuilder(
+        builder: (c, setLocal) => AlertDialog(
+          title: const Text('Empty all rooms?'),
+          content: SizedBox(
+            width: 440,
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                const Text(
+                  'Every room in every hostel will be marked unoccupied, and '
+                  'each hostel\'s occupied-bed count reset to zero. Do this '
+                  'only when nobody actually holds a room — it does not '
+                  'check who still needs one.',
+                  style: TextStyle(fontSize: 13, height: 1.5),
+                ),
+                const SizedBox(height: 16),
+                Text(
+                  'Type $phrase to confirm',
+                  style: const TextStyle(
+                    fontSize: 12.5,
+                    fontWeight: FontWeight.w700,
+                  ),
+                ),
+                const SizedBox(height: 6),
+                TextField(
+                  controller: controller,
+                  autofocus: true,
+                  decoration: const InputDecoration(
+                    hintText: phrase,
+                    isDense: true,
+                  ),
+                  onChanged: (_) => setLocal(() {}),
+                ),
+              ],
+            ),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(c, false),
+              child: const Text('Cancel'),
+            ),
+            FilledButton(
+              style: FilledButton.styleFrom(backgroundColor: AppColors.danger),
+              onPressed: controller.text.trim().toUpperCase() == phrase
+                  ? () => Navigator.pop(c, true)
+                  : null,
+              child: const Text('Empty all'),
+            ),
+          ],
+        ),
+      ),
+    );
+    controller.dispose();
+    if (ok != true) return;
+
+    try {
+      final result = await HostelService.instance.emptyAllRooms(collegeId);
+      messenger.showSnackBar(
+        SnackBar(
+          content: Text(
+            'Cleared ${result.roomsCleared} room(s), freed '
+            '${result.bedsFreed} bed(s)',
+          ),
+        ),
+      );
+    } catch (e) {
+      messenger.showSnackBar(
+        SnackBar(content: Text(AuthService.describeError(e))),
+      );
+    }
   }
 
   Future<void> _confirmDelete(String collegeId, Hostel hostel) async {

@@ -191,24 +191,17 @@ class _ProfilePageState extends State<ProfilePage> {
                           ? 'Accounts that sign in with a registration '
                                 'number don\'t have an email to change.'
                           : null,
-                      suffixIcon: Identity.isSynthetic(user.email)
-                          ? null
-                          : TextButton(
-                              onPressed: _busy
-                                  ? null
-                                  : () => _changeEmail(context),
-                              child: const Text('Change'),
-                            ),
                     ),
                   ),
                   const SizedBox(height: 20),
-                  Row(
+                  Wrap(
+                    spacing: 12,
+                    runSpacing: 12,
                     children: [
                       ElevatedButton(
                         onPressed: _busy ? null : () => _save(user.uid),
                         child: const Text('Save changes'),
                       ),
-                      const SizedBox(width: 12),
                       OutlinedButton(
                         onPressed: _busy
                             ? null
@@ -216,7 +209,12 @@ class _ProfilePageState extends State<ProfilePage> {
                         child: const Text('Change password'),
                       ),
                       if (!Identity.isSynthetic(user.email)) ...[
-                        const SizedBox(width: 12),
+                        OutlinedButton(
+                          onPressed: _busy
+                              ? null
+                              : () => _changeEmail(context),
+                          child: const Text('Change email'),
+                        ),
                         OutlinedButton(
                           onPressed: _busy
                               ? null

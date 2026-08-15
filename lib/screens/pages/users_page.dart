@@ -77,10 +77,12 @@ class _UsersPageState extends State<UsersPage> {
   /// controller, resetting `_query` in setState leaves the typed text on
   /// screen while the list silently shows everything.
   final _search = TextEditingController();
+  final _roomSearch = TextEditingController();
 
   @override
   void dispose() {
     _search.dispose();
+    _roomSearch.dispose();
     super.dispose();
   }
 
@@ -130,28 +132,7 @@ class _UsersPageState extends State<UsersPage> {
             }
 
             final all = userSnap.data!;
-
-            // Room numbers offered are those in the chosen hostel only —
-            // "Room 101" exists in every block, so an unscoped room list
-            // would match people across four buildings at once.
-            final roomOptions =
-                all
-                    .where(
-                      (u) =>
-                          _hostelFilter == null ||
-                          _hostelFilter == _kUnallotted ||
-                          u.hostelName == _hostelFilter,
-                    )
-                    .map((u) => u.roomNumber)
-                    .whereType<String>()
-                    .toSet()
-                    .toList()
-                  ..sort((a, b) {
-                    final na = int.tryParse(a);
-                    final nb = int.tryParse(b);
-                    if (na != null && nb != null) return na.compareTo(nb);
-                    return a.compareTo(b);
-                  });
+            final roomQuery = _roomFilter?.trim().toLowerCase() ?? '';
 
             final filtered = all.where((u) {
               final q = _query.toLowerCase();
@@ -168,7 +149,8 @@ class _UsersPageState extends State<UsersPage> {
                 final h => u.hostelName == h,
               };
               final matchesRoom =
-                  _roomFilter == null || u.roomNumber == _roomFilter;
+                  roomQuery.isEmpty ||
+                  (u.roomNumber?.toLowerCase().contains(roomQuery) ?? false);
               return matchesQuery && matchesRole && matchesHostel && matchesRoom;
             }).toList();
 
@@ -342,37 +324,25 @@ class _UsersPageState extends State<UsersPage> {
                               onChanged: (v) => setState(() {
                                 _hostelFilter = v;
                                 _roomFilter = null;
+                                _roomSearch.clear();
                               }),
                             ),
                           ),
                           const SizedBox(width: 12),
                           SizedBox(
                             width: 170,
-                            child: DropdownButtonFormField<String>(
-                              initialValue: roomOptions.contains(_roomFilter)
-                                  ? _roomFilter
-                                  : null,
-                              isExpanded: true,
+                            child: TextField(
+                              controller: _roomSearch,
+                              enabled:
+                                  _hostelFilter != null &&
+                                  _hostelFilter != _kUnallotted,
+                              onChanged: (v) =>
+                                  setState(() => _roomFilter = v),
                               decoration: const InputDecoration(
                                 labelText: 'Room',
+                                hintText: 'Search room no.',
                                 isDense: true,
                               ),
-                              hint: const Text('Any room'),
-                              items: [
-                                const DropdownMenuItem<String>(
-                                  value: null,
-                                  child: Text('Any room'),
-                                ),
-                                ...roomOptions.map(
-                                  (r) => DropdownMenuItem(
-                                    value: r,
-                                    child: Text(r),
-                                  ),
-                                ),
-                              ],
-                              onChanged: _hostelFilter == _kUnallotted
-                                  ? null
-                                  : (v) => setState(() => _roomFilter = v),
                             ),
                           ),
                           const SizedBox(width: 12),
@@ -392,6 +362,7 @@ class _UsersPageState extends State<UsersPage> {
                             TextButton.icon(
                               onPressed: () {
                                 _search.clear();
+                                _roomSearch.clear();
                                 setState(() {
                                   _hostelFilter = null;
                                   _roomFilter = null;
@@ -416,8 +387,14 @@ class _UsersPageState extends State<UsersPage> {
                     padding: EdgeInsets.symmetric(vertical: 50),
                     child: Center(
                       child: Text(
-                        'No users match your filters.',
+                        _hostelFilter != null &&
+                                _hostelFilter != _kUnallotted &&
+                                roomQuery.isNotEmpty
+                            ? 'Room "${_roomFilter!.trim()}" in '
+                                  '$_hostelFilter is not allotted to anyone.'
+                            : 'No users match your filters.',
                         style: TextStyle(color: AppColors.textMuted),
+                        textAlign: TextAlign.center,
                       ),
                     ),
                   )
