@@ -1,6 +1,7 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
 
 import '../models/college_settings.dart';
+import 'stream_cache.dart';
 
 /// Workspace configuration, at `colleges/{collegeId}/settings/config`.
 ///
@@ -26,13 +27,18 @@ class SettingsService {
   /// Never emits an error state for "not configured yet" — a workspace that
   /// has never opened the settings screen gets defaults, which is what every
   /// caller wants.
-  Stream<CollegeSettings> watch(String collegeId) => _doc(collegeId)
-      .snapshots()
-      .map(
-        (d) => d.exists
-            ? CollegeSettings.fromMap(d.data()!)
-            : const CollegeSettings(),
-      );
+  final CachedStreamPool<CollegeSettings> _pool = CachedStreamPool();
+
+  Stream<CollegeSettings> watch(String collegeId) => _pool.stream(
+    collegeId,
+    () => _doc(collegeId)
+        .snapshots()
+        .map(
+          (d) => d.exists
+              ? CollegeSettings.fromMap(d.data()!)
+              : const CollegeSettings(),
+        ),
+  );
 
   Future<CollegeSettings> read(String collegeId) async {
     final d = await _doc(collegeId).get();

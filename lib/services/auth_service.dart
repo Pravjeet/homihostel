@@ -6,6 +6,7 @@ import '../core/identity.dart';
 import '../core/permissions.dart';
 import '../models/app_role.dart';
 import '../models/app_user.dart';
+import 'stream_cache.dart';
 
 /// All authentication + provisioning logic. Widgets never touch
 /// FirebaseAuth/Firestore directly.
@@ -109,7 +110,16 @@ class AuthService {
     );
   }
 
-  Future<void> signOut() => _auth.signOut();
+  /// Signs out and drops every cached query.
+  ///
+  /// Order matters: the caches are closed *before* Firebase Auth drops the
+  /// credential. A listener still attached when the token goes away fires a
+  /// permission-denied error, which surfaces as a red error card flashing over
+  /// the login screen on the way out.
+  Future<void> signOut() async {
+    await StreamCaches.disposeAll();
+    await _auth.signOut();
+  }
 
   /// Only meaningful for real addresses. A synthetic one has no inbox, so we
   /// refuse rather than silently pretending to send.

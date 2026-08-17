@@ -27,6 +27,17 @@ Same Firebase project, same free Spark plan. Just a more privileged door.
 - **Service accounts** tab → **Generate new private key** → **Generate key**
 - A `.json` file downloads
 
+> **Check the project name at the top of the console before you click.** If you
+> have more than one Firebase project, a key from the wrong one authenticates
+> perfectly and then reads and writes a database the app never opens. Every
+> script reports success, and the app goes on showing the records you thought
+> you had just deleted — which looks exactly like a caching bug and gets
+> debugged as one for hours.
+>
+> The scripts now refuse to run when the key's project does not match
+> `.firebaserc`, and print both ids so the fix is obvious. If you hit that
+> message, this is the step that went wrong.
+
 **2. Put it here**
 
 Rename it to `serviceAccountKey.json` and drop it in this `tools/` folder.
@@ -80,7 +91,7 @@ Same file the in-app importer takes. Only `name` plus either
 ```
 name, registrationNo, email, role, gender, phone,
 course, year, trade, batch, sem,
-hostel, room, officeRoom, dateOfBirth, bloodGroup, address,
+hostel, room, dateOfBirth, bloodGroup, address,
 guardianName, guardianRelation, guardianPhone, notes,
 category, religion, admissionYear, motherName, permanentMobile,
 section, city, pinCode
@@ -98,10 +109,39 @@ Two fields are derived when blank:
 Students sign in with their **registration number as both username and
 password**. Tell them to change it from My Profile after first login.
 
+A row with an `email` value logs in with *that* address instead. Siblings
+sharing one parent's address therefore share a login — and since the importer
+matches existing students by that same key, the second row is read as an
+*update* of the first and silently overwrites them. Run this first to check:
+
+```bash
+# writes finalsheet.fixed.csv, never touches the input
+node fix-duplicate-emails.js ../../finalsheet.csv
+```
+
+Later rows of each colliding group get `{registrationNo}@homihostel.local`,
+and a `notes` cell recording the address they shared, who they shared it with,
+and the original as a contact. It prints every substitution and exits without
+writing if two rows carry the same registration number, which no generated
+login can separate. Import the `.fixed.csv` it produces.
+
 ## Deleting students
 
-The counterpart the app can't provide. Removes the Auth account *and* the
-Firestore profile, and frees any room they held so bed counts stay correct.
+Removes every trace of a student, in both halves of Firebase:
+
+1. room occupancy — `occupantUids` entries and the hostel bed counters
+2. mess fee records — `colleges/{id}/feeRecords`
+3. fines — `colleges/{id}/fines`
+4. requests — `colleges/{id}/requests`
+5. Firestore profiles
+6. Firebase Auth sign-in accounts
+
+Steps 1–5 are also available in the app, under **Settings → Danger zone →
+"Delete ALL student data"**. Step 6 is the one only this script can do — see
+[Orphaned sign-in accounts](#orphaned-sign-in-accounts).
+
+Hostels, rooms, college settings, roles, notices, office orders and the audit
+log are never touched. Those are the institution, not its intake.
 
 ```bash
 # preview
@@ -112,7 +152,8 @@ node delete-students.js --from-csv ../students.csv --commit
 ```
 
 `--from-csv` deletes only the people listed in that file — the safe way to
-undo a botched import.
+undo a botched import. The preview reports the attached records too, so the
+dry run is the whole story and not just a headcount.
 
 ### Orphaned sign-in accounts
 
@@ -144,6 +185,7 @@ node delete-students.js --all-students --i-mean-it --commit
 | Situation | Use |
 |---|---|
 | Warden adds 5 new students mid-semester | The app's CSV import |
+| A sheet has an `email` column | `fix-duplicate-emails.js`, then import |
 | You seed 200 students at session start | `import-students.js` |
 | A test import went wrong | `delete-students.js --from-csv` |
 | You need an Auth account actually gone | `delete-students.js` |

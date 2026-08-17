@@ -138,6 +138,57 @@ class AllotmentService {
   }
 
   // ------------------------------------------------------------------
+  // Hostel-only assignment (no specific room/bed)
+  // ------------------------------------------------------------------
+  //
+  // Some colleges know who lives in which hostel before rooms are finalised
+  // — or never track individual beds for a given block at all. This records
+  // hostel membership on [AppUser.hostelId]/[hostelName] without touching
+  // [AppUser.roomId] or any room's occupancy, so [AppUser.isAllotted] (which
+  // requires a room) correctly stays false. A plain write, not a
+  // transaction: unlike [allot], nothing here contends over a shared,
+  // capacity-limited resource.
+
+  /// Marks [student] as belonging to [hostel] with no room chosen yet.
+  Future<void> assignHostelOnly({
+    required String collegeId,
+    required AppUser student,
+    required Hostel hostel,
+  }) async {
+    if (student.isAllotted) {
+      throw AllotmentFailure(
+        '${student.name} already has ${student.roomLabel}. '
+        'Change or vacate their room instead.',
+      );
+    }
+    if (!genderAllows(hostel.gender, student.gender)) {
+      throw AllotmentFailure(genderRefusal(hostel.gender, student.gender));
+    }
+    await _db.collection('users').doc(student.uid).update({
+      'hostelId': hostel.id,
+      'hostelName': hostel.name,
+    });
+  }
+
+  /// Clears a hostel-only assignment made by [assignHostelOnly]. A student
+  /// who actually holds a room should be vacated via [vacate] instead, which
+  /// also frees the bed — this refuses if called on one by mistake.
+  Future<void> unassignHostelOnly({
+    required String collegeId,
+    required AppUser student,
+  }) async {
+    if (student.isAllotted) {
+      throw AllotmentFailure(
+        '${student.name} has an actual room — vacate it instead.',
+      );
+    }
+    await _db.collection('users').doc(student.uid).update({
+      'hostelId': null,
+      'hostelName': null,
+    });
+  }
+
+  // ------------------------------------------------------------------
   // Vacate
   // ------------------------------------------------------------------
 

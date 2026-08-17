@@ -266,12 +266,15 @@ console.log('');
 // per-student transaction the app has to use.
 
 const wantRooms = imported.filter((r) => r.values.hostel && r.values.room);
+// Hostel named but no room number — record membership without a bed rather
+// than silently dropping the hostel value, which is what most rows in a
+// typical sheet look like before rooms are finalised.
+const wantHostelOnly = imported.filter((r) => r.values.hostel && !r.values.room);
 const allotIssues = [];
 let allotted = 0;
+let hostelOnly = 0;
 
-if (wantRooms.length) {
-  console.log('\nAllotting rooms…');
-
+if (wantRooms.length || wantHostelOnly.length) {
   const hostelSnap = await db.collection('colleges').doc(college.id)
     .collection('hostels').get();
   const hostels = hostelSnap.docs.map((d) => ({ id: d.id, ...d.data() }));
@@ -280,70 +283,105 @@ if (wantRooms.length) {
   const writes = [];
   const bedDelta = new Map();
 
-  for (const r of wantRooms) {
-    const wanted = r.values.hostel.toLowerCase();
-    const hostel = hostels.find(
-      (h) => (h.name ?? '').toLowerCase() === wanted ||
-             (h.code ?? '').toLowerCase() === wanted
-    );
-    if (!hostel) {
-      allotIssues.push(`line ${r.line}: no hostel called "${r.values.hostel}"`);
-      continue;
-    }
+  if (wantRooms.length) {
+    console.log('\nAllotting rooms…');
 
-    // Already living somewhere ELSE. Adding them to the new room without
-    // vacating the old one would leave them listed in two rooms at once and
-    // permanently inflate both hostels' occupiedBeds. Moving a student is a
-    // deliberate act — refuse it here and say so.
-    const prev = r.existing;
-    if (prev?.roomId &&
-        !(prev.hostelId === hostel.id && String(prev.roomId) === String(r.values.room))) {
-      allotIssues.push(
-        `line ${r.line}: ${prev.name ?? 'that student'} is already in ` +
-        `${prev.hostelName} room ${prev.roomNumber} — move them in the app ` +
-        `instead of re-importing`
+    for (const r of wantRooms) {
+      const wanted = r.values.hostel.toLowerCase();
+      const hostel = hostels.find(
+        (h) => (h.name ?? '').toLowerCase() === wanted ||
+               (h.code ?? '').toLowerCase() === wanted
       );
-      continue;
-    }
+      if (!hostel) {
+        allotIssues.push(`line ${r.line}: no hostel called "${r.values.hostel}"`);
+        continue;
+      }
 
-    if (!roomsByHostel.has(hostel.id)) {
-      const rs = await db.collection('colleges').doc(college.id)
-        .collection('hostels').doc(hostel.id).collection('rooms').get();
-      roomsByHostel.set(hostel.id, new Map(rs.docs.map((d) => [d.id, { id: d.id, ...d.data() }])));
-    }
-    const rooms = roomsByHostel.get(hostel.id);
-    const room = rooms.get(String(r.values.room));
+      // Already living somewhere ELSE. Adding them to the new room without
+      // vacating the old one would leave them listed in two rooms at once and
+      // permanently inflate both hostels' occupiedBeds. Moving a student is a
+      // deliberate act — refuse it here and say so.
+      const prev = r.existing;
+      if (prev?.roomId &&
+          !(prev.hostelId === hostel.id && String(prev.roomId) === String(r.values.room))) {
+        allotIssues.push(
+          `line ${r.line}: ${prev.name ?? 'that student'} is already in ` +
+          `${prev.hostelName} room ${prev.roomNumber} — move them in the app ` +
+          `instead of re-importing`
+        );
+        continue;
+      }
 
-    if (!room) {
-      allotIssues.push(`line ${r.line}: ${hostel.name} has no room ${r.values.room}`);
-      continue;
-    }
-    const occupants = room.occupantUids ?? [];
-    if (occupants.includes(r.uid)) continue;           // already there
-    if (occupants.length >= (room.capacity ?? 1)) {
-      allotIssues.push(`line ${r.line}: ${hostel.name} room ${room.id} is full`);
-      continue;
-    }
+      if (!roomsByHostel.has(hostel.id)) {
+        const rs = await db.collection('colleges').doc(college.id)
+          .collection('hostels').doc(hostel.id).collection('rooms').get();
+        roomsByHostel.set(hostel.id, new Map(rs.docs.map((d) => [d.id, { id: d.id, ...d.data() }])));
+      }
+      const rooms = roomsByHostel.get(hostel.id);
+      const room = rooms.get(String(r.values.room));
 
-    room.occupantUids = [...occupants, r.uid];
-    bedDelta.set(hostel.id, (bedDelta.get(hostel.id) ?? 0) + 1);
-    allotted++;
+      if (!room) {
+        allotIssues.push(`line ${r.line}: ${hostel.name} has no room ${r.values.room}`);
+        continue;
+      }
+      const occupants = room.occupantUids ?? [];
+      if (occupants.includes(r.uid)) continue;           // already there
+      if (occupants.length >= (room.capacity ?? 1)) {
+        allotIssues.push(`line ${r.line}: ${hostel.name} room ${room.id} is full`);
+        continue;
+      }
 
-    writes.push({
-      ref: db.collection('colleges').doc(college.id)
-        .collection('hostels').doc(hostel.id).collection('rooms').doc(room.id),
-      data: { occupantUids: room.occupantUids },
-    });
-    writes.push({
-      ref: db.collection('users').doc(r.uid),
-      data: {
-        hostelId: hostel.id,
-        hostelName: hostel.name,
-        roomId: room.id,
-        roomNumber: room.number ?? room.id,
-        allottedAt: FieldValue.serverTimestamp(),
-      },
-    });
+      room.occupantUids = [...occupants, r.uid];
+      bedDelta.set(hostel.id, (bedDelta.get(hostel.id) ?? 0) + 1);
+      allotted++;
+
+      writes.push({
+        ref: db.collection('colleges').doc(college.id)
+          .collection('hostels').doc(hostel.id).collection('rooms').doc(room.id),
+        data: { occupantUids: room.occupantUids },
+      });
+      writes.push({
+        ref: db.collection('users').doc(r.uid),
+        data: {
+          hostelId: hostel.id,
+          hostelName: hostel.name,
+          roomId: room.id,
+          roomNumber: room.number ?? room.id,
+          allottedAt: FieldValue.serverTimestamp(),
+        },
+      });
+    }
+  }
+
+  // Hostel named but no room number — record membership without a bed
+  // rather than silently dropping the hostel value, which is what most rows
+  // in a typical sheet look like before rooms are finalised. A student who
+  // already holds an actual room is left alone: this path never downgrades
+  // a real allotment.
+  if (wantHostelOnly.length) {
+    console.log('\nAssigning hostels (no room)…');
+
+    for (const r of wantHostelOnly) {
+      const wanted = r.values.hostel.toLowerCase();
+      const hostel = hostels.find(
+        (h) => (h.name ?? '').toLowerCase() === wanted ||
+               (h.code ?? '').toLowerCase() === wanted
+      );
+      if (!hostel) {
+        allotIssues.push(`line ${r.line}: no hostel called "${r.values.hostel}"`);
+        continue;
+      }
+
+      const prev = r.existing;
+      if (prev?.roomId) continue;                  // has an actual room — leave it
+      if (prev?.hostelId === hostel.id) continue;   // already set from a prior run
+
+      hostelOnly++;
+      writes.push({
+        ref: db.collection('users').doc(r.uid),
+        data: { hostelId: hostel.id, hostelName: hostel.name },
+      });
+    }
   }
 
   for (const [hostelId, delta] of bedDelta) {
@@ -367,6 +405,7 @@ console.log('\n─────────────────────�
 console.log(`created  ${madeAccounts}`);
 console.log(`updated  ${updatedProfiles}`);
 console.log(`allotted ${allotted}`);
+console.log(`hostel only (no room) ${hostelOnly}`);
 console.log(`failed   ${failures.length}`);
 
 if (allotIssues.length) {

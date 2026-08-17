@@ -3,8 +3,10 @@ import 'package:flutter/material.dart';
 import '../../core/permissions.dart';
 import '../../core/session.dart';
 import '../../core/theme.dart';
+import '../../models/app_user.dart';
 import '../../models/hostel.dart';
 import '../../services/auth_service.dart';
+import '../../services/data_service.dart';
 import '../../services/hostel_service.dart';
 import '../../widgets/selectable_chips.dart';
 import 'hostel_editor_dialog.dart';
@@ -24,7 +26,11 @@ class HostelDetailView extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final canManage = Session.of(context).can(Perm.hostelsManage);
+    final session = Session.of(context);
+    final canManage = session.can(Perm.hostelsManage);
+    // Listing users needs `users.view`; without it the roster query would be
+    // rejected, so the headcount is omitted rather than shown as a stuck dash.
+    final canCount = session.can(Perm.usersView);
 
     return StreamBuilder<Hostel?>(
       stream: HostelService.instance.watchHostel(collegeId, hostelId),
@@ -51,66 +57,86 @@ class HostelDetailView extends StatelessWidget {
           );
         }
 
-        return StreamBuilder<List<Room>>(
-          stream: HostelService.instance.watchRooms(collegeId, hostelId),
-          builder: (context, roomSnap) {
-            if (roomSnap.hasError) {
-              return AppCard(
-                child: Text(AuthService.describeError(roomSnap.error!)),
-              );
-            }
-            final rooms = roomSnap.data ?? const <Room>[];
+        return StreamBuilder<List<AppUser>>(
+          // Pooled, and already open from the dashboard — this attaches a
+          // listener rather than re-reading the roster.
+          stream: canCount
+              ? DataService.instance.watchUsers(collegeId)
+              : const Stream<List<AppUser>>.empty(),
+          builder: (context, userSnap) {
+            final members = (userSnap.data ?? const <AppUser>[])
+                .where((u) => u.hostelId == hostelId && u.isActive)
+                .toList();
+            final head = HostelHeadcount(
+              total: members.length,
+              withBed: members.where((u) => u.isAllotted).length,
+            );
 
-            // Group by floor, preserving the service's floor→number ordering.
-            final byFloor = <int, List<Room>>{};
-            for (final r in rooms) {
-              byFloor.putIfAbsent(r.floor, () => []).add(r);
-            }
-            final floors = byFloor.keys.toList()..sort();
+            return StreamBuilder<List<Room>>(
+              stream: HostelService.instance.watchRooms(collegeId, hostelId),
+              builder: (context, roomSnap) {
+                if (roomSnap.hasError) {
+                  return AppCard(
+                    child: Text(AuthService.describeError(roomSnap.error!)),
+                  );
+                }
+                final rooms = roomSnap.data ?? const <Room>[];
 
-            return Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                _Header(
-                  hostel: hostel,
-                  canManage: canManage,
-                  onBack: onBack,
-                  onAddRoom: () => _addRoom(context, hostel),
-                  onAddFloor: () => _addFloor(context, hostel, floors),
-                  onEditDetails: () => _editHostel(context, hostel),
-                  onRecalculate: () => _recalculate(context),
-                ),
-                const SizedBox(height: 18),
-                if (!roomSnap.hasData)
-                  const Padding(
-                    padding: EdgeInsets.all(60),
-                    child: Center(child: CircularProgressIndicator()),
-                  )
-                else if (rooms.isEmpty)
-                  AppCard(
-                    padding: EdgeInsets.symmetric(vertical: 50),
-                    child: Center(
-                      child: Text(
-                        'This hostel has no rooms yet.',
-                        style: TextStyle(color: AppColors.textMuted),
-                      ),
+                // Group by floor, preserving the service's floor→number ordering.
+                final byFloor = <int, List<Room>>{};
+                for (final r in rooms) {
+                  byFloor.putIfAbsent(r.floor, () => []).add(r);
+                }
+                final floors = byFloor.keys.toList()..sort();
+
+                return Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    _Header(
+                      hostel: hostel,
+                      head: head,
+                      countsReady: canCount && userSnap.hasData,
+                      canManage: canManage,
+                      onBack: onBack,
+                      onAddRoom: () => _addRoom(context, hostel),
+                      onAddFloor: () => _addFloor(context, hostel, floors),
+                      onEditDetails: () => _editHostel(context, hostel),
+                      onRecalculate: () => _recalculate(context),
                     ),
-                  )
-                else
-                  ...floors.map(
-                    (floor) => Padding(
-                      padding: const EdgeInsets.only(bottom: 18),
-                      child: _FloorSection(
-                        floor: floor,
-                        rooms: byFloor[floor]!,
-                        canManage: canManage,
-                        onTapRoom: (room) => _editRoom(context, hostel, room),
+                    const SizedBox(height: 18),
+                    if (!roomSnap.hasData)
+                      const Padding(
+                        padding: EdgeInsets.all(60),
+                        child: Center(child: CircularProgressIndicator()),
+                      )
+                    else if (rooms.isEmpty)
+                      AppCard(
+                        padding: EdgeInsets.symmetric(vertical: 50),
+                        child: Center(
+                          child: Text(
+                            'This hostel has no rooms yet.',
+                            style: TextStyle(color: AppColors.textMuted),
+                          ),
+                        ),
+                      )
+                    else
+                      ...floors.map(
+                        (floor) => Padding(
+                          padding: const EdgeInsets.only(bottom: 18),
+                          child: _FloorSection(
+                            floor: floor,
+                            rooms: byFloor[floor]!,
+                            canManage: canManage,
+                            onTapRoom: (room) =>
+                                _editRoom(context, hostel, room),
+                          ),
+                        ),
                       ),
-                    ),
-                  ),
-                const SizedBox(height: 8),
-                const _Legend(),
-              ],
+                    const SizedBox(height: 8),
+                    const _Legend(),
+                  ],
+                );
+              },
             );
           },
         );
@@ -118,29 +144,19 @@ class HostelDetailView extends StatelessWidget {
     );
   }
 
-  Future<void> _editRoom(
-    BuildContext context,
-    Hostel hostel,
-    Room room,
-  ) async {
+  Future<void> _editRoom(BuildContext context, Hostel hostel, Room room) async {
     await showDialog(
       context: context,
-      builder: (_) => _RoomEditorDialog(
-        collegeId: collegeId,
-        hostel: hostel,
-        room: room,
-      ),
+      builder: (_) =>
+          _RoomEditorDialog(collegeId: collegeId, hostel: hostel, room: room),
     );
   }
 
   Future<void> _addRoom(BuildContext context, Hostel hostel) async {
     await showDialog(
       context: context,
-      builder: (_) => _RoomEditorDialog(
-        collegeId: collegeId,
-        hostel: hostel,
-        room: null,
-      ),
+      builder: (_) =>
+          _RoomEditorDialog(collegeId: collegeId, hostel: hostel, room: null),
     );
   }
 
@@ -185,6 +201,8 @@ class HostelDetailView extends StatelessWidget {
 
 class _Header extends StatelessWidget {
   final Hostel hostel;
+  final HostelHeadcount head;
+  final bool countsReady;
   final bool canManage;
   final VoidCallback onBack;
   final VoidCallback onAddRoom;
@@ -194,6 +212,8 @@ class _Header extends StatelessWidget {
 
   const _Header({
     required this.hostel,
+    required this.head,
+    required this.countsReady,
     required this.canManage,
     required this.onBack,
     required this.onAddRoom,
@@ -237,6 +257,38 @@ class _Header extends StatelessWidget {
                         fontSize: 13,
                       ),
                     ),
+                    // Membership, which the bed counters above cannot show: a
+                    // student can be in this hostel with no room yet.
+                    if (countsReady) ...[
+                      const SizedBox(height: 6),
+                      Row(
+                        children: [
+                          Icon(
+                            Icons.people_outline_rounded,
+                            size: 15,
+                            color: AppColors.primary,
+                          ),
+                          const SizedBox(width: 6),
+                          Text(
+                            '${head.total} student${head.total == 1 ? '' : 's'} '
+                            'in this hostel',
+                            style: TextStyle(
+                              fontSize: 13,
+                              fontWeight: FontWeight.w700,
+                              color: AppColors.primary,
+                            ),
+                          ),
+                          if (head.awaitingRoom > 0) ...[
+                            const SizedBox(width: 8),
+                            StatusPill(
+                              '${head.awaitingRoom} AWAITING ROOM',
+                              AppColors.warning,
+                              AppColors.warningSoft,
+                            ),
+                          ],
+                        ],
+                      ),
+                    ],
                   ],
                 ),
               ),
@@ -302,10 +354,7 @@ class _Header extends StatelessWidget {
                 Expanded(
                   child: Text(
                     hostel.address!,
-                    style: TextStyle(
-                      color: AppColors.textMuted,
-                      fontSize: 13,
-                    ),
+                    style: TextStyle(color: AppColors.textMuted, fontSize: 13),
                   ),
                 ),
               ],
@@ -364,10 +413,7 @@ class _FloorSection extends StatelessWidget {
               const SizedBox(width: 10),
               Text(
                 '${rooms.length} rooms · $occupied/$beds beds',
-                style: TextStyle(
-                  color: AppColors.textMuted,
-                  fontSize: 12.5,
-                ),
+                style: TextStyle(color: AppColors.textMuted, fontSize: 12.5),
               ),
             ],
           ),
@@ -636,9 +682,7 @@ class _RoomEditorDialogState extends State<_RoomEditorDialog> {
       );
     } catch (e) {
       if (mounted) {
-        setState(
-          () => _error = e.toString().replaceFirst('Exception: ', ''),
-        );
+        setState(() => _error = e.toString().replaceFirst('Exception: ', ''));
       }
     } finally {
       if (mounted) setState(() => _busy = false);
@@ -677,9 +721,7 @@ class _RoomEditorDialogState extends State<_RoomEditorDialog> {
       messenger.showSnackBar(const SnackBar(content: Text('Room deleted')));
     } catch (e) {
       if (mounted) {
-        setState(
-          () => _error = e.toString().replaceFirst('Exception: ', ''),
-        );
+        setState(() => _error = e.toString().replaceFirst('Exception: ', ''));
       }
     }
   }
@@ -707,10 +749,7 @@ class _RoomEditorDialogState extends State<_RoomEditorDialog> {
                     ),
                     child: Text(
                       _error!,
-                      style: TextStyle(
-                        color: AppColors.danger,
-                        fontSize: 13,
-                      ),
+                      style: TextStyle(color: AppColors.danger, fontSize: 13),
                     ),
                   ),
                   const SizedBox(height: 16),
@@ -738,9 +777,7 @@ class _RoomEditorDialogState extends State<_RoomEditorDialog> {
                           controller: _floor,
                           enabled: !_busy,
                           keyboardType: TextInputType.number,
-                          decoration: const InputDecoration(
-                            labelText: 'Floor',
-                          ),
+                          decoration: const InputDecoration(labelText: 'Floor'),
                           validator: (v) {
                             final n = int.tryParse(v ?? '');
                             return (n == null || n < 1) ? 'Min 1' : null;
@@ -856,10 +893,7 @@ class _RoomEditorDialogState extends State<_RoomEditorDialog> {
         if (!_isNew)
           TextButton(
             onPressed: _busy ? null : _delete,
-            child: Text(
-              'Delete',
-              style: TextStyle(color: AppColors.danger),
-            ),
+            child: Text('Delete', style: TextStyle(color: AppColors.danger)),
           ),
         TextButton(
           onPressed: _busy ? null : () => Navigator.pop(context),
@@ -946,9 +980,7 @@ class _AddFloorDialogState extends State<_AddFloorDialog> {
       messenger.showSnackBar(const SnackBar(content: Text('Floor added')));
     } catch (e) {
       if (mounted) {
-        setState(
-          () => _error = e.toString().replaceFirst('Exception: ', ''),
-        );
+        setState(() => _error = e.toString().replaceFirst('Exception: ', ''));
       }
     } finally {
       if (mounted) setState(() => _busy = false);
@@ -981,10 +1013,7 @@ class _AddFloorDialogState extends State<_AddFloorDialog> {
                     ),
                     child: Text(
                       _error!,
-                      style: TextStyle(
-                        color: AppColors.danger,
-                        fontSize: 13,
-                      ),
+                      style: TextStyle(color: AppColors.danger, fontSize: 13),
                     ),
                   ),
                   const SizedBox(height: 16),
@@ -1015,9 +1044,7 @@ class _AddFloorDialogState extends State<_AddFloorDialog> {
                         enabled: !_busy,
                         keyboardType: TextInputType.number,
                         onChanged: (_) => setState(() {}),
-                        decoration: const InputDecoration(
-                          labelText: 'Rooms',
-                        ),
+                        decoration: const InputDecoration(labelText: 'Rooms'),
                         validator: (v) {
                           final n = int.tryParse(v ?? '');
                           if (n == null || n < 1) return 'Min 1';

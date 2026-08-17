@@ -42,12 +42,12 @@ flutter test
 flutter analyze
 ```
 
-Both must be clean. `flutter analyze` is the minimum bar per `CLAUDE.md` —
+Both must be clean. `flutter analyze` is the minimum bar per `DEVELOPMENT.md` —
 don't ship on a red analyzer.
 
 ## 3. Rules changes: deploy, then verify
 
-Per `CLAUDE.md`: a change to `firestore.rules` is not real until deployed —
+Per `DEVELOPMENT.md`: a change to `firestore.rules` is not real until deployed —
 the file on disk has no effect on its own.
 
 ```bash

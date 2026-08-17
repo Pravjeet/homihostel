@@ -1,5 +1,7 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
 
+import 'app_user.dart';
+
 /// Who a hostel accommodates. Stored as the enum `name` string.
 enum HostelGender { boys, girls, coed }
 
@@ -355,5 +357,54 @@ class RoomPlan {
       parts.add('$where: ${block.totalRooms} rooms ($label)');
     }
     return parts.isEmpty ? '—' : parts.join(', ');
+  }
+}
+
+/// How many people belong to a hostel, split by whether they hold a bed.
+///
+/// Hostel membership and bed occupancy are separate facts in this app, and
+/// conflating them under-reports badly. A CSV import can name a hostel
+/// without a room — `AllotmentService.assignHostelOnly` writes `hostelId` and
+/// nothing else — so a hostel can hold 2,400 students while `occupiedBeds`,
+/// which only ever counts rooms, still reads zero.
+///
+/// Counted from the roster the app already watches rather than denormalised
+/// onto the hostel document. `occupiedBeds` is denormalised because it is
+/// written inside the allotment transaction that owns it; membership has no
+/// such single writer (an import, a hostel-only assignment and a user edit
+/// can all set `hostelId`), so a stored counter would drift.
+class HostelHeadcount {
+  /// Everyone whose `hostelId` is this hostel, bed or no bed.
+  final int total;
+
+  /// Of those, the ones who also hold a room.
+  final int withBed;
+
+  const HostelHeadcount({this.total = 0, this.withBed = 0});
+
+  /// In the hostel, still waiting for a room.
+  int get awaitingRoom => (total - withBed).clamp(0, total);
+
+  /// Tallies every hostel in one pass over [users].
+  ///
+  /// Deactivated accounts are excluded — they cannot be allotted and counting
+  /// them would make a hostel look fuller than it can be filled. Returns an
+  /// entry only for hostels that actually have members; callers should treat
+  /// a missing key as an empty count.
+  static Map<String, HostelHeadcount> byHostel(Iterable<AppUser> users) {
+    final total = <String, int>{};
+    final withBed = <String, int>{};
+
+    for (final u in users) {
+      final id = u.hostelId;
+      if (id == null || id.isEmpty || !u.isActive) continue;
+      total[id] = (total[id] ?? 0) + 1;
+      if (u.isAllotted) withBed[id] = (withBed[id] ?? 0) + 1;
+    }
+
+    return {
+      for (final id in total.keys)
+        id: HostelHeadcount(total: total[id]!, withBed: withBed[id] ?? 0),
+    };
   }
 }

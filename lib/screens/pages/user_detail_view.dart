@@ -1058,6 +1058,8 @@ class _RoomSection extends StatelessWidget {
   Widget build(BuildContext context) {
     final canAllot = Session.of(context).can(Perm.allotmentManage);
     final u = user;
+    // Hostel recorded but no specific bed — see [AllotmentService.assignHostelOnly].
+    final hostelOnly = !u.isAllotted && u.hostelId != null;
 
     return AppCard(
       child: Row(
@@ -1065,8 +1067,14 @@ class _RoomSection extends StatelessWidget {
           Icon(
             u.isAllotted
                 ? Icons.meeting_room_rounded
+                : hostelOnly
+                ? Icons.holiday_village_rounded
                 : Icons.no_meeting_room_rounded,
-            color: u.isAllotted ? AppColors.success : AppColors.textMuted,
+            color: u.isAllotted
+                ? AppColors.success
+                : hostelOnly
+                ? AppColors.warning
+                : AppColors.textMuted,
           ),
           const SizedBox(width: 14),
           Expanded(
@@ -1074,7 +1082,11 @@ class _RoomSection extends StatelessWidget {
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 Text(
-                  u.isAllotted ? u.roomLabel! : 'No room allotted',
+                  u.isAllotted
+                      ? u.roomLabel!
+                      : hostelOnly
+                      ? u.hostelName!
+                      : 'No room allotted',
                   style: const TextStyle(
                     fontSize: 15,
                     fontWeight: FontWeight.w700,
@@ -1084,6 +1096,8 @@ class _RoomSection extends StatelessWidget {
                 Text(
                   u.isAllotted
                       ? 'Allotted room'
+                      : hostelOnly
+                      ? 'Assigned to this hostel — no room yet'
                       : 'This person hasn\'t been given a bed yet.',
                   style: TextStyle(
                     fontSize: 12.5,
@@ -1106,15 +1120,89 @@ class _RoomSection extends StatelessWidget {
                   style: TextStyle(color: AppColors.danger),
                 ),
               ),
-            ] else
+            ] else ...[
+              if (hostelOnly)
+                TextButton(
+                  onPressed: () => _removeFromHostel(context, u),
+                  child: Text(
+                    'Remove from hostel',
+                    style: TextStyle(color: AppColors.danger),
+                  ),
+                )
+              else
+                TextButton(
+                  onPressed: () => _assignHostel(context, u),
+                  child: const Text('Assign hostel'),
+                ),
+              const SizedBox(width: 4),
               FilledButton(
                 onPressed: () => onAllot(false),
                 child: const Text('Allot room'),
               ),
+            ],
           ],
         ],
       ),
     );
+  }
+
+  Future<void> _assignHostel(BuildContext context, AppUser u) async {
+    final messenger = ScaffoldMessenger.of(context);
+    final hostel = await showDialog<Hostel>(
+      context: context,
+      builder: (_) => _HostelPickerDialog(student: u),
+    );
+    if (hostel == null) return;
+
+    try {
+      await AllotmentService.instance.assignHostelOnly(
+        collegeId: u.collegeId,
+        student: u,
+        hostel: hostel,
+      );
+      messenger.showSnackBar(
+        SnackBar(content: Text('Assigned to ${hostel.name}')),
+      );
+    } catch (e) {
+      messenger.showSnackBar(SnackBar(content: Text(_describe(e))));
+    }
+  }
+
+  Future<void> _removeFromHostel(BuildContext context, AppUser u) async {
+    final messenger = ScaffoldMessenger.of(context);
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (c) => AlertDialog(
+        title: Text('Remove ${u.name} from ${u.hostelName}?'),
+        content: const Text(
+          'They will no longer be recorded as belonging to this hostel.',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(c, false),
+            child: const Text('Cancel'),
+          ),
+          FilledButton(
+            style: FilledButton.styleFrom(backgroundColor: AppColors.danger),
+            onPressed: () => Navigator.pop(c, true),
+            child: const Text('Remove'),
+          ),
+        ],
+      ),
+    );
+    if (ok != true) return;
+
+    try {
+      await AllotmentService.instance.unassignHostelOnly(
+        collegeId: u.collegeId,
+        student: u,
+      );
+      messenger.showSnackBar(
+        const SnackBar(content: Text('Removed from hostel')),
+      );
+    } catch (e) {
+      messenger.showSnackBar(SnackBar(content: Text(_describe(e))));
+    }
   }
 
   Future<void> _vacate(BuildContext context, AppUser u) async {
@@ -1151,6 +1239,101 @@ class _RoomSection extends StatelessWidget {
 
   static String _describe(Object e) =>
       e is AllotmentFailure ? e.message : AuthService.describeError(e);
+}
+
+/// Pick a hostel with no room — the lightweight counterpart to
+/// [AllotRoomView] for colleges that record hostel membership before rooms
+/// are finalised. Same eligible-but-disabled-with-a-reason chip pattern.
+class _HostelPickerDialog extends StatefulWidget {
+  final AppUser student;
+  const _HostelPickerDialog({required this.student});
+
+  @override
+  State<_HostelPickerDialog> createState() => _HostelPickerDialogState();
+}
+
+class _HostelPickerDialogState extends State<_HostelPickerDialog> {
+  Hostel? _hostel;
+
+  @override
+  Widget build(BuildContext context) {
+    final collegeId = widget.student.collegeId;
+    return AlertDialog(
+      title: Text('Assign ${widget.student.name} to a hostel'),
+      content: SizedBox(
+        width: 420,
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(
+              'Records which hostel they belong to, with no room chosen '
+              'yet — allot a bed separately once one\'s free.',
+              style: TextStyle(fontSize: 12.5, color: AppColors.textMuted),
+            ),
+            const SizedBox(height: 14),
+            StreamBuilder<List<Hostel>>(
+              stream: HostelService.instance.watchHostels(collegeId),
+              builder: (context, snap) {
+                if (!snap.hasData) {
+                  return const Padding(
+                    padding: EdgeInsets.symmetric(vertical: 20),
+                    child: Center(child: CircularProgressIndicator()),
+                  );
+                }
+                final hostels = snap.data!;
+                if (hostels.isEmpty) {
+                  return Text(
+                    'No hostels exist yet.',
+                    style: TextStyle(color: AppColors.textMuted),
+                  );
+                }
+                return Wrap(
+                  spacing: 8,
+                  runSpacing: 8,
+                  children: hostels.map((h) {
+                    final eligible = AllotmentService.genderAllows(
+                      h.gender,
+                      widget.student.gender,
+                    );
+                    final selected = _hostel?.id == h.id;
+                    final label = h.code.trim().isEmpty
+                        ? h.name
+                        : h.code.trim().toUpperCase();
+                    return Tooltip(
+                      message: eligible
+                          ? h.name
+                          : '${h.name} · ${h.gender.label} hostel — '
+                                'not eligible',
+                      child: ChoiceChip(
+                        label: Text(label),
+                        selected: selected,
+                        onSelected: eligible
+                            ? (_) => setState(() => _hostel = h)
+                            : null,
+                      ),
+                    );
+                  }).toList(),
+                );
+              },
+            ),
+          ],
+        ),
+      ),
+      actions: [
+        TextButton(
+          onPressed: () => Navigator.pop(context),
+          child: const Text('Cancel'),
+        ),
+        FilledButton(
+          onPressed: _hostel == null
+              ? null
+              : () => Navigator.pop(context, _hostel),
+          child: const Text('Assign'),
+        ),
+      ],
+    );
+  }
 }
 
 // ------------------------------ small pieces ------------------------------

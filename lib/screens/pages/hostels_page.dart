@@ -3,8 +3,10 @@ import 'package:flutter/material.dart';
 import '../../core/permissions.dart';
 import '../../core/session.dart';
 import '../../core/theme.dart';
+import '../../models/app_user.dart';
 import '../../models/hostel.dart';
 import '../../services/auth_service.dart';
+import '../../services/data_service.dart';
 import '../../services/hostel_service.dart';
 import '../../widgets/selectable_chips.dart';
 import 'hostel_detail_view.dart';
@@ -51,127 +53,192 @@ class _HostelsPageState extends State<HostelsPage> {
         }
 
         final hostels = snap.data!;
-        final totalRooms = hostels.fold<int>(0, (s, h) => s + h.roomCount);
-        final totalBeds = hostels.fold<int>(0, (s, h) => s + h.bedCount);
-        final totalOccupied = hostels.fold<int>(0, (s, h) => s + h.occupiedBeds);
 
-        return Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            AppCard(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  SectionHeader(
-                    'Hostels  (${hostels.length})',
-                    trailing: !session.can(Perm.hostelsManage)
-                        ? null
-                        : Row(
-                            mainAxisSize: MainAxisSize.min,
-                            children: [
-                              if (hostels.isNotEmpty) ...[
-                                OutlinedButton.icon(
-                                  onPressed: () => _emptyAllRooms(collegeId),
-                                  icon: Icon(
-                                    Icons.meeting_room_outlined,
-                                    size: 18,
-                                    color: AppColors.danger,
-                                  ),
-                                  label: Text(
-                                    'Empty all rooms',
-                                    style: TextStyle(color: AppColors.danger),
-                                  ),
-                                  style: OutlinedButton.styleFrom(
-                                    side: BorderSide(
-                                      color: AppColors.dangerSoft,
-                                    ),
-                                    padding: const EdgeInsets.symmetric(
-                                      horizontal: 16,
-                                      vertical: 14,
-                                    ),
-                                  ),
-                                ),
-                                const SizedBox(width: 10),
-                              ],
-                              ElevatedButton.icon(
-                                onPressed: () => _openEditor(collegeId, null),
-                                icon: const Icon(Icons.add_rounded, size: 18),
-                                label: const Text('Add hostel'),
-                                style: ElevatedButton.styleFrom(
-                                  padding: const EdgeInsets.symmetric(
-                                    horizontal: 18,
-                                    vertical: 14,
-                                  ),
-                                ),
-                              ),
-                            ],
-                          ),
-                  ),
-                  if (hostels.isNotEmpty) ...[
-                    const SizedBox(height: 18),
-                    Wrap(
-                      spacing: 28,
-                      runSpacing: 14,
-                      children: [
-                        _Metric('Hostels', '${hostels.length}'),
-                        _Metric('Rooms', '$totalRooms'),
-                        _Metric('Beds', '$totalBeds'),
-                        _Metric(
-                          'Occupied',
-                          totalBeds == 0
-                              ? '0%'
-                              : '${(totalOccupied / totalBeds * 100).round()}%',
-                        ),
-                      ],
-                    ),
-                  ],
-                ],
-              ),
-            ),
-            const SizedBox(height: 18),
-            if (hostels.isEmpty)
-              _EmptyState(
-                canManage: session.can(Perm.hostelsManage),
-                onAdd: () => _openEditor(collegeId, null),
-              )
-            else
-              // A Wrap, not a GridView with a fixed childAspectRatio: cards
-              // size to their own content, so a hostel with many amenities
-              // can't overflow its tile and paint over the ones beside it.
-              LayoutBuilder(
-                builder: (context, c) {
-                  const spacing = 16.0;
-                  final columns = c.maxWidth > 1150
-                      ? 3
-                      : c.maxWidth > 720
-                      ? 2
-                      : 1;
-                  final cardWidth =
-                      (c.maxWidth - spacing * (columns - 1)) / columns;
-                  return Wrap(
-                    spacing: spacing,
-                    runSpacing: spacing,
-                    children: hostels
-                        .map(
-                          (h) => SizedBox(
-                            width: cardWidth,
-                            child: _HostelCard(
-                              hostel: h,
-                              canManage: session.can(Perm.hostelsManage),
-                              onOpen: () =>
-                                  setState(() => _openHostelId = h.id),
-                              onEdit: () => _openEditor(collegeId, h),
-                              onDelete: () => _confirmDelete(collegeId, h),
-                            ),
-                          ),
-                        )
-                        .toList(),
-                  );
-                },
-              ),
-          ],
+        // Headcounts come from the roster, and listing users needs
+        // `users.view` — a role granted hostels but not users would otherwise
+        // fire a query the rules reject and sit on a permanent dash. Without
+        // the permission the student figures are simply not shown.
+        if (!session.can(Perm.usersView)) {
+          return _body(
+            context,
+            session: session,
+            collegeId: collegeId,
+            hostels: hostels,
+            heads: const {},
+            showCounts: false,
+            countsReady: false,
+          );
+        }
+
+        // `watchUsers` is pooled, and the dashboard opens it before anyone
+        // reaches this page, so this attaches a listener rather than paying
+        // for another read of every user.
+        return StreamBuilder<List<AppUser>>(
+          stream: DataService.instance.watchUsers(collegeId),
+          builder: (context, userSnap) {
+            final heads = HostelHeadcount.byHostel(
+              userSnap.data ?? const <AppUser>[],
+            );
+            return _body(
+              context,
+              session: session,
+              collegeId: collegeId,
+              hostels: hostels,
+              heads: heads,
+              showCounts: true,
+              // Still loading, so the tiles show a dash rather than a
+              // confident zero.
+              countsReady: userSnap.hasData,
+            );
+          },
         );
       },
+    );
+  }
+
+  Widget _body(
+    BuildContext context, {
+    required Session session,
+    required String collegeId,
+    required List<Hostel> hostels,
+    required Map<String, HostelHeadcount> heads,
+    required bool showCounts,
+    required bool countsReady,
+  }) {
+    final totalRooms = hostels.fold<int>(0, (s, h) => s + h.roomCount);
+    final totalBeds = hostels.fold<int>(0, (s, h) => s + h.bedCount);
+    final totalOccupied = hostels.fold<int>(0, (s, h) => s + h.occupiedBeds);
+    final totalStudents = heads.values.fold<int>(0, (s, h) => s + h.total);
+    final totalAwaiting = heads.values.fold<int>(
+      0,
+      (s, h) => s + h.awaitingRoom,
+    );
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        AppCard(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              SectionHeader(
+                'Hostels  (${hostels.length})',
+                trailing: !session.can(Perm.hostelsManage)
+                    ? null
+                    : Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          if (hostels.isNotEmpty) ...[
+                            OutlinedButton.icon(
+                              onPressed: () => _emptyAllRooms(collegeId),
+                              icon: Icon(
+                                Icons.meeting_room_outlined,
+                                size: 18,
+                                color: AppColors.danger,
+                              ),
+                              label: Text(
+                                'Empty all rooms',
+                                style: TextStyle(color: AppColors.danger),
+                              ),
+                              style: OutlinedButton.styleFrom(
+                                side: BorderSide(color: AppColors.dangerSoft),
+                                padding: const EdgeInsets.symmetric(
+                                  horizontal: 16,
+                                  vertical: 14,
+                                ),
+                              ),
+                            ),
+                            const SizedBox(width: 10),
+                          ],
+                          ElevatedButton.icon(
+                            onPressed: () => _openEditor(collegeId, null),
+                            icon: const Icon(Icons.add_rounded, size: 18),
+                            label: const Text('Add hostel'),
+                            style: ElevatedButton.styleFrom(
+                              padding: const EdgeInsets.symmetric(
+                                horizontal: 18,
+                                vertical: 14,
+                              ),
+                            ),
+                          ),
+                        ],
+                      ),
+              ),
+              if (hostels.isNotEmpty) ...[
+                const SizedBox(height: 18),
+                Wrap(
+                  spacing: 28,
+                  runSpacing: 14,
+                  children: [
+                    _Metric('Hostels', '${hostels.length}'),
+                    _Metric('Rooms', '$totalRooms'),
+                    _Metric('Beds', '$totalBeds'),
+                    _Metric(
+                      'Occupied',
+                      totalBeds == 0
+                          ? '0%'
+                          : '${(totalOccupied / totalBeds * 100).round()}%',
+                    ),
+                    // Everyone in a hostel, whether or not a bed has been
+                    // assigned — the figure the bed counters cannot show.
+                    if (showCounts) ...[
+                      _Metric('Students', countsReady ? '$totalStudents' : '—'),
+                      _Metric(
+                        'Awaiting room',
+                        countsReady ? '$totalAwaiting' : '—',
+                        color: totalAwaiting > 0 ? AppColors.warning : null,
+                      ),
+                    ],
+                  ],
+                ),
+              ],
+            ],
+          ),
+        ),
+        const SizedBox(height: 18),
+        if (hostels.isEmpty)
+          _EmptyState(
+            canManage: session.can(Perm.hostelsManage),
+            onAdd: () => _openEditor(collegeId, null),
+          )
+        else
+          // A Wrap, not a GridView with a fixed childAspectRatio: cards
+          // size to their own content, so a hostel with many amenities
+          // can't overflow its tile and paint over the ones beside it.
+          LayoutBuilder(
+            builder: (context, c) {
+              const spacing = 16.0;
+              final columns = c.maxWidth > 1150
+                  ? 3
+                  : c.maxWidth > 720
+                  ? 2
+                  : 1;
+              final cardWidth =
+                  (c.maxWidth - spacing * (columns - 1)) / columns;
+              return Wrap(
+                spacing: spacing,
+                runSpacing: spacing,
+                children: hostels
+                    .map(
+                      (h) => SizedBox(
+                        width: cardWidth,
+                        child: _HostelCard(
+                          hostel: h,
+                          head: heads[h.id] ?? const HostelHeadcount(),
+                          showCounts: showCounts,
+                          countsReady: countsReady,
+                          canManage: session.can(Perm.hostelsManage),
+                          onOpen: () => setState(() => _openHostelId = h.id),
+                          onEdit: () => _openEditor(collegeId, h),
+                          onDelete: () => _confirmDelete(collegeId, h),
+                        ),
+                      ),
+                    )
+                    .toList(),
+              );
+            },
+          ),
+      ],
     );
   }
 
@@ -295,9 +362,7 @@ class _HostelsPageState extends State<HostelsPage> {
     );
     try {
       await HostelService.instance.deleteHostel(collegeId, hostel.id);
-      messenger.showSnackBar(
-        SnackBar(content: Text('${hostel.name} deleted')),
-      );
+      messenger.showSnackBar(SnackBar(content: Text('${hostel.name} deleted')));
     } catch (e) {
       messenger.showSnackBar(
         SnackBar(content: Text(AuthService.describeError(e))),
@@ -309,7 +374,8 @@ class _HostelsPageState extends State<HostelsPage> {
 class _Metric extends StatelessWidget {
   final String label;
   final String value;
-  const _Metric(this.label, this.value);
+  final Color? color;
+  const _Metric(this.label, this.value, {this.color});
 
   @override
   Widget build(BuildContext context) => Column(
@@ -327,7 +393,11 @@ class _Metric extends StatelessWidget {
       const SizedBox(height: 2),
       Text(
         value,
-        style: const TextStyle(fontSize: 21, fontWeight: FontWeight.w800),
+        style: TextStyle(
+          fontSize: 21,
+          fontWeight: FontWeight.w800,
+          color: color,
+        ),
       ),
     ],
   );
@@ -392,6 +462,12 @@ class _EmptyState extends StatelessWidget {
 
 class _HostelCard extends StatelessWidget {
   final Hostel hostel;
+  final HostelHeadcount head;
+
+  /// False when the viewer lacks `users.view`, so the roster was never read
+  /// and the student figures are hidden rather than shown as a stuck dash.
+  final bool showCounts;
+  final bool countsReady;
   final bool canManage;
   final VoidCallback onOpen;
   final VoidCallback onEdit;
@@ -399,6 +475,9 @@ class _HostelCard extends StatelessWidget {
 
   const _HostelCard({
     required this.hostel,
+    required this.head,
+    required this.showCounts,
+    required this.countsReady,
     required this.canManage,
     required this.onOpen,
     required this.onEdit,
@@ -476,8 +555,7 @@ class _HostelCard extends StatelessWidget {
                 if (canManage)
                   PopupMenuButton<String>(
                     icon: const Icon(Icons.more_horiz_rounded, size: 20),
-                    onSelected: (v) =>
-                        v == 'edit' ? onEdit() : onDelete(),
+                    onSelected: (v) => v == 'edit' ? onEdit() : onDelete(),
                     itemBuilder: (_) => [
                       PopupMenuItem(value: 'edit', child: Text('Edit details')),
                       PopupMenuItem(
@@ -497,8 +575,49 @@ class _HostelCard extends StatelessWidget {
                 _MiniStat(label: 'Rooms', value: '${hostel.roomCount}'),
                 _MiniStat(label: 'Beds', value: '${hostel.bedCount}'),
                 _MiniStat(label: 'Free', value: '${hostel.freeBeds}'),
+                // Students attached to this hostel, bed or not. Sits beside
+                // the bed figures because the gap between them is the point.
+                if (showCounts)
+                  _MiniStat(
+                    label: 'Students',
+                    value: countsReady ? '${head.total}' : '—',
+                  ),
               ],
             ),
+            if (showCounts && countsReady && head.awaitingRoom > 0) ...[
+              const SizedBox(height: 12),
+              Container(
+                width: double.infinity,
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 10,
+                  vertical: 8,
+                ),
+                decoration: BoxDecoration(
+                  color: AppColors.warningSoft,
+                  borderRadius: BorderRadius.circular(8),
+                ),
+                child: Row(
+                  children: [
+                    Icon(
+                      Icons.hourglass_empty_rounded,
+                      size: 14,
+                      color: AppColors.warning,
+                    ),
+                    const SizedBox(width: 6),
+                    Expanded(
+                      child: Text(
+                        '${head.awaitingRoom} awaiting a room',
+                        style: TextStyle(
+                          fontSize: 12,
+                          fontWeight: FontWeight.w700,
+                          color: AppColors.warning,
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ],
             const SizedBox(height: 14),
             Row(
               children: [

@@ -7,6 +7,7 @@ import '../models/app_user.dart';
 import '../models/fine.dart';
 import '../models/office_order.dart';
 import 'audit_service.dart';
+import 'stream_cache.dart';
 
 /// Fines live under their college:
 ///   colleges/{collegeId}/fines/{fineId}
@@ -30,11 +31,16 @@ class FineService {
 
   // ------------------------------ reads ------------------------------
 
+  final CachedStreamPool<List<Fine>> _allPool = CachedStreamPool();
+
   /// Everything, newest first — for staff holding fines.viewAll.
-  Stream<List<Fine>> watchAll(String collegeId) => _col(collegeId)
-      .orderBy('createdAt', descending: true)
-      .snapshots()
-      .map((s) => s.docs.map((d) => Fine.fromMap(d.id, d.data())).toList());
+  Stream<List<Fine>> watchAll(String collegeId) => _allPool.stream(
+    collegeId,
+    () => _col(collegeId)
+        .orderBy('createdAt', descending: true)
+        .snapshots()
+        .map((s) => s.docs.map((d) => Fine.fromMap(d.id, d.data())).toList()),
+  );
 
   /// One student's own fines. Not ordered in the query — an `orderBy` next to
   /// the `where` would need a composite index, and sorting a handful of

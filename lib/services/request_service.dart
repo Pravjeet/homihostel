@@ -2,6 +2,7 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 
 import '../models/app_user.dart';
 import '../models/hostel_request.dart';
+import 'stream_cache.dart';
 
 /// Requests live under their college:
 ///   colleges/{collegeId}/requests/{requestId}
@@ -21,15 +22,20 @@ class RequestService {
 
   // ------------------------------ reads ------------------------------
 
+  final CachedStreamPool<List<HostelRequest>> _allPool = CachedStreamPool();
+
   /// Everything, newest first — for staff holding requests.viewAll.
-  Stream<List<HostelRequest>> watchAll(String collegeId) => _col(collegeId)
-      .orderBy('createdAt', descending: true)
-      .snapshots()
-      .map(
-        (s) => s.docs
-            .map((d) => HostelRequest.fromMap(d.id, d.data()))
-            .toList(),
-      );
+  Stream<List<HostelRequest>> watchAll(String collegeId) => _allPool.stream(
+    collegeId,
+    () => _col(collegeId)
+        .orderBy('createdAt', descending: true)
+        .snapshots()
+        .map(
+          (s) => s.docs
+              .map((d) => HostelRequest.fromMap(d.id, d.data()))
+              .toList(),
+        ),
+  );
 
   /// One person's own requests.
   ///
@@ -162,6 +168,27 @@ class RequestService {
       await batch.commit();
     }
     return snap.docs.length;
+  }
+
+  /// Deletes every request in the college, decided or not.
+  ///
+  /// Part of the master student-data reset. Paged rather than read-whole for
+  /// the same reason as `FeeService.deleteAll`.
+  Future<int> deleteAll(String collegeId) async {
+    final col = _col(collegeId);
+    var removed = 0;
+    while (true) {
+      final snap = await col.limit(400).get();
+      if (snap.docs.isEmpty) break;
+      final batch = _db.batch();
+      for (final d in snap.docs) {
+        batch.delete(d.reference);
+      }
+      await batch.commit();
+      removed += snap.docs.length;
+      if (snap.docs.length < 400) break;
+    }
+    return removed;
   }
 
   /// Removes requests whose author is no longer in [liveUids].

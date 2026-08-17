@@ -2,7 +2,7 @@
 //
 // The managed `gcloud firestore export` path needs a Blaze (billing-enabled)
 // project — this one is on Spark, same reason Firebase Storage isn't
-// available (see CLAUDE.md). This is the Spark-compatible alternative: walk
+// available (see DEVELOPMENT.md). This is the Spark-compatible alternative: walk
 // every collection and subcollection with the Admin SDK (same credentials
 // the other tools/ scripts use) and write it all to one local JSON file.
 //

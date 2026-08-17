@@ -160,6 +160,21 @@ class _ImportStudentsDialogState extends State<ImportStudentsDialog> {
     }
   }
 
+  /// AlertDialog's own horizontal inset, plus its content padding. Anything
+  /// wider than the window minus this overflows instead of shrinking.
+  static const double _dialogChrome = 40 * 2 + 24 * 2;
+
+  double _contentWidth(BuildContext context) {
+    final room = MediaQuery.of(context).size.width - _dialogChrome;
+    // The paste box doesn't benefit from extra width; the grid does.
+    return _step == 1 ? room.clamp(320.0, 1180.0) : room.clamp(320.0, 720.0);
+  }
+
+  double _contentHeight(BuildContext context) {
+    final room = MediaQuery.of(context).size.height - 220;
+    return _step == 1 ? room.clamp(320.0, 760.0) : room.clamp(320.0, 540.0);
+  }
+
   @override
   Widget build(BuildContext context) {
     return AlertDialog(
@@ -170,9 +185,15 @@ class _ImportStudentsDialogState extends State<ImportStudentsDialog> {
           _ => _running ? 'Importing…' : 'Import finished',
         },
       ),
+      // The preview earns more room than the other two steps: it is a
+      // spreadsheet, and 720px shows about four columns of one.
+      //
+      // Sized against the window *minus the dialog's own inset padding* —
+      // asking for more than that overflows rather than shrinking, since a
+      // SizedBox is a demand, not a request.
       content: SizedBox(
-        width: 720,
-        height: 540,
+        width: _contentWidth(context),
+        height: _contentHeight(context),
         child: switch (_step) {
           0 => _PasteStep(
             controller: _paste,
@@ -276,7 +297,13 @@ class _PasteStep extends StatelessWidget {
           ),
         ),
         const SizedBox(height: 14),
-        Row(
+        // Wrap rather than Row + Spacer: the two buttons and the role
+        // dropdown need ~824px side by side and this step is 720 wide, so a
+        // Row clipped the dropdown off the right edge at every window size.
+        Wrap(
+          spacing: 10,
+          runSpacing: 10,
+          crossAxisAlignment: WrapCrossAlignment.center,
           children: [
             OutlinedButton.icon(
               onPressed: () async {
@@ -294,7 +321,6 @@ class _PasteStep extends StatelessWidget {
               icon: const Icon(Icons.copy_rounded, size: 17),
               label: const Text('Copy template headers'),
             ),
-            const SizedBox(width: 10),
             OutlinedButton.icon(
               onPressed: () async {
                 await Clipboard.setData(
@@ -309,7 +335,6 @@ class _PasteStep extends StatelessWidget {
               icon: const Icon(Icons.description_outlined, size: 17),
               label: const Text('With example row'),
             ),
-            const Spacer(),
             if (roles.isNotEmpty)
               SizedBox(
                 width: 210,
@@ -437,15 +462,18 @@ class _PreviewStep extends StatelessWidget {
           ),
           const SizedBox(height: 14),
         ],
-        Row(
+        // Wrap, not Row: five tallies need about 800px and the dialog is
+        // narrower than that on a small window, where a Row silently clips
+        // the last two counts instead of moving them to a second line.
+        Wrap(
+          spacing: 26,
+          runSpacing: 10,
           children: [
             _Tally('Will create', plan.creates, AppColors.success),
-            const SizedBox(width: 26),
             _Tally('Will update', plan.updates, AppColors.primary),
-            const SizedBox(width: 26),
             _Tally('Skipped', plan.skips, AppColors.danger),
-            const SizedBox(width: 26),
             _Tally('Rooms allotted', plan.allotments, AppColors.info),
+            _Tally('Hostel only', plan.hostelOnlyAllotments, AppColors.info),
           ],
         ),
         if (plan.unknownColumns.isNotEmpty) ...[
@@ -460,16 +488,8 @@ class _PreviewStep extends StatelessWidget {
             ),
           ),
         ],
-        const SizedBox(height: 14),
-        const Divider(height: 1),
-        Expanded(
-          child: ListView.separated(
-            itemCount: plan.rows.length,
-            separatorBuilder: (context, index) =>
-                Divider(height: 1, color: AppColors.border),
-            itemBuilder: (context, i) => _RowTile(row: plan.rows[i]),
-          ),
-        ),
+        const SizedBox(height: 12),
+        Expanded(child: _SheetGrid(plan: plan)),
         if (plan.creates > 40) ...[
           const SizedBox(height: 10),
           Container(
@@ -480,10 +500,11 @@ class _PreviewStep extends StatelessWidget {
               borderRadius: BorderRadius.circular(9),
             ),
             child: Text(
-              '${plan.creates} new accounts is a lot for the browser to create '
-              '— Firebase throttles this, so expect it to be slow and for some '
-              'rows to fail. Any that fail are listed at the end and you can '
-              're-run safely.',
+              '${plan.creates} new accounts is a lot to create from a browser. '
+              'Firebase quotas this, and if it pushes back the importer drops '
+              'to creating them one at a time — so expect it to take a while. '
+              'Any rows that still fail are listed at the end, and re-running '
+              'is safe.',
               style: const TextStyle(
                 fontSize: 12,
                 color: Color(0xFF92400E),
@@ -493,6 +514,251 @@ class _PreviewStep extends StatelessWidget {
           ),
         ],
       ],
+    );
+  }
+}
+
+/// The pasted sheet, laid out as a sheet.
+///
+/// A vertical list of summary tiles answered "what will happen to row 40?"
+/// but not "does column K look right?", which is the question someone
+/// actually opens a 2,000-row file to check. This shows the grid they pasted,
+/// with the import's verdict attached to each line.
+///
+/// Two scroll axes, arranged so the header cannot drift out of step with the
+/// body: the horizontal scroll wraps *both* the header row and the list, so
+/// they move together for free and no controller has to be synchronised. The
+/// vertical scroll lives inside the list, which leaves the header pinned.
+class _SheetGrid extends StatefulWidget {
+  final ImportPlan plan;
+  const _SheetGrid({required this.plan});
+
+  @override
+  State<_SheetGrid> createState() => _SheetGridState();
+}
+
+class _SheetGridState extends State<_SheetGrid> {
+  final _h = ScrollController();
+  final _v = ScrollController();
+
+  static const double _numberWidth = 46;
+  static const double _statusWidth = 78;
+  static const double _issueWidth = 210;
+  static const double _rowHeight = 34;
+
+  late List<String> _columns;
+  late Map<String, double> _widths;
+
+  @override
+  void initState() {
+    super.initState();
+    _measure();
+  }
+
+  @override
+  void didUpdateWidget(_SheetGrid old) {
+    super.didUpdateWidget(old);
+    if (old.plan != widget.plan) _measure();
+  }
+
+  /// Rough auto-fit, like a spreadsheet sizing a column to its contents.
+  ///
+  /// Sampled rather than exhaustive: a 2,600-row file would otherwise measure
+  /// 75,000 cells to set 29 widths, and the first hundred rows already tell
+  /// you whether a column holds "M" or a postal address.
+  void _measure() {
+    _columns = widget.plan.headers.isNotEmpty
+        ? widget.plan.headers
+        : kImportColumns;
+
+    final sample = widget.plan.rows.take(100);
+    _widths = {
+      for (final col in _columns)
+        col: () {
+          var chars = col.length;
+          for (final row in sample) {
+            final v = row.values[col];
+            if (v != null && v.length > chars) chars = v.length;
+          }
+          return (chars * 7.6 + 26).clamp(72.0, 260.0);
+        }(),
+    };
+  }
+
+  @override
+  void dispose() {
+    _h.dispose();
+    _v.dispose();
+    super.dispose();
+  }
+
+  double get _totalWidth =>
+      _numberWidth +
+      _statusWidth +
+      _issueWidth +
+      _columns.fold(0.0, (sum, c) => sum + _widths[c]!);
+
+  @override
+  Widget build(BuildContext context) {
+    final rows = widget.plan.rows;
+
+    return Container(
+      decoration: BoxDecoration(
+        border: Border.all(color: AppColors.border),
+        borderRadius: BorderRadius.circular(8),
+      ),
+      clipBehavior: Clip.antiAlias,
+      // Both scrollbars keep the default depth==0 predicate: each one's own
+      // scrollable is its immediate descendant, and the inner list's
+      // notifications bubble up to this one at depth 1, where ignoring them
+      // is exactly what's wanted.
+      child: Scrollbar(
+        controller: _h,
+        thumbVisibility: true,
+        child: SingleChildScrollView(
+          controller: _h,
+          scrollDirection: Axis.horizontal,
+          child: SizedBox(
+            width: _totalWidth,
+            child: Column(
+              children: [
+                _header(),
+                Divider(height: 1, color: AppColors.border),
+                Expanded(
+                  child: Scrollbar(
+                    controller: _v,
+                    thumbVisibility: true,
+                    child: ListView.builder(
+                      controller: _v,
+                      itemExtent: _rowHeight,
+                      itemCount: rows.length,
+                      itemBuilder: (context, i) => _row(rows[i], i),
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _header() {
+    Widget cell(String text, double width, {bool ignored = false}) => Container(
+      width: width,
+      height: _rowHeight,
+      alignment: Alignment.centerLeft,
+      padding: const EdgeInsets.symmetric(horizontal: 8),
+      decoration: BoxDecoration(
+        border: Border(right: BorderSide(color: AppColors.border)),
+      ),
+      child: Text(
+        text,
+        overflow: TextOverflow.ellipsis,
+        style: TextStyle(
+          fontSize: 11.5,
+          fontWeight: FontWeight.w800,
+          letterSpacing: 0.2,
+          // An ignored column is shown, not hidden — seeing it greyed out is
+          // how you find out the app never understood that header.
+          color: ignored ? AppColors.textMuted : null,
+          fontStyle: ignored ? FontStyle.italic : null,
+          decoration: ignored ? TextDecoration.lineThrough : null,
+        ),
+      ),
+    );
+
+    final ignored = widget.plan.unknownColumns.toSet();
+
+    return ColoredBox(
+      color: AppColors.canvas,
+      child: Row(
+        children: [
+          cell('#', _numberWidth),
+          cell('Status', _statusWidth),
+          cell('Issue', _issueWidth),
+          for (final col in _columns)
+            Tooltip(
+              message: ignored.contains(col)
+                  ? '$col — not a column this import understands, so it is '
+                        'ignored'
+                  : col,
+              child: cell(col, _widths[col]!, ignored: ignored.contains(col)),
+            ),
+        ],
+      ),
+    );
+  }
+
+  Widget _row(ImportRow row, int index) {
+    final (label, color, bg) = switch (row.action) {
+      RowAction.create => ('NEW', AppColors.success, AppColors.successSoft),
+      RowAction.update => ('UPDATE', AppColors.primary, AppColors.primarySoft),
+      RowAction.skip => ('SKIP', AppColors.danger, AppColors.dangerSoft),
+    };
+
+    // The tint is what keeps a row's verdict readable once it is scrolled
+    // past the status column — colour survives horizontal scrolling, a pill
+    // does not.
+    final tint = switch (row.action) {
+      RowAction.skip => AppColors.dangerSoft,
+      RowAction.update => AppColors.primarySoft,
+      RowAction.create => index.isEven ? AppColors.canvas : null,
+    };
+
+    Widget cell(Widget child, double width, {Color? fg}) => Container(
+      width: width,
+      height: _rowHeight,
+      alignment: Alignment.centerLeft,
+      padding: const EdgeInsets.symmetric(horizontal: 8),
+      decoration: BoxDecoration(
+        border: Border(right: BorderSide(color: AppColors.border)),
+      ),
+      child: child,
+    );
+
+    Widget text(String value, double width, {Color? fg, FontWeight? weight}) =>
+        cell(
+          Text(
+            value,
+            overflow: TextOverflow.ellipsis,
+            style: TextStyle(fontSize: 12, color: fg, fontWeight: weight),
+          ),
+          width,
+        );
+
+    final issue = row.problems.isNotEmpty
+        ? row.problems.join(' · ')
+        : row.warnings.join(' · ');
+
+    return ColoredBox(
+      color: tint ?? Colors.transparent,
+      child: Row(
+        children: [
+          text(
+            '${row.lineNumber}',
+            _numberWidth,
+            fg: AppColors.textMuted,
+            weight: FontWeight.w600,
+          ),
+          cell(StatusPill(label, color, bg), _statusWidth),
+          Tooltip(
+            message: issue,
+            waitDuration: const Duration(milliseconds: 400),
+            child: text(
+              issue,
+              _issueWidth,
+              fg: row.problems.isNotEmpty
+                  ? AppColors.danger
+                  : AppColors.warning,
+              weight: FontWeight.w600,
+            ),
+          ),
+          for (final col in _columns)
+            text(row.values[col] ?? '', _widths[col]!),
+        ],
+      ),
     );
   }
 }
@@ -528,103 +794,6 @@ class _Tally extends StatelessWidget {
   );
 }
 
-class _RowTile extends StatelessWidget {
-  final ImportRow row;
-  const _RowTile({required this.row});
-
-  @override
-  Widget build(BuildContext context) {
-    final (label, color, bg) = switch (row.action) {
-      RowAction.create => ('NEW', AppColors.success, AppColors.successSoft),
-      RowAction.update => ('UPDATE', AppColors.primary, AppColors.primarySoft),
-      RowAction.skip => ('SKIP', AppColors.danger, AppColors.dangerSoft),
-    };
-
-    return Padding(
-      padding: const EdgeInsets.symmetric(vertical: 9, horizontal: 4),
-      child: Row(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          SizedBox(
-            width: 34,
-            child: Text(
-              '${row.lineNumber}',
-              style: TextStyle(
-                fontSize: 11.5,
-                color: AppColors.textMuted,
-                fontWeight: FontWeight.w600,
-              ),
-            ),
-          ),
-          StatusPill(label, color, bg),
-          const SizedBox(width: 12),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  row.name.isEmpty ? '(no name)' : row.name,
-                  style: const TextStyle(
-                    fontSize: 13.5,
-                    fontWeight: FontWeight.w600,
-                  ),
-                ),
-                Text(
-                  [
-                    if (row.loginLabel.isNotEmpty) row.loginLabel,
-                    if (row.role != null) row.role!.name,
-                    if (row.values['enrollmentNo'] != null)
-                      row.values['enrollmentNo']!,
-                  ].join(' · '),
-                  style: TextStyle(
-                    fontSize: 12,
-                    color: AppColors.textMuted,
-                  ),
-                ),
-                if (row.problems.isNotEmpty)
-                  Padding(
-                    padding: const EdgeInsets.only(top: 3),
-                    child: Text(
-                      row.problems.join(' · '),
-                      style: TextStyle(
-                        fontSize: 12,
-                        color: AppColors.danger,
-                        fontWeight: FontWeight.w600,
-                      ),
-                    ),
-                  ),
-                if (row.warnings.isNotEmpty)
-                  Padding(
-                    padding: const EdgeInsets.only(top: 3),
-                    child: Text(
-                      row.warnings.join(' · '),
-                      style: TextStyle(
-                        fontSize: 12,
-                        color: AppColors.warning,
-                        fontWeight: FontWeight.w600,
-                      ),
-                    ),
-                  ),
-                if (row.wantsAllotment)
-                  Padding(
-                    padding: const EdgeInsets.only(top: 3),
-                    child: Text(
-                      '→ ${row.hostel!.name}, room ${row.roomNumber}',
-                      style: TextStyle(
-                        fontSize: 12,
-                        color: AppColors.info,
-                        fontWeight: FontWeight.w600,
-                      ),
-                    ),
-                  ),
-              ],
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-}
 
 // ------------------------------- step 3 -------------------------------
 
@@ -745,6 +914,8 @@ class _RunStep extends StatelessWidget {
             _Tally('Updated', o.updated, AppColors.primary),
             const SizedBox(width: 26),
             _Tally('Rooms allotted', o.allotted, AppColors.info),
+            const SizedBox(width: 26),
+            _Tally('Hostel only', o.hostelOnly, AppColors.info),
             const SizedBox(width: 26),
             _Tally('Failed', o.failures.length, AppColors.danger),
           ],

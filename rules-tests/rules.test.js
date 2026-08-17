@@ -4,7 +4,7 @@
 // the UI respects roles by clicking through the app; this proves the rules
 // themselves refuse the write/read even if the UI's check were bypassed
 // entirely (e.g. a direct REST call), which is the actual security boundary
-// per CLAUDE.md.
+// per DEVELOPMENT.md.
 //
 // Run with:  cd rules-tests && npm install && npm test
 // Requires the Firebase CLI (already installed) and a JDK (the emulator is

@@ -41,6 +41,7 @@ class _BulkDeleteUsersDialogState extends State<BulkDeleteUsersDialog> {
   final _confirm = TextEditingController();
   bool _armed = false;
   bool _running = false;
+  bool _stopRequested = false;
   int _done = 0;
   BulkDeleteOutcome? _outcome;
   String? _error;
@@ -63,6 +64,7 @@ class _BulkDeleteUsersDialogState extends State<BulkDeleteUsersDialog> {
   Future<void> _run() async {
     setState(() {
       _running = true;
+      _stopRequested = false;
       _error = null;
       _done = 0;
     });
@@ -73,6 +75,7 @@ class _BulkDeleteUsersDialogState extends State<BulkDeleteUsersDialog> {
         onProgress: (done, _) {
           if (mounted) setState(() => _done = done);
         },
+        isCancelled: () => _stopRequested,
       );
       if (mounted) setState(() => _outcome = outcome);
     } catch (e) {
@@ -111,16 +114,25 @@ class _BulkDeleteUsersDialogState extends State<BulkDeleteUsersDialog> {
                 child: const Text('Done'),
               ),
             ]
+          : _running
+          ? [
+              TextButton(
+                onPressed: _stopRequested
+                    ? null
+                    : () => setState(() => _stopRequested = true),
+                child: Text(_stopRequested ? 'Stopping…' : 'Stop'),
+              ),
+            ]
           : [
               TextButton(
-                onPressed: _running ? null : () => Navigator.pop(context, false),
+                onPressed: () => Navigator.pop(context, false),
                 child: const Text('Cancel'),
               ),
               FilledButton(
                 style: FilledButton.styleFrom(
                   backgroundColor: AppColors.danger,
                 ),
-                onPressed: (_armed && !_running) ? _run : null,
+                onPressed: _armed ? _run : null,
                 child: Text('Delete $n'),
               ),
             ],
@@ -290,6 +302,26 @@ class _Result extends StatelessWidget {
     crossAxisAlignment: CrossAxisAlignment.start,
     mainAxisSize: MainAxisSize.min,
     children: [
+      if (outcome.stoppedEarly)
+        Container(
+          width: double.infinity,
+          margin: const EdgeInsets.only(bottom: 14),
+          padding: const EdgeInsets.all(13),
+          decoration: BoxDecoration(
+            color: AppColors.warningSoft,
+            borderRadius: BorderRadius.circular(10),
+          ),
+          child: Text(
+            'Stopped early — ${outcome.remaining} user(s) were never '
+            'attempted. Open the same filter and delete again to pick up '
+            'where this left off.',
+            style: TextStyle(
+              fontSize: 12.5,
+              color: AppColors.warning,
+              height: 1.45,
+            ),
+          ),
+        ),
       Wrap(
         spacing: 30,
         runSpacing: 12,
@@ -299,6 +331,7 @@ class _Result extends StatelessWidget {
           _Tally('Beds freed', outcome.vacated, AppColors.info),
           _Tally('Fines removed', outcome.finesDeleted, AppColors.info),
           _Tally('Requests removed', outcome.requestsDeleted, AppColors.info),
+          _Tally('Fee records removed', outcome.feesDeleted, AppColors.info),
           _Tally('Problems', outcome.failures.length, AppColors.danger),
         ],
       ),

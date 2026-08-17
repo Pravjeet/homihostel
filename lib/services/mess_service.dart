@@ -1,6 +1,7 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
 
 import '../models/mess.dart';
+import 'stream_cache.dart';
 
 /// Firestore access for the mess module.
 ///
@@ -22,9 +23,15 @@ class MessService {
 
   // ------------------------------ menu ------------------------------
 
-  Stream<MessMenu> watchMenu(String collegeId) => _doc(collegeId, 'menu')
-      .snapshots()
-      .map((d) => d.exists ? MessMenu.fromMap(d.data()!) : const MessMenu());
+  final CachedStreamPool<MessMenu> _menuPool = CachedStreamPool();
+  final CachedStreamPool<MessConfig> _configPool = CachedStreamPool();
+
+  Stream<MessMenu> watchMenu(String collegeId) => _menuPool.stream(
+    collegeId,
+    () => _doc(collegeId, 'menu')
+        .snapshots()
+        .map((d) => d.exists ? MessMenu.fromMap(d.data()!) : const MessMenu()),
+  );
 
   /// Writes the whole grid. `set` with merge so a save never wipes fields a
   /// newer version of the app might have added.
@@ -61,9 +68,12 @@ class MessService {
 
   // ------------------------------ config ------------------------------
 
-  Stream<MessConfig> watchConfig(String collegeId) => _doc(collegeId, 'config')
-      .snapshots()
-      .map((d) => d.exists ? MessConfig.fromMap(d.data()!) : const MessConfig());
+  Stream<MessConfig> watchConfig(String collegeId) => _configPool.stream(
+    collegeId,
+    () => _doc(collegeId, 'config').snapshots().map(
+      (d) => d.exists ? MessConfig.fromMap(d.data()!) : const MessConfig(),
+    ),
+  );
 
   Future<void> saveConfig(String collegeId, MessConfig config) =>
       _doc(collegeId, 'config').set({

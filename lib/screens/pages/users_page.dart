@@ -64,7 +64,13 @@ class _BulkDeleteButton extends StatelessWidget {
 
 class _UsersPageState extends State<UsersPage> {
   String _query = '';
-  String _roleFilter = 'All';
+
+  /// Defaults to showing only the Super Admin rather than the whole roster.
+  /// With a few thousand students imported, rendering "All" on first load
+  /// means building a row for every one of them before anyone's chosen to
+  /// look — picking any other filter (including "All" explicitly) shows
+  /// the rest.
+  String _roleFilter = 'Super Admin';
 
   /// Null = any. `_kUnallotted` is a real choice, not a missing one — finding
   /// who still needs a bed is the reason someone opens this filter.
@@ -72,6 +78,13 @@ class _UsersPageState extends State<UsersPage> {
   String? _roomFilter;
 
   static const _kUnallotted = '__none__';
+
+  /// Rendered a page at a time — with a few thousand students imported,
+  /// building a row for every match at once is what makes the screen crawl
+  /// or crash. Reset to 0 whenever a filter changes, so "page 3" of the old
+  /// results doesn't silently carry over into a much smaller new list.
+  static const _pageSize = 50;
+  int _page = 0;
 
   /// Owned so "Clear filters" can actually empty the box. Without a
   /// controller, resetting `_query` in setState leaves the typed text on
@@ -153,6 +166,17 @@ class _UsersPageState extends State<UsersPage> {
                   (u.roomNumber?.toLowerCase().contains(roomQuery) ?? false);
               return matchesQuery && matchesRole && matchesHostel && matchesRoom;
             }).toList();
+
+            // Clamp defensively rather than writing back to `_page` here —
+            // mutating state during build is asking for trouble. A stale
+            // `_page` (e.g. the list shrank after a filter changed) self
+            // corrects the moment Next/Prev is pressed again.
+            final pageCount = filtered.isEmpty
+                ? 1
+                : (filtered.length / _pageSize).ceil();
+            final page = _page.clamp(0, pageCount - 1);
+            final pageStart = page * _pageSize;
+            final pageItems = filtered.skip(pageStart).take(_pageSize).toList();
 
             return Column(
               crossAxisAlignment: CrossAxisAlignment.start,
@@ -243,7 +267,10 @@ class _UsersPageState extends State<UsersPage> {
                           Expanded(
                             child: TextField(
                               controller: _search,
-                              onChanged: (v) => setState(() => _query = v),
+                              onChanged: (v) => setState(() {
+                                _query = v;
+                                _page = 0;
+                              }),
                               decoration: const InputDecoration(
                                 hintText: 'Search by name, registration number or email',
                                 prefixIcon: Icon(Icons.search_rounded),
@@ -276,8 +303,10 @@ class _UsersPageState extends State<UsersPage> {
                                       ),
                                     )
                                     .toList(),
-                                onChanged: (v) =>
-                                    setState(() => _roleFilter = v ?? 'All'),
+                                onChanged: (v) => setState(() {
+                                  _roleFilter = v ?? 'All';
+                                  _page = 0;
+                                }),
                               );
                             },
                           ),
@@ -325,6 +354,7 @@ class _UsersPageState extends State<UsersPage> {
                                 _hostelFilter = v;
                                 _roomFilter = null;
                                 _roomSearch.clear();
+                                _page = 0;
                               }),
                             ),
                           ),
@@ -336,8 +366,10 @@ class _UsersPageState extends State<UsersPage> {
                               enabled:
                                   _hostelFilter != null &&
                                   _hostelFilter != _kUnallotted,
-                              onChanged: (v) =>
-                                  setState(() => _roomFilter = v),
+                              onChanged: (v) => setState(() {
+                                _roomFilter = v;
+                                _page = 0;
+                              }),
                               decoration: const InputDecoration(
                                 labelText: 'Room',
                                 hintText: 'Search room no.',
@@ -347,7 +379,11 @@ class _UsersPageState extends State<UsersPage> {
                           ),
                           const SizedBox(width: 12),
                           Text(
-                            '${filtered.length} of ${all.length}',
+                            filtered.isEmpty
+                                ? '0 of ${all.length}'
+                                : '${pageStart + 1}–'
+                                      '${pageStart + pageItems.length} of '
+                                      '${filtered.length}',
                             style: TextStyle(
                               fontSize: 12.5,
                               fontWeight: FontWeight.w600,
@@ -368,6 +404,7 @@ class _UsersPageState extends State<UsersPage> {
                                   _roomFilter = null;
                                   _roleFilter = 'All';
                                   _query = '';
+                                  _page = 0;
                                 });
                               },
                               icon: const Icon(
@@ -403,15 +440,15 @@ class _UsersPageState extends State<UsersPage> {
                     padding: const EdgeInsets.symmetric(vertical: 6),
                     child: Column(
                       children: [
-                        for (var i = 0; i < filtered.length; i++) ...[
+                        for (var i = 0; i < pageItems.length; i++) ...[
                           _UserRow(
-                            user: filtered[i],
+                            user: pageItems[i],
                             roles: assignable,
-                            isSelf: filtered[i].uid == session.user.uid,
+                            isSelf: pageItems[i].uid == session.user.uid,
                             onOpen: () =>
-                                setState(() => _openUser = filtered[i]),
+                                setState(() => _openUser = pageItems[i]),
                           ),
-                          if (i != filtered.length - 1)
+                          if (i != pageItems.length - 1)
                             Divider(
                               height: 1,
                               indent: 20,
@@ -422,6 +459,37 @@ class _UsersPageState extends State<UsersPage> {
                       ],
                     ),
                   ),
+                if (pageCount > 1) ...[
+                  const SizedBox(height: 14),
+                  Row(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: [
+                      OutlinedButton(
+                        onPressed: page > 0
+                            ? () => setState(() => _page = page - 1)
+                            : null,
+                        child: const Text('Previous'),
+                      ),
+                      Padding(
+                        padding: const EdgeInsets.symmetric(horizontal: 16),
+                        child: Text(
+                          'Page ${page + 1} of $pageCount',
+                          style: TextStyle(
+                            fontSize: 12.5,
+                            fontWeight: FontWeight.w600,
+                            color: AppColors.textMuted,
+                          ),
+                        ),
+                      ),
+                      OutlinedButton(
+                        onPressed: page < pageCount - 1
+                            ? () => setState(() => _page = page + 1)
+                            : null,
+                        child: const Text('Next'),
+                      ),
+                    ],
+                  ),
+                ],
               ],
             );
           },

@@ -155,7 +155,24 @@ class _Data {
   final List<Hostel> hostels;
   final List<HostelRequest> requests;
   final List<Fine> fines;
-  final List<FeeRecord> fees;
+
+  /// Only the current month's records — see [_FeedState]. Everything older is
+  /// carried by [revenueByPeriod] as a total, not as documents.
+  final List<FeeRecord> feesThisMonth;
+
+  /// Collected per `YYYY-MM`, from a `sum()` aggregation rather than from
+  /// reading the records.
+  ///
+  /// Null while in flight, and if the aggregation fails. Deliberately not
+  /// defaulted to an empty map: every consumer here reads a missing period as
+  /// zero, so a failed read would render as a confident "collected nothing"
+  /// across six months rather than as "not loaded".
+  final Map<String, num>? revenueByPeriod;
+
+  /// The dozen most recent payments, for the activity feed and the payments
+  /// card. Read with a server-side limit, not sorted out of a larger set.
+  final List<FeeRecord> recentFees;
+
   final List<Notice> notices;
   final MessConfig mess;
 
@@ -164,7 +181,9 @@ class _Data {
     required this.hostels,
     required this.requests,
     required this.fines,
-    required this.fees,
+    required this.feesThisMonth,
+    required this.revenueByPeriod,
+    required this.recentFees,
     required this.notices,
     required this.mess,
   });
@@ -190,8 +209,7 @@ class _Data {
 
   String get thisPeriod => periodOf(DateTime.now());
 
-  List<FeeRecord> get thisMonthFees =>
-      fees.where((f) => f.period == thisPeriod).toList();
+  List<FeeRecord> get thisMonthFees => feesThisMonth;
 
   num get collectedThisMonth =>
       thisMonthFees.fold<num>(0, (a, f) => a + f.amount);
@@ -235,10 +253,11 @@ class _Data {
       .where((u) => u.createdAt != null && periodOf(u.createdAt!) == thisPeriod)
       .length;
 
-  List<num> get feeTrend => [
-    for (final p in trendPeriods)
-      fees.where((f) => f.period == p).fold<num>(0, (a, f) => a + f.amount),
-  ];
+  /// Empty when the totals aren't in — [_Kpi] hides a sparkline it can't
+  /// draw, which is the right outcome for "unknown".
+  List<num> get feeTrend => revenueByPeriod == null
+      ? const []
+      : [for (final p in trendPeriods) revenueByPeriod![p] ?? 0];
 
   /// Things a warden should actually look at. Counted, not guessed — an alert
   /// tile that invents urgency trains people to ignore it.
@@ -253,55 +272,94 @@ class _Data {
 }
 
 /// Fans out the streams the dashboard needs and hands over one snapshot.
-class _Feed extends StatelessWidget {
+///
+/// Stateful only so the two one-shot reads — the revenue trend and the recent
+/// payments list — are issued once. Built inside `build()` they would re-run
+/// on every rebuild, which is the same mistake that made the streams
+/// expensive; see `CachedStream` in services/stream_cache.dart.
+class _Feed extends StatefulWidget {
   final String collegeId;
   final Widget Function(BuildContext, _Data) builder;
 
   const _Feed({required this.collegeId, required this.builder});
 
   @override
+  State<_Feed> createState() => _FeedState();
+}
+
+class _FeedState extends State<_Feed> {
+  /// Seven months back covers the revenue trend without pulling years of
+  /// history the page never draws.
+  late final List<String> _periods = recentPeriods(
+    DateTime.now(),
+    count: 7,
+  ).reversed.toList();
+
+  late final Future<Map<String, num>> _revenue = FeeService.instance
+      .revenueByPeriod(widget.collegeId, _periods);
+
+  late final Future<List<FeeRecord>> _recent = FeeService.instance
+      .recentPayments(widget.collegeId);
+
+  @override
   Widget build(BuildContext context) {
-    // Six months back covers the revenue trend without pulling years of
-    // history the page never draws.
-    final from = recentPeriods(DateTime.now(), count: 7).last;
+    final thisPeriod = periodOf(DateTime.now());
 
     return StreamBuilder<List<AppUser>>(
-      stream: DataService.instance.watchUsers(collegeId),
+      stream: DataService.instance.watchUsers(widget.collegeId),
       builder: (context, users) => StreamBuilder<List<Hostel>>(
-        stream: HostelService.instance.watchHostels(collegeId),
+        stream: HostelService.instance.watchHostels(widget.collegeId),
         builder: (context, hostels) => StreamBuilder<List<HostelRequest>>(
-          stream: RequestService.instance.watchAll(collegeId),
+          stream: RequestService.instance.watchAll(widget.collegeId),
           builder: (context, requests) => StreamBuilder<List<Fine>>(
-            stream: FineService.instance.watchAll(collegeId),
+            stream: FineService.instance.watchAll(widget.collegeId),
+            // Only the current month is streamed. It is the one that has to
+            // move as clerks tick people off, and it is bounded by the number
+            // of residents. The older months are read once, as sums.
             builder: (context, fines) => StreamBuilder<List<FeeRecord>>(
-              stream: FeeService.instance.watchSince(collegeId, from),
+              stream: FeeService.instance.watchPeriod(
+                widget.collegeId,
+                thisPeriod,
+              ),
               builder: (context, fees) => StreamBuilder<List<Notice>>(
-                stream: NoticeService.instance.watchAll(collegeId),
+                stream: NoticeService.instance.watchAll(widget.collegeId),
                 builder: (context, notices) => StreamBuilder<MessConfig>(
-                  stream: MessService.instance.watchConfig(collegeId),
-                  builder: (context, mess) {
-                    // Rendered as soon as users arrive; the rest fill in as
-                    // they land. Blocking on all seven would leave the page
-                    // blank for as long as the slowest one takes.
-                    if (!users.hasData) {
-                      return const Padding(
-                        padding: EdgeInsets.all(80),
-                        child: Center(child: CircularProgressIndicator()),
-                      );
-                    }
-                    return builder(
-                      context,
-                      _Data(
-                        users: users.data!,
-                        hostels: hostels.data ?? const [],
-                        requests: requests.data ?? const [],
-                        fines: fines.data ?? const [],
-                        fees: fees.data ?? const [],
-                        notices: notices.data ?? const [],
-                        mess: mess.data ?? const MessConfig(),
-                      ),
-                    );
-                  },
+                  stream: MessService.instance.watchConfig(widget.collegeId),
+                  builder: (context, mess) => FutureBuilder<Map<String, num>>(
+                    future: _revenue,
+                    builder: (context, revenue) =>
+                        FutureBuilder<List<FeeRecord>>(
+                          future: _recent,
+                          builder: (context, recent) {
+                            // Rendered as soon as users arrive; the rest fill
+                            // in as they land. Blocking on all nine would
+                            // leave the page blank for as long as the slowest
+                            // one takes.
+                            if (!users.hasData) {
+                              return const Padding(
+                                padding: EdgeInsets.all(80),
+                                child: Center(
+                                  child: CircularProgressIndicator(),
+                                ),
+                              );
+                            }
+                            return widget.builder(
+                              context,
+                              _Data(
+                                users: users.data!,
+                                hostels: hostels.data ?? const [],
+                                requests: requests.data ?? const [],
+                                fines: fines.data ?? const [],
+                                feesThisMonth: fees.data ?? const [],
+                                revenueByPeriod: revenue.data,
+                                recentFees: recent.data ?? const [],
+                                notices: notices.data ?? const [],
+                                mess: mess.data ?? const MessConfig(),
+                              ),
+                            );
+                          },
+                        ),
+                  ),
                 ),
               ),
             ),
@@ -1186,7 +1244,7 @@ class _RecentActivity extends StatelessWidget {
             title: 'Notice posted',
             detail: n.title,
           ),
-      for (final f in data.fees.take(12))
+      for (final f in data.recentFees.take(12))
         if (f.createdAt != null)
           _Event(
             at: f.createdAt!,
@@ -1420,12 +1478,19 @@ class _RevenueCard extends StatelessWidget {
   Widget build(BuildContext context) {
     // Oldest first, so the line reads left to right like a calendar.
     final periods = recentPeriods(DateTime.now(), count: 7).reversed.toList();
-    final totals = {
-      for (final p in periods)
-        p: data.fees
-            .where((f) => f.period == p)
-            .fold<num>(0, (a, f) => a + f.amount),
-    };
+    final byPeriod = data.revenueByPeriod;
+
+    // A chart of seven zero bars is indistinguishable from a real month of no
+    // collection, so say nothing rather than something wrong.
+    if (byPeriod == null) {
+      return const _Card(
+        title: 'Fee collection',
+        subtitle: '· last 7 months',
+        child: _Empty('Collection totals are still loading.'),
+      );
+    }
+
+    final totals = {for (final p in periods) p: byPeriod[p] ?? 0};
     final values = periods.map((p) => totals[p]!).toList();
     final maxV = values.isEmpty
         ? 0
@@ -1766,7 +1831,10 @@ class _RecentPayments extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final recent = [...data.fees]
+    // Already newest-first from the server, but the ordering key there is
+    // `createdAt` (when it was entered) while this table shows `paidOn` (when
+    // the money arrived). Re-sorting the dozen rows keeps the two consistent.
+    final recent = [...data.recentFees]
       ..sort((a, b) {
         final at = a.paidOn ?? a.createdAt;
         final bt = b.paidOn ?? b.createdAt;

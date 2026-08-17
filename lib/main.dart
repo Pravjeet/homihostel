@@ -1,4 +1,7 @@
+import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:firebase_auth/firebase_auth.dart';
 import 'package:firebase_core/firebase_core.dart';
+import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart';
 
 import 'core/theme.dart';
@@ -17,6 +20,35 @@ Future<void> main() async {
     await Firebase.initializeApp(
       options: DefaultFirebaseOptions.currentPlatform,
     );
+
+    // Local cache on, and uncapped.
+    //
+    // Firestore bills per document read, and the free tier allows 50,000 a
+    // day — which a few thousand students burn through fast. With persistence
+    // the SDK keeps a local copy and re-attaches listeners using a resume
+    // token, so a reload asks "what changed?" instead of paying for the whole
+    // roster again. The default cache is 40 MB, small enough that the roster
+    // could be evicted between visits and re-fetched in full; unlimited keeps
+    // it. Must be set before Firestore is used for anything.
+    FirebaseFirestore.instance.settings = const Settings(
+      persistenceEnabled: true,
+      cacheSizeBytes: Settings.CACHE_SIZE_UNLIMITED,
+    );
+
+    // Sign-in lasts as long as the tab, not the browser profile.
+    //
+    // Firebase's web default is LOCAL — the session survives closing the
+    // browser entirely, so opening the app link lands you back in whoever
+    // signed in last. On the shared office machines this runs on, that hands
+    // the next person a live warden session. SESSION scopes the credential to
+    // the tab: close it and the next visit starts at the login screen, while
+    // an accidental F5 mid-task still keeps you signed in.
+    //
+    // Web-only in FlutterFire — it throws on Windows and Android, where the
+    // OS account model already isolates users.
+    if (kIsWeb) {
+      await FirebaseAuth.instance.setPersistence(Persistence.SESSION);
+    }
   } catch (e) {
     startupError = e;
   }
@@ -69,11 +101,7 @@ class _StartupError extends StatelessWidget {
           child: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
-              Icon(
-                Icons.cloud_off_rounded,
-                size: 44,
-                color: AppColors.danger,
-              ),
+              Icon(Icons.cloud_off_rounded, size: 44, color: AppColors.danger),
               const SizedBox(height: 16),
               const Text(
                 'Could not connect to Firebase',
@@ -83,10 +111,7 @@ class _StartupError extends StatelessWidget {
               Text(
                 '$error',
                 textAlign: TextAlign.center,
-                style: TextStyle(
-                  color: AppColors.textMuted,
-                  fontSize: 13,
-                ),
+                style: TextStyle(color: AppColors.textMuted, fontSize: 13),
               ),
             ],
           ),

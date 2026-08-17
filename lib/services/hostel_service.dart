@@ -1,6 +1,7 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
 
 import '../models/hostel.dart';
+import 'stream_cache.dart';
 
 /// Firestore access for hostels and their rooms.
 ///
@@ -28,10 +29,15 @@ class HostelService {
 
   // ------------------------------ reads ------------------------------
 
-  Stream<List<Hostel>> watchHostels(String collegeId) =>
-      _hostels(collegeId).orderBy('name').snapshots().map(
-        (s) => s.docs.map((d) => Hostel.fromMap(d.id, d.data())).toList(),
-      );
+  final CachedStreamPool<List<Hostel>> _hostelPool = CachedStreamPool();
+  final CachedStreamPool<List<Room>> _roomPool = CachedStreamPool();
+
+  Stream<List<Hostel>> watchHostels(String collegeId) => _hostelPool.stream(
+    collegeId,
+    () => _hostels(collegeId).orderBy('name').snapshots().map(
+      (s) => s.docs.map((d) => Hostel.fromMap(d.id, d.data())).toList(),
+    ),
+  );
 
   Stream<Hostel?> watchHostel(String collegeId, String hostelId) =>
       _hostels(collegeId)
@@ -42,15 +48,20 @@ class HostelService {
   /// Rooms sorted by floor then number. Sorting client-side keeps this to a
   /// single-field Firestore index instead of a composite one.
   Stream<List<Room>> watchRooms(String collegeId, String hostelId) =>
-      _rooms(collegeId, hostelId).snapshots().map((s) {
-        final rooms = s.docs.map((d) => Room.fromMap(d.id, d.data())).toList();
-        rooms.sort((a, b) {
-          final byFloor = a.floor.compareTo(b.floor);
-          if (byFloor != 0) return byFloor;
-          return _numericCompare(a.number, b.number);
-        });
-        return rooms;
-      });
+      _roomPool.stream(
+        '$collegeId/$hostelId',
+        () => _rooms(collegeId, hostelId).snapshots().map((s) {
+          final rooms = s.docs
+              .map((d) => Room.fromMap(d.id, d.data()))
+              .toList();
+          rooms.sort((a, b) {
+            final byFloor = a.floor.compareTo(b.floor);
+            if (byFloor != 0) return byFloor;
+            return _numericCompare(a.number, b.number);
+          });
+          return rooms;
+        }),
+      );
 
   /// One-shot read of a hostel's rooms.
   ///

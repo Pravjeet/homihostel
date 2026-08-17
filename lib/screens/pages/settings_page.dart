@@ -15,6 +15,7 @@ import '../../services/fine_service.dart';
 import '../../services/hostel_service.dart';
 import '../../services/request_service.dart';
 import '../../services/settings_service.dart';
+import 'reset_student_data_dialog.dart';
 
 /// Largest logo photo accepted, in bytes. Base64 adds ~33% on top, and this
 /// document also carries the rest of the institution profile plus theming —
@@ -1202,6 +1203,42 @@ class _DangerZoneState extends State<_DangerZone> {
     }
   }
 
+  /// The master reset. Unlike the rows below it this does not go through
+  /// [_confirm] — the scope is too broad for a one-line body and a snackbar,
+  /// so it gets its own dialog with the deleted/kept breakdown and live
+  /// progress. The roster is counted first so the confirmation can name a
+  /// real number rather than asking you to approve "everyone".
+  Future<void> _resetAll(Session session) async {
+    final messenger = ScaffoldMessenger.of(context);
+    setState(() => _busy = true);
+
+    int count;
+    try {
+      final all = await DataService.instance.watchUsers(widget.collegeId).first;
+      count = all.where((u) => !u.isSuperAdmin).length;
+    } catch (e) {
+      messenger.showSnackBar(
+        SnackBar(content: Text(AuthService.describeError(e))),
+      );
+      return;
+    } finally {
+      if (mounted) setState(() => _busy = false);
+    }
+
+    if (!mounted) return;
+    await showDialog<bool>(
+      context: context,
+      // A half-finished sweep is worse than either finishing or stopping
+      // deliberately, and Stop is right there.
+      barrierDismissible: false,
+      builder: (_) => ResetStudentDataDialog(
+        collegeId: widget.collegeId,
+        actor: session.user,
+        studentCount: count,
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final session = Session.of(context);
@@ -1232,6 +1269,59 @@ class _DangerZoneState extends State<_DangerZone> {
             style: TextStyle(fontSize: 12.5, color: AppColors.textMuted),
           ),
           const SizedBox(height: 18),
+
+          // The master reset, set apart from the rows below it. Those are
+          // single-collection cleanups you reach for when one thing has gone
+          // stale; this is the one that clears an intake end-to-end, and
+          // burying it in the list is how you end up running four of the
+          // others and still finding fee records left over.
+          Container(
+            padding: const EdgeInsets.all(15),
+            decoration: BoxDecoration(
+              color: AppColors.dangerSoft,
+              borderRadius: BorderRadius.circular(11),
+            ),
+            child: Row(
+              children: [
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        'Delete ALL student data',
+                        style: TextStyle(
+                          fontSize: 14,
+                          fontWeight: FontWeight.w800,
+                          color: AppColors.danger,
+                        ),
+                      ),
+                      const SizedBox(height: 3),
+                      Text(
+                        'One button for a clean slate: every profile, mess fee '
+                        'record, fine, request and room assignment. Hostels, '
+                        'rooms, college details, roles and Super Admins are '
+                        'kept.',
+                        style: TextStyle(
+                          fontSize: 12.5,
+                          color: AppColors.danger,
+                          height: 1.4,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+                const SizedBox(width: 16),
+                FilledButton(
+                  onPressed: _busy ? null : () => _resetAll(session),
+                  style: FilledButton.styleFrom(
+                    backgroundColor: AppColors.danger,
+                  ),
+                  child: const Text('Delete all'),
+                ),
+              ],
+            ),
+          ),
+          Divider(height: 26, color: AppColors.border),
           _DangerRow(
             label: 'Delete every fine',
             detail: 'Removes all fines, paid and unpaid. Students and rooms '
@@ -1306,7 +1396,8 @@ class _DangerZoneState extends State<_DangerZone> {
                 return 'Deleted ${outcome.deleted} profile(s), '
                     'freed ${outcome.vacated} bed(s), '
                     'removed ${outcome.finesDeleted} fine(s), '
-                    '${outcome.requestsDeleted} request(s)';
+                    '${outcome.requestsDeleted} request(s), '
+                    '${outcome.feesDeleted} fee record(s)';
               },
             ),
           ),

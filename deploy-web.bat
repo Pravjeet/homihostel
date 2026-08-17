@@ -42,6 +42,6 @@ if errorlevel 1 (
 )
 
 echo.
-echo Deployed. Live at: https://homihostel-57391.web.app
+echo Deployed. Live at: https://homihostel.web.app
 echo If this deploy needs undoing: Firebase console -^> Hosting -^> Release
 echo history -^> pick the previous release -^> Rollback.

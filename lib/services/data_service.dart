@@ -7,8 +7,10 @@ import '../models/app_user.dart';
 import 'allotment_service.dart';
 import 'audit_service.dart';
 import 'auth_service.dart';
+import 'fee_service.dart';
 import 'fine_service.dart';
 import 'request_service.dart';
+import 'stream_cache.dart';
 
 /// Firestore reads/writes for roles and users.
 class DataService {
@@ -22,10 +24,14 @@ class DataService {
 
   // ------------------------------- Roles -------------------------------
 
-  Stream<List<AppRole>> watchRoles(String collegeId) =>
-      _roles(collegeId).orderBy('name').snapshots().map(
-        (s) => s.docs.map((d) => AppRole.fromMap(d.id, d.data())).toList(),
-      );
+  final CachedStreamPool<List<AppRole>> _rolePool = CachedStreamPool();
+
+  Stream<List<AppRole>> watchRoles(String collegeId) => _rolePool.stream(
+    collegeId,
+    () => _roles(collegeId).orderBy('name').snapshots().map(
+      (s) => s.docs.map((d) => AppRole.fromMap(d.id, d.data())).toList(),
+    ),
+  );
 
   Future<void> createRole({
     required String collegeId,
@@ -79,14 +85,28 @@ class DataService {
 
   // ------------------------------- Users -------------------------------
 
-  Stream<List<AppUser>> watchUsers(String collegeId) => _db
-      .collection('users')
-      .where('collegeId', isEqualTo: collegeId)
-      .snapshots()
-      .map(
-        (s) => s.docs.map((d) => AppUser.fromMap(d.id, d.data())).toList()
-          ..sort((a, b) => a.name.toLowerCase().compareTo(b.name.toLowerCase())),
-      );
+  final CachedStreamPool<List<AppUser>> _userPool = CachedStreamPool();
+
+  /// The whole roster, shared.
+  ///
+  /// This is the single most expensive query in the app — with a few thousand
+  /// students it is the entire `users` collection — and six screens want it.
+  /// Going through [CachedStreamPool] means those six share one live query
+  /// instead of opening one each, and that the returned object is stable, so a
+  /// rebuild does not re-subscribe. See [CachedStream] for the arithmetic.
+  Stream<List<AppUser>> watchUsers(String collegeId) => _userPool.stream(
+    collegeId,
+    () => _db
+        .collection('users')
+        .where('collegeId', isEqualTo: collegeId)
+        .snapshots()
+        .map(
+          (s) => s.docs.map((d) => AppUser.fromMap(d.id, d.data())).toList()
+            ..sort(
+              (a, b) => a.name.toLowerCase().compareTo(b.name.toLowerCase()),
+            ),
+        ),
+  );
 
   Future<void> updateUser(String uid, Map<String, dynamic> changes) => _db
       .collection('users')
@@ -249,6 +269,17 @@ class DataService {
       );
     } catch (_) {}
 
+    // And their mess-fee history, for the same reason. This was the gap that
+    // left the Mess Fees page reporting hundreds of residents and lakhs
+    // pending after the roster had already been cleared.
+    var feesDeleted = 0;
+    try {
+      feesDeleted = await FeeService.instance.deleteForStudent(
+        collegeId,
+        user.uid,
+      );
+    } catch (_) {}
+
     await deleteUserProfile(user.uid);
 
     if (actor != null && before != null) {
@@ -275,7 +306,46 @@ class DataService {
       vacated: vacated,
       finesDeleted: finesDeleted,
       requestsDeleted: requestsDeleted,
+      feesDeleted: feesDeleted,
     );
+  }
+
+  /// Deletes profile documents wholesale, in batches, with no per-user work.
+  ///
+  /// The counterpart to [deleteUserProfiles] for the case where *everyone* is
+  /// going. That method does five round-trips per person — an Auth sign-in
+  /// attempt, a vacate transaction, a fines query, a requests query, a delete
+  /// — which is right for thirty students and unusable for three thousand.
+  /// Here the attached records are cleared collection-at-a-time by the caller
+  /// instead, and rooms are emptied in one sweep afterwards, so this only has
+  /// to delete documents.
+  ///
+  /// Super Admins are filtered out before anything is written, so there is no
+  /// path through this that locks you out of your own workspace.
+  ///
+  /// Returns the number of profiles removed. [isCancelled] is polled between
+  /// batches; stopping leaves a partially-cleared roster, which is safe to
+  /// resume by simply running again.
+  Future<int> deleteProfilesInBulk({
+    required List<AppUser> users,
+    void Function(int done, int total)? onProgress,
+    bool Function()? isCancelled,
+  }) async {
+    final targets = users.where((u) => !u.isSuperAdmin).toList();
+    var done = 0;
+
+    for (var i = 0; i < targets.length; i += 400) {
+      if (isCancelled?.call() ?? false) break;
+      final end = (i + 400).clamp(0, targets.length);
+      final batch = _db.batch();
+      for (final u in targets.sublist(i, end)) {
+        batch.delete(_db.collection('users').doc(u.uid));
+      }
+      await batch.commit();
+      done = end;
+      onProgress?.call(done, targets.length);
+    }
+    return done;
   }
 
   /// Bulk-removes profiles, freeing any rooms they held first.
@@ -291,10 +361,17 @@ class DataService {
   ///
   /// As with [deleteUserProfile], the Firebase Auth accounts survive. See
   /// `tools/delete-students.js` for a wipe that removes those too.
+  /// [isCancelled] is polled between users, never mid-delete — same
+  /// contract as [runImport]'s: a "Stop" click takes effect after whichever
+  /// person is currently being removed finishes, not before. Re-running
+  /// (selecting the same filter and deleting again) is safe and just picks
+  /// up where it left off, since anyone already gone is simply absent from
+  /// the next batch.
   Future<BulkDeleteOutcome> deleteUserProfiles({
     required String collegeId,
     required List<AppUser> users,
     void Function(int done, int total)? onProgress,
+    bool Function()? isCancelled,
   }) async {
     final failures = <String>[];
     final authLeftBehind = <String>[];
@@ -302,8 +379,10 @@ class DataService {
     var vacated = 0;
     var finesDeleted = 0;
     var requestsDeleted = 0;
+    var feesDeleted = 0;
     var authDeleted = 0;
     var done = 0;
+    var stoppedEarly = false;
 
     // ONE provisioning app for the whole run — creating one per user is what
     // made bulk import crawl, and this does the same work.
@@ -313,6 +392,10 @@ class DataService {
       provisioning = await AuthService.instance.openProvisioningApp();
 
       for (final user in users) {
+        if (isCancelled?.call() ?? false) {
+          stoppedEarly = true;
+          break;
+        }
         if (user.isSuperAdmin) {
           failures.add('${user.name}: Super Admin accounts are never deleted');
           done++;
@@ -330,6 +413,7 @@ class DataService {
           if (outcome.vacated) vacated++;
           finesDeleted += outcome.finesDeleted;
           requestsDeleted += outcome.requestsDeleted;
+          feesDeleted += outcome.feesDeleted;
           if (outcome.auth == AuthDeleteResult.deleted) {
             authDeleted++;
           } else if (!outcome.auth.isGone) {
@@ -353,9 +437,12 @@ class DataService {
       vacated: vacated,
       finesDeleted: finesDeleted,
       requestsDeleted: requestsDeleted,
+      feesDeleted: feesDeleted,
       authDeleted: authDeleted,
       authLeftBehind: authLeftBehind,
       failures: failures,
+      stoppedEarly: stoppedEarly,
+      remaining: users.length - done,
     );
   }
 }
@@ -365,11 +452,13 @@ class UserDeleteOutcome {
   final bool vacated;
   final int finesDeleted;
   final int requestsDeleted;
+  final int feesDeleted;
   const UserDeleteOutcome({
     required this.auth,
     required this.vacated,
     this.finesDeleted = 0,
     this.requestsDeleted = 0,
+    this.feesDeleted = 0,
   });
 }
 
@@ -378,6 +467,7 @@ class BulkDeleteOutcome {
   final int vacated;
   final int finesDeleted;
   final int requestsDeleted;
+  final int feesDeleted;
 
   /// Sign-in accounts actually removed. Can be lower than [deleted] — see
   /// [authLeftBehind].
@@ -388,13 +478,23 @@ class BulkDeleteOutcome {
 
   final List<String> failures;
 
+  /// True when [DataService.deleteUserProfiles]'s `isCancelled` stopped the
+  /// run before every user was processed.
+  final bool stoppedEarly;
+
+  /// How many users in the batch were never attempted because of that stop.
+  final int remaining;
+
   const BulkDeleteOutcome({
     required this.deleted,
     required this.vacated,
     this.finesDeleted = 0,
     this.requestsDeleted = 0,
+    this.feesDeleted = 0,
     this.authDeleted = 0,
     this.authLeftBehind = const [],
     required this.failures,
+    this.stoppedEarly = false,
+    this.remaining = 0,
   });
 }

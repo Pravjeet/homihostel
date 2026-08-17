@@ -14,6 +14,7 @@ import '../screens/pages/requests_page.dart';
 import '../screens/pages/notices_page.dart';
 import '../screens/pages/roles_page.dart';
 import '../screens/pages/settings_page.dart';
+import '../screens/pages/student_overview_page.dart';
 import '../screens/pages/users_page.dart';
 import 'permissions.dart';
 import 'session.dart';
@@ -81,6 +82,13 @@ const List<NavSection> _allSections = [
         icon: Icons.group_rounded,
         requires: [Perm.usersView],
         builder: _users,
+      ),
+      NavItem(
+        id: 'student-overview',
+        label: 'Student Overview',
+        icon: Icons.school_rounded,
+        requires: [Perm.usersView],
+        builder: _studentOverview,
       ),
       NavItem(
         id: 'roles',
@@ -216,6 +224,7 @@ List<NavSection> navigationFor(Session session) {
 // function references are const — which `_allSections` requires.
 Widget _overview(BuildContext c) => const OverviewPage();
 Widget _users(BuildContext c) => const UsersPage();
+Widget _studentOverview(BuildContext c) => const StudentOverviewPage();
 Widget _roles(BuildContext c) => const RolesPage();
 Widget _myRoom(BuildContext c) => const MyRoomPage();
 Widget _profile(BuildContext c) => const ProfilePage();

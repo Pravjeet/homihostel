@@ -262,16 +262,24 @@ const List<String> kTrades = [
   'DCE',
   'DCE-CBM',
   'DME',
+  'DME-CAC',
   'DME-CAF',
   'DME-CFF',
   'DME-CTD',
+  'DME-CWG',
   'DEE',
   'DEE-CEN',
   'DIN',
+  'DIN-CIM',
+  'DIN-CSMM',
   'DEC',
   'DEC-CSME',
+  'DEC-CTC',
+  'DEC-CTV',
   'DCS',
+  'DCS-CDE',
   'DCT',
+  'DCT-CPT',
   'DFT',
   'DFT-CFP',
   // B.E.
@@ -297,6 +305,8 @@ const List<String> kTrades = [
   'PGPHY',
   'PGCHY',
   'PGMATH',
+  // MBA
+  'MBA',
 ];
 
 /// Human-readable names for [kTrades], shown beside the code so nobody has to
@@ -333,6 +343,7 @@ const Map<String, String> kTradeNames = {
   'PGPHY': 'M.Sc Physics',
   'PGCHY': 'M.Sc Chemistry',
   'PGMATH': 'M.Sc Mathematics',
+  'MBA': 'Master of Business Administration',
 };
 
 /// "GIN — Instrumentation & Control Engineering", or just the code when it

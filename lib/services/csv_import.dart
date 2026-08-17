@@ -37,7 +37,6 @@ const List<String> kImportColumns = [
   'state',
   'hostel',
   'room',
-  'officeRoom',
   'dateOfBirth',
   'bloodGroup',
   'address',
@@ -83,7 +82,6 @@ String templateWithExample() => '${kImportColumns.join(',')}\n'
       'Punjab', // state
       'BH-01', // hostel
       '101', // room
-      '', // officeRoom
       '14/03/2004', // dateOfBirth
       'O+', // bloodGroup
       '"Ludhiana, Punjab"', // address
@@ -207,9 +205,6 @@ String _normaliseHeader(String raw) {
     'semester': 'sem',
     'homestate': 'state',
     'domicile': 'state',
-    'office': 'officeRoom',
-    'officeroom': 'officeRoom',
-    'staffroom': 'officeRoom',
     'hostelnumber': 'hostel',
     'hostelname': 'hostel',
     'block': 'hostel',
@@ -288,11 +283,20 @@ class ImportRow {
 
 class ImportPlan {
   final List<ImportRow> rows;
+
+  /// The sheet's own columns, in the order they appeared, after aliasing.
+  ///
+  /// Kept so the preview can lay the file out the way the user wrote it —
+  /// including the columns the import ignores, which is usually how someone
+  /// discovers a header this app never understood.
+  final List<String> headers;
+
   final List<String> unknownColumns;
   final List<String> missingColumns;
 
   const ImportPlan({
     required this.rows,
+    this.headers = const [],
     this.unknownColumns = const [],
     this.missingColumns = const [],
   });
@@ -301,6 +305,9 @@ class ImportPlan {
   int get updates => rows.where((r) => r.action == RowAction.update).length;
   int get skips => rows.where((r) => r.action == RowAction.skip).length;
   int get allotments => rows.where((r) => r.isValid && r.wantsAllotment).length;
+  int get hostelOnlyAllotments => rows
+      .where((r) => r.isValid && r.hostel != null && r.roomNumber == null)
+      .length;
   bool get canRun => creates + updates > 0 && missingColumns.isEmpty;
 }
 
@@ -331,6 +338,7 @@ ImportPlan analyseImport({
   if (missing.isNotEmpty) {
     return ImportPlan(
       rows: [],
+      headers: table.headers,
       unknownColumns: unknown,
       missingColumns: missing,
     );
@@ -469,7 +477,10 @@ ImportPlan analyseImport({
       if (hostel == null) {
         warnings.add('No hostel called "$hostelName" — allotment skipped');
       } else if (roomNo == null) {
-        warnings.add('Hostel given without a room — allotment skipped');
+        warnings.add(
+          'Hostel given without a room — will be assigned to the hostel, '
+          'no bed yet',
+        );
       } else {
         room = roomNo;
       }
@@ -498,6 +509,7 @@ ImportPlan analyseImport({
 
   return ImportPlan(
     rows: result,
+    headers: table.headers,
     unknownColumns: unknown,
     missingColumns: missing,
   );
@@ -519,6 +531,10 @@ class ImportOutcome {
   final int created;
   final int updated;
   final int allotted;
+
+  /// Assigned to a hostel with no specific room — see
+  /// [AllotmentService.assignHostelOnly].
+  final int hostelOnly;
   final List<String> failures;
   final List<String> allotmentIssues;
 
@@ -532,6 +548,7 @@ class ImportOutcome {
     this.created,
     this.updated,
     this.allotted,
+    this.hostelOnly,
     this.failures,
     this.allotmentIssues, {
     this.stoppedEarly = false,
@@ -566,16 +583,111 @@ bool _isThrottle(Object e) {
       text.contains('quota');
 }
 
-/// Runs the plan. Account creation is sequential because Firebase throttles it
-/// from a browser. A failure on one row is recorded and the run continues — an
-/// import that aborts halfway leaves you worse off than one that tells you
-/// which six rows need attention.
+/// How many profile updates to run at once.
 ///
-/// [isCancelled] is polled between rows, never mid-row — a "Stop" click takes
-/// effect after whichever student is currently being written finishes, not
-/// before. Re-running the same file afterwards is safe and picks up where it
-/// left off, same as recovering from a failure: rows already created are
-/// matched by email and updated, not duplicated.
+/// These are plain Firestore writes — no Auth involved, and nothing Firebase
+/// rate limits at this scale. The phase is purely round-trip bound, so this
+/// is the one number here that can be raised without thinking hard about it.
+const int kUpdateConcurrency = 10;
+
+/// How many accounts to create at once, *before* Firebase objects.
+///
+/// Deliberately much lower than the Node importer's 10. That script holds a
+/// service-account key and talks to the Admin endpoint; this runs in a
+/// browser and must go through the public sign-up door, which is quota'd per
+/// project. Four is a bet that the quota is above one-at-a-time — and
+/// [runImport] gives the bet back the moment Firebase says no, by collapsing
+/// to a single lane for the rest of the run.
+const int kCreateConcurrency = 4;
+
+/// What one pooled task learned about whether the pool should stay wide.
+enum LaneVerdict {
+  /// Nothing pushed back; the pool may keep every lane it has.
+  ok,
+
+  /// The remote end is rate limiting. The pool drops to a single lane and
+  /// stays there — see [runPooled].
+  narrow,
+}
+
+/// Runs [task] over [items] on up to [lanes] concurrent workers, narrowing to
+/// one worker for good the first time a task reports [LaneVerdict.narrow].
+///
+/// Lives apart from [runImport] because this — not the Firestore plumbing —
+/// is the part with the interesting failure modes, and out here it can be
+/// tested against a fake task instead of a live Firebase project.
+///
+/// Narrowing is **one-way on purpose.** A pool that widened again after a
+/// quiet spell would rediscover the limit over and over, and the limit being
+/// probed here is a project-wide Firebase Auth block that affects real
+/// sign-ins, not a per-request retry. Once it answers, believe it.
+///
+/// Lanes are pulled from a shared cursor rather than given a slice each, so
+/// one slow item can't leave a lane idle while another still has a queue.
+/// `next++` needs no lock: Dart only switches tasks at an `await`, and there
+/// isn't one between the read and the write.
+Future<void> runPooled<T>({
+  required List<T> items,
+  required int lanes,
+  required Future<LaneVerdict> Function(T item, int lane) task,
+  bool Function()? isCancelled,
+  void Function()? onStopped,
+}) async {
+  if (items.isEmpty || lanes <= 0) return;
+
+  var next = 0;
+  var narrowed = false;
+
+  Future<void> worker(int id) async {
+    while (true) {
+      if (isCancelled?.call() ?? false) {
+        onStopped?.call();
+        return;
+      }
+      // Every lane but the first stands down once the far end has pushed
+      // back, leaving exactly the one-at-a-time behaviour known to work.
+      // Checked before claiming an item, so nothing is stranded.
+      if (narrowed && id != 0) return;
+
+      final i = next++;
+      if (i >= items.length) return;
+
+      if (await task(items[i], id) == LaneVerdict.narrow) narrowed = true;
+    }
+  }
+
+  await Future.wait([for (var id = 0; id < lanes; id++) worker(id)]);
+}
+
+/// Runs the plan, in three phases rather than one row-at-a-time pass.
+///
+/// The pass this replaced was sequential end to end, which meant a 200-student
+/// import paid full network latency 600+ times over. Splitting it works
+/// because the three kinds of work have nothing in common but the row they
+/// came from:
+///
+///  * **Updates** touch Firestore only. Nothing throttles them, so they run
+///    in parallel waves of [kUpdateConcurrency].
+///  * **Creates** go through the public sign-up endpoint, which Firebase
+///    quotas per project. They run on [kCreateConcurrency] lanes that
+///    **collapse to one** the first time a throttle is seen, so a generous
+///    quota gets used and a tight one gets today's behaviour instead of a
+///    project-wide block.
+///  * **Allotment stays strictly sequential.** Two rows can name the same
+///    room, and the shared room cache is what stops the phase re-reading a
+///    hostel per student. The transaction would keep it correct either way;
+///    running it in parallel would just trade correctness-by-design for
+///    correctness-by-retry.
+///
+/// A failure on one row is recorded and the run continues — an import that
+/// aborts halfway leaves you worse off than one that tells you which six rows
+/// need attention.
+///
+/// [isCancelled] is polled between rows, never mid-write — a "Stop" click
+/// takes effect once the rows already in flight finish, and never leaves one
+/// half-imported. Re-running the same file afterwards is safe and picks up
+/// where it left off, same as recovering from a failure: rows already created
+/// are matched by email and updated, not duplicated.
 Future<ImportOutcome> runImport({
   required ImportPlan plan,
   required String collegeId,
@@ -585,45 +697,122 @@ Future<ImportOutcome> runImport({
   final work = plan.rows.where((r) => r.isValid).toList();
   final failures = <String>[];
   final allotIssues = <String>[];
-  var created = 0, updated = 0, allotted = 0, done = 0;
+  var created = 0, updated = 0, allotted = 0, hostelOnly = 0, done = 0;
   var stoppedEarly = false;
 
   // Cache rooms per hostel so a 30-row import doesn't re-read the same
   // collection 30 times.
   final roomCache = <String, List<Room>>{};
 
-  // ONE provisioning app for the whole run. Creating a FirebaseApp per row
-  // was costing more than every other operation combined.
-  final needsAccounts = work.any((r) => r.action == RowAction.create);
-  FirebaseApp? provisioning;
+  final creates = work.where((r) => r.action == RowAction.create).toList();
+  final updates = work.where((r) => r.action != RowAction.create).toList();
+  final allotWork = work
+      .where((r) => r.wantsAllotment || (r.hostel != null && r.roomNumber == null))
+      .toList();
 
+  // Progress is counted in units of work, not rows: a student who also needs
+  // a room is two. Without this the bar would sit at 100% for the whole
+  // allotment phase.
+  final totalUnits = work.length + allotWork.length;
+
+  // Who each row ended up being, so the allotment phase doesn't have to
+  // re-query for a uid the account phase was already handed.
+  final resolved = <ImportRow, AppUser>{};
+
+  bool cancelled() => isCancelled?.call() ?? false;
+
+  void step(String label) {
+    done++;
+    onProgress(done, totalUnits, label);
+  }
+
+  void recordFailure(ImportRow row, Object e) {
+    failures.add(
+      e is TimeoutException
+          ? 'Row ${row.lineNumber} (${row.loginLabel}): timed out after '
+                '${kRowTimeout.inSeconds}s. Re-running the import is safe.'
+          : 'Row ${row.lineNumber} (${row.loginLabel}): '
+                '${AuthService.describeError(e)}',
+    );
+  }
+
+  // ---- phase 1: updates, in parallel waves -------------------------------
+
+  for (var i = 0; i < updates.length; i += kUpdateConcurrency) {
+    if (cancelled()) {
+      stoppedEarly = true;
+      break;
+    }
+    final slice = updates.sublist(
+      i,
+      (i + kUpdateConcurrency).clamp(0, updates.length),
+    );
+    onProgress(done, totalUnits, slice.first.name);
+
+    await Future.wait(
+      slice.map((row) async {
+        try {
+          await DataService.instance
+              .updateUser(row.existing!.uid, {
+                'name': row.values['name']!,
+                if (row.values['phone'] != null) 'phone': row.values['phone'],
+                if (row.values['gender'] != null)
+                  'gender': row.values['gender'],
+                if (row.registrationNo.isNotEmpty)
+                  'enrollmentNo': row.registrationNo,
+                ..._detailFields(row),
+              })
+              .timeout(kRowTimeout);
+          resolved[row] = row.existing!;
+          updated++;
+        } catch (e) {
+          recordFailure(row, e);
+        }
+      }),
+    );
+
+    // Counted after the wave commits, so `done` never runs ahead of the work.
+    for (final row in slice) {
+      step(row.name);
+    }
+  }
+
+  // ---- phase 2: account creation, on a self-limiting pool ----------------
+
+  final lanes = creates.isEmpty
+      ? 0
+      : (cancelled() ? 0 : kCreateConcurrency);
+
+  // One provisioning app PER LANE. Sharing a single FirebaseApp across
+  // concurrent creates would have them fighting over one Auth session and its
+  // persistence; a separate instance per lane keeps them from touching at
+  // all. Still created once per run, never per row — that was the original
+  // cost that dwarfed everything else.
+  final apps = <FirebaseApp>[];
   try {
-    if (needsAccounts) {
-      provisioning = await AuthService.instance.openProvisioningApp();
+    for (var i = 0; i < lanes; i++) {
+      apps.add(await AuthService.instance.openProvisioningApp());
     }
 
-    for (final row in work) {
-      // Checked between rows only — never mid-write. Stopping never leaves a
-      // row half-imported, only the ones after it un-attempted.
-      if (isCancelled?.call() ?? false) {
-        stoppedEarly = true;
-        break;
-      }
+    await runPooled<ImportRow>(
+      items: creates,
+      lanes: lanes,
+      isCancelled: cancelled,
+      onStopped: () => stoppedEarly = true,
+      task: (row, id) async {
+        // Report before the work, so the label moves the moment a row starts
+        // rather than only once it finishes.
+        onProgress(done, totalUnits, row.name);
 
-      // Report before the work, so the label moves the moment a row starts
-      // rather than only once it finishes.
-      onProgress(done, work.length, row.name);
-
-      AppUser? person;
-      try {
-        if (row.action == RowAction.create) {
+        var throttled = false;
+        try {
           // Detail fields ride along in the same document write — no second
           // round trip, and no re-query to find the uid we were just handed.
-          // Retried on throttling only: a duplicate email or a bad password is
-          // not going to fix itself by waiting.
+          // Retried on throttling only: a duplicate email or a bad password
+          // is not going to fix itself by waiting.
           for (var attempt = 0; ; attempt++) {
             try {
-              person = await AuthService.instance
+              resolved[row] = await AuthService.instance
                   .createSubUser(
                     name: row.values['name']!,
                     email: row.authEmail,
@@ -641,18 +830,19 @@ Future<ImportOutcome> runImport({
                         ? null
                         : row.registrationNo,
                     extra: _detailFields(row),
-                    app: provisioning,
+                    app: apps[id],
                   )
                   .timeout(kRowTimeout);
               break;
             } catch (e) {
-              if (attempt >= kThrottleBackoff.length || !_isThrottle(e)) {
-                rethrow;
-              }
+              if (!_isThrottle(e)) rethrow;
+              // The signal this whole phase is built around: stop widening.
+              throttled = true;
+              if (attempt >= kThrottleBackoff.length) rethrow;
               final wait = kThrottleBackoff[attempt];
               onProgress(
                 done,
-                work.length,
+                totalUnits,
                 'Firebase is throttling — waiting ${wait.inSeconds}s, then '
                 'retrying ${row.name}',
               );
@@ -660,105 +850,111 @@ Future<ImportOutcome> runImport({
             }
           }
           created++;
-        } else {
-          await DataService.instance
-              .updateUser(row.existing!.uid, {
-                'name': row.values['name']!,
-                if (row.values['phone'] != null) 'phone': row.values['phone'],
-                if (row.values['gender'] != null)
-                  'gender': row.values['gender'],
-                if (row.registrationNo.isNotEmpty)
-                  'enrollmentNo': row.registrationNo,
-                ..._detailFields(row),
-              })
-              .timeout(kRowTimeout);
-          person = row.existing;
-          updated++;
-        }
-      } on TimeoutException {
-        failures.add(
-          'Row ${row.lineNumber} (${row.loginLabel}): timed out after '
-          '${kRowTimeout.inSeconds}s. Re-running the import is safe.',
-        );
-        done++;
-        onProgress(done, work.length, row.name);
-        continue;
-      } catch (e) {
-        failures.add(
-          'Row ${row.lineNumber} (${row.loginLabel}): '
-          '${AuthService.describeError(e)}',
-        );
-        done++;
-        onProgress(done, work.length, row.name);
-        continue;
-      }
-
-      // --- allotment, best-effort: a room problem must not undo the account ---
-      if (row.wantsAllotment && person != null) {
-        try {
-          final h = row.hostel!;
-          final rooms = roomCache[h.id] ??= await HostelService.instance
-              .roomsOnce(collegeId, h.id)
-              .timeout(kAllotTimeout);
-          Room? target;
-          var targetIndex = -1;
-          for (var i = 0; i < rooms.length; i++) {
-            if (rooms[i].number == row.roomNumber) {
-              target = rooms[i];
-              targetIndex = i;
-              break;
-            }
-          }
-          if (target == null) {
-            allotIssues.add(
-              'Row ${row.lineNumber}: ${h.name} has no room ${row.roomNumber}',
-            );
-          } else if (person.isAllotted) {
-            allotIssues.add(
-              'Row ${row.lineNumber}: ${person.name} already has '
-              '${person.roomLabel}',
-            );
-          } else {
-            await AllotmentService.instance
-                .allot(
-                  collegeId: collegeId,
-                  student: person,
-                  hostel: h,
-                  room: target,
-                )
-                .timeout(kAllotTimeout);
-            allotted++;
-            // Patch the cached room rather than dropping the whole hostel's
-            // room list and re-reading it on the next student.
-            rooms[targetIndex] = target.copyWith(
-              occupantUids: [...target.occupantUids, person.uid],
-            );
-          }
         } catch (e) {
+          recordFailure(row, e);
+        }
+        step(row.name);
+        return throttled ? LaneVerdict.narrow : LaneVerdict.ok;
+      },
+    );
+  } finally {
+    for (final app in apps) {
+      await AuthService.instance.closeProvisioningApp(app);
+    }
+  }
+
+  // ---- phase 3: rooms, strictly sequential -------------------------------
+
+  for (final row in allotWork) {
+    if (cancelled()) {
+      stoppedEarly = true;
+      break;
+    }
+    // Absent means the account stage failed for this row — it has already
+    // been reported, and there is nobody to put in a bed.
+    final person = resolved[row];
+    if (person == null) continue;
+
+    onProgress(done, totalUnits, row.name);
+
+    // --- allotment, best-effort: a room problem must not undo the account ---
+    if (row.wantsAllotment) {
+      try {
+        final h = row.hostel!;
+        final rooms = roomCache[h.id] ??= await HostelService.instance
+            .roomsOnce(collegeId, h.id)
+            .timeout(kAllotTimeout);
+        Room? target;
+        var targetIndex = -1;
+        for (var i = 0; i < rooms.length; i++) {
+          if (rooms[i].number == row.roomNumber) {
+            target = rooms[i];
+            targetIndex = i;
+            break;
+          }
+        }
+        if (target == null) {
           allotIssues.add(
-            'Row ${row.lineNumber}: '
-            '${e is AllotmentFailure ? e.message : AuthService.describeError(e)}',
+            'Row ${row.lineNumber}: ${h.name} has no room ${row.roomNumber}',
+          );
+        } else if (person.isAllotted) {
+          allotIssues.add(
+            'Row ${row.lineNumber}: ${person.name} already has '
+            '${person.roomLabel}',
+          );
+        } else {
+          await AllotmentService.instance
+              .allot(
+                collegeId: collegeId,
+                student: person,
+                hostel: h,
+                room: target,
+              )
+              .timeout(kAllotTimeout);
+          allotted++;
+          // Patch the cached room rather than dropping the whole hostel's
+          // room list and re-reading it on the next student.
+          rooms[targetIndex] = target.copyWith(
+            occupantUids: [...target.occupantUids, person.uid],
           );
         }
+      } catch (e) {
+        allotIssues.add(
+          'Row ${row.lineNumber}: '
+          '${e is AllotmentFailure ? e.message : AuthService.describeError(e)}',
+        );
       }
+    } else if (row.hostel != null && row.roomNumber == null) {
+      // Hostel named but no room — record membership without a bed.
+      try {
+        await AllotmentService.instance
+            .assignHostelOnly(
+              collegeId: collegeId,
+              student: person,
+              hostel: row.hostel!,
+            )
+            .timeout(kAllotTimeout);
+        hostelOnly++;
+      } catch (e) {
+        allotIssues.add(
+          'Row ${row.lineNumber}: '
+          '${e is AllotmentFailure ? e.message : AuthService.describeError(e)}',
+        );
+      }
+    }
 
-      done++;
-      onProgress(done, work.length, row.name);
-    }
-  } finally {
-    if (provisioning != null) {
-      await AuthService.instance.closeProvisioningApp(provisioning);
-    }
+    step(row.name);
   }
 
   return ImportOutcome(
     created,
     updated,
     allotted,
+    hostelOnly,
     failures,
     allotIssues,
     stoppedEarly: stoppedEarly,
-    remaining: work.length - done,
+    remaining: totalUnits - done,
   );
 }
 
@@ -768,7 +964,6 @@ Map<String, dynamic> _detailFields(ImportRow row) {
     'year',
     'trade',
     'batch',
-    'officeRoom',
     'dateOfBirth',
     'bloodGroup',
     'address',

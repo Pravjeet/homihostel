@@ -27,6 +27,7 @@
     "indexes": "firestore.indexes.json"
   },
   "hosting": {
+    "site": "homihostel",
     "public": "build/web",
     "ignore": [
       "firebase.json",
