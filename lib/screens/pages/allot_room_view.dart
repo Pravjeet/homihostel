@@ -3,10 +3,13 @@ import 'package:flutter/material.dart';
 import '../../core/session.dart';
 import '../../core/theme.dart';
 import '../../models/app_user.dart';
+import '../../models/enrollment.dart';
 import '../../models/hostel.dart';
 import '../../services/allotment_service.dart';
 import '../../services/auth_service.dart';
+import '../../services/enrollment_service.dart';
 import '../../services/hostel_service.dart';
+import '../../utils/enrollment_helpers.dart';
 
 /// Pick a hostel, then a free room, for one student.
 ///
@@ -47,6 +50,29 @@ class _AllotRoomViewState extends State<AllotRoomView> {
   bool _onlyEmpty = false;
   bool _busy = false;
   String? _error;
+
+  /// Whether the room list is narrowed to the entitlement below. Default on —
+  /// per the seating policy, a mismatched type should be the exception a
+  /// warden has to deliberately reach for, not the default view — but it's a
+  /// toggle, not a hard block: real hostels run out of the right type
+  /// sometimes, and staff need an escape hatch rather than a dead end.
+  bool _matchOnly = true;
+
+  /// Fetched once — the current session's enrollment doesn't change while
+  /// this screen is open, and a Future (not a Stream) keeps a slow read from
+  /// blocking the hostel picker above it from rendering.
+  late final Future<Enrollment?> _enrollmentFuture = _loadEnrollment();
+
+  Future<Enrollment?> _loadEnrollment() {
+    final session = Session.of(context);
+    final currentSession = session.settings.session.current;
+    if (currentSession == null) return Future.value(null);
+    return EnrollmentService.instance.get(
+      widget.student.collegeId,
+      widget.student.uid,
+      currentSession,
+    );
+  }
 
   Future<void> _confirm() async {
     if (_hostel == null || _room == null) return;
@@ -173,6 +199,56 @@ class _AllotRoomViewState extends State<AllotRoomView> {
               ),
               const SizedBox(height: 14),
               _StudentStrip(student: student),
+              FutureBuilder<Enrollment?>(
+                future: _enrollmentFuture,
+                builder: (context, snap) {
+                  final capacity = snap.data?.requiredCapacity;
+                  if (capacity == null) return const SizedBox.shrink();
+                  return Padding(
+                    padding: const EdgeInsets.only(top: 12),
+                    child: Container(
+                      width: double.infinity,
+                      padding: const EdgeInsets.all(12),
+                      decoration: BoxDecoration(
+                        color: AppColors.primarySoft,
+                        borderRadius: BorderRadius.circular(10),
+                      ),
+                      child: Row(
+                        children: [
+                          Icon(
+                            Icons.stars_rounded,
+                            size: 17,
+                            color: AppColors.primary,
+                          ),
+                          const SizedBox(width: 8),
+                          Expanded(
+                            child: Text(
+                              'Entitled to a ${roomTypeLabel(capacity)} room '
+                              'this year, per the seating policy.',
+                              style: TextStyle(
+                                fontSize: 12.5,
+                                fontWeight: FontWeight.w600,
+                                color: AppColors.primary,
+                              ),
+                            ),
+                          ),
+                          Text(
+                            'Match only',
+                            style: TextStyle(
+                              fontSize: 11.5,
+                              color: AppColors.primary,
+                            ),
+                          ),
+                          Switch(
+                            value: _matchOnly,
+                            onChanged: (v) => setState(() => _matchOnly = v),
+                          ),
+                        ],
+                      ),
+                    ),
+                  );
+                },
+              ),
               if (_error != null) ...[
                 const SizedBox(height: 14),
                 Container(
@@ -297,13 +373,19 @@ class _AllotRoomViewState extends State<AllotRoomView> {
                     ),
                   )
                 else
-                  _RoomPicker(
-                    collegeId: collegeId,
-                    hostel: _hostel!,
-                    selected: _room,
-                    onlyEmpty: _onlyEmpty,
-                    onToggleOnlyEmpty: (v) => setState(() => _onlyEmpty = v),
-                    onPick: (r) => setState(() => _room = r),
+                  FutureBuilder<Enrollment?>(
+                    future: _enrollmentFuture,
+                    builder: (context, snap) => _RoomPicker(
+                      collegeId: collegeId,
+                      hostel: _hostel!,
+                      selected: _room,
+                      onlyEmpty: _onlyEmpty,
+                      onToggleOnlyEmpty: (v) => setState(() => _onlyEmpty = v),
+                      onPick: (r) => setState(() => _room = r),
+                      requiredCapacity: _matchOnly
+                          ? snap.data?.requiredCapacity
+                          : null,
+                    ),
                   ),
               ],
             );
@@ -371,6 +453,12 @@ class _RoomPicker extends StatelessWidget {
   final ValueChanged<bool> onToggleOnlyEmpty;
   final ValueChanged<Room> onPick;
 
+  /// When set, only rooms of this capacity are shown — the seating-policy
+  /// entitlement, applied as a filter rather than hiding the picker
+  /// entirely. Null means no policy applies, or the "Match only" switch
+  /// above has been turned off — every available room is shown either way.
+  final int? requiredCapacity;
+
   const _RoomPicker({
     required this.collegeId,
     required this.hostel,
@@ -378,6 +466,7 @@ class _RoomPicker extends StatelessWidget {
     required this.onlyEmpty,
     required this.onToggleOnlyEmpty,
     required this.onPick,
+    this.requiredCapacity,
   });
 
   @override
@@ -395,6 +484,9 @@ class _RoomPicker extends StatelessWidget {
         // Only rooms that can actually take someone.
         var rooms = snap.data!.where((r) => r.isAvailable).toList();
         if (onlyEmpty) rooms = rooms.where((r) => r.occupied == 0).toList();
+        if (requiredCapacity != null) {
+          rooms = rooms.where((r) => r.capacity == requiredCapacity).toList();
+        }
 
         final byFloor = <int, List<Room>>{};
         for (final r in rooms) {
@@ -423,8 +515,13 @@ class _RoomPicker extends StatelessWidget {
                   padding: EdgeInsets.symmetric(vertical: 40),
                   child: Center(
                     child: Text(
-                      'No free rooms match. Try another hostel, or turn off '
-                      '"empty rooms only".',
+                      requiredCapacity != null
+                          ? 'No free ${roomTypeLabel(requiredCapacity!)} '
+                                'rooms here. Try another hostel, turn off '
+                                '"Match only" above, or turn off "empty '
+                                'rooms only".'
+                          : 'No free rooms match. Try another hostel, or '
+                                'turn off "empty rooms only".',
                       textAlign: TextAlign.center,
                       style: TextStyle(color: AppColors.textMuted),
                     ),
@@ -460,9 +557,7 @@ class _RoomPicker extends StatelessWidget {
                                 horizontal: 8,
                               ),
                               decoration: BoxDecoration(
-                                color: isSel
-                                    ? AppColors.primary
-                                    : Colors.white,
+                                color: isSel ? AppColors.primary : Colors.white,
                                 borderRadius: BorderRadius.circular(10),
                                 border: Border.all(
                                   color: isSel

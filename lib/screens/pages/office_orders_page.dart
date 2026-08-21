@@ -11,8 +11,8 @@ import '../../services/auth_service.dart';
 import '../../services/office_order_service.dart';
 
 /// Office orders: the register of disciplinary orders issued against
-/// residents. Every order here exists because a fine was imposed under it —
-/// see `ImposeFineView`, which is the only place one is created.
+/// residents. An order names one or more students, and may or may not carry a
+/// fine — see `ImposeFineView`, which is the only place one is created.
 ///
 /// Everyone with `officeOrders.view` can search and open them; staff with
 /// `officeOrders.manage` can delete their own. Two searches are offered
@@ -138,10 +138,10 @@ class _OfficeOrdersPageState extends State<OfficeOrdersPage> {
               const SectionHeader('Office Orders'),
               const SizedBox(height: 4),
               Text(
-                'Disciplinary orders issued against residents, one per fine. '
-                'Search by order number, student, or the date printed on the '
-                'order. To add one, impose a fine — every fine is issued '
-                'under an order.',
+                'Disciplinary orders issued against residents. One order can '
+                'cover several students — a single incident is one order, not '
+                'one each. Search by order number, student, or the date '
+                'printed on the order.',
                 style: TextStyle(fontSize: 13, color: AppColors.textMuted),
               ),
               const SizedBox(height: 16),
@@ -162,9 +162,7 @@ class _OfficeOrdersPageState extends State<OfficeOrdersPage> {
                     onPressed: _pickDate,
                     icon: const Icon(Icons.calendar_today_rounded, size: 16),
                     label: Text(
-                      _onDate == null
-                          ? 'Any date'
-                          : _labelFor(_onDate!),
+                      _onDate == null ? 'Any date' : _labelFor(_onDate!),
                     ),
                     style: OutlinedButton.styleFrom(
                       padding: const EdgeInsets.symmetric(
@@ -255,8 +253,18 @@ class _OfficeOrdersPageState extends State<OfficeOrdersPage> {
 
 String _labelFor(DateTime d) {
   const months = [
-    'Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun',
-    'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec',
+    'Jan',
+    'Feb',
+    'Mar',
+    'Apr',
+    'May',
+    'Jun',
+    'Jul',
+    'Aug',
+    'Sep',
+    'Oct',
+    'Nov',
+    'Dec',
   ];
   return '${d.day} ${months[d.month - 1]} ${d.year}';
 }
@@ -331,7 +339,11 @@ class OfficeOrderViewer extends StatelessWidget {
   final OfficeOrder order;
   final Uint8List bytes;
 
-  const OfficeOrderViewer({super.key, required this.order, required this.bytes});
+  const OfficeOrderViewer({
+    super.key,
+    required this.order,
+    required this.bytes,
+  });
 
   @override
   Widget build(BuildContext context) {
@@ -379,6 +391,44 @@ class OfficeOrderViewer extends StatelessWidget {
                           color: AppColors.textMuted,
                         ),
                       ),
+                      // Every student named on the order, spelled out. The
+                      // register row only has space for "and 4 others", so
+                      // this is the one place you can see who they were.
+                      if (order.students.isNotEmpty) ...[
+                        const SizedBox(height: 6),
+                        Text(
+                          order.students
+                              .map(
+                                (s) =>
+                                    '${s.name}'
+                                    '${(s.regNo ?? '').isEmpty ? '' : ' (${s.regNo})'}'
+                                    // Spelled out per student, because on this
+                                    // order they did not all pay the same.
+                                    '${s.isFined ? ' — ₹${s.fineAmount}' : ' — no fine'}',
+                              )
+                              .join(',   '),
+                          style: TextStyle(
+                            fontSize: 12.5,
+                            height: 1.45,
+                            fontWeight: FontWeight.w600,
+                            color: AppColors.primary,
+                          ),
+                        ),
+                        if (order.hasFine)
+                          Text(
+                            order.isGroup
+                                ? '₹${order.fineTotal} across '
+                                      '${order.finedStudents.length} of '
+                                      '${order.students.length} students · '
+                                      '${order.fineCategory ?? ''}'
+                                : '₹${order.fineTotal} · '
+                                      '${order.fineCategory ?? ''}',
+                            style: TextStyle(
+                              fontSize: 12.5,
+                              color: AppColors.textMuted,
+                            ),
+                          ),
+                      ],
                     ],
                   ),
                 ),
@@ -460,14 +510,23 @@ class _OrderRow extends StatelessWidget {
                       color: AppColors.textMuted,
                     ),
                   ),
-                  if (order.studentName != null) ...[
+                  if (order.students.isNotEmpty) ...[
                     const SizedBox(height: 3),
                     Text(
                       [
-                        'For ${order.studentName}',
-                        if (order.studentRegNo != null) order.studentRegNo!,
-                        if (order.fineAmount != null)
-                          '₹${order.fineAmount} · ${order.fineCategory ?? ''}',
+                        'For ${order.studentLabel}',
+                        // Only worth showing for a single student; on a group
+                        // order the registration numbers don't fit and the
+                        // expanded view lists them properly.
+                        if (order.students.length == 1 &&
+                            (order.students.first.regNo ?? '').isNotEmpty)
+                          order.students.first.regNo!,
+                        // Amounts differ per student, so the range is what
+                        // means something — a single figure would imply
+                        // everyone paid the same.
+                        if (order.hasFine)
+                          '${order.fineRangeLabel} · '
+                              '${order.fineCategory ?? ''}',
                       ].join(' · '),
                       overflow: TextOverflow.ellipsis,
                       style: TextStyle(

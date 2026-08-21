@@ -163,9 +163,7 @@ class _AuditPageState extends State<AuditPage> {
                             ),
                             style: OutlinedButton.styleFrom(
                               side: BorderSide(
-                                color: AppColors.danger.withValues(
-                                  alpha: 0.4,
-                                ),
+                                color: AppColors.danger.withValues(alpha: 0.4),
                               ),
                               padding: const EdgeInsets.symmetric(
                                 horizontal: 12,
@@ -185,10 +183,7 @@ class _AuditPageState extends State<AuditPage> {
                   Text(
                     'Recent changes across the workspace. Anything still '
                     'within 24 hours can be undone.',
-                    style: TextStyle(
-                      fontSize: 13,
-                      color: AppColors.textMuted,
-                    ),
+                    style: TextStyle(fontSize: 13, color: AppColors.textMuted),
                   ),
                   const SizedBox(height: 16),
                   Row(
@@ -366,8 +361,18 @@ class _Grouped extends StatelessWidget {
     if (diff == 0) return 'Today';
     if (diff == 1) return 'Yesterday';
     const months = [
-      'Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun',
-      'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec',
+      'Jan',
+      'Feb',
+      'Mar',
+      'Apr',
+      'May',
+      'Jun',
+      'Jul',
+      'Aug',
+      'Sep',
+      'Oct',
+      'Nov',
+      'Dec',
     ];
     return '${t.day} ${months[t.month - 1]} ${t.year}';
   }
@@ -512,10 +517,7 @@ class _EntryRowState extends State<_EntryRow> {
                     if (e.undone && e.undoneByName != null)
                       'undone by ${e.undoneByName}',
                   ].join(' · '),
-                  style: TextStyle(
-                    fontSize: 11.5,
-                    color: AppColors.textMuted,
-                  ),
+                  style: TextStyle(fontSize: 11.5, color: AppColors.textMuted),
                 ),
               ],
             ),

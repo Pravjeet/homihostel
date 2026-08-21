@@ -2,6 +2,7 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_core/firebase_core.dart';
 
 import '../core/identity.dart';
+import '../core/permissions.dart';
 import '../models/app_role.dart';
 import '../models/app_user.dart';
 import 'allotment_service.dart';
@@ -28,9 +29,12 @@ class DataService {
 
   Stream<List<AppRole>> watchRoles(String collegeId) => _rolePool.stream(
     collegeId,
-    () => _roles(collegeId).orderBy('name').snapshots().map(
-      (s) => s.docs.map((d) => AppRole.fromMap(d.id, d.data())).toList(),
-    ),
+    () => _roles(collegeId)
+        .orderBy('name')
+        .snapshots()
+        .map(
+          (s) => s.docs.map((d) => AppRole.fromMap(d.id, d.data())).toList(),
+        ),
   );
 
   Future<void> createRole({
@@ -56,7 +60,9 @@ class DataService {
   }
 
   Future<void> updateRole(String collegeId, AppRole role) async {
-    if (role.isSystem) throw Exception('The Super Admin role cannot be edited.');
+    if (role.isSystem) {
+      throw Exception('The Super Admin role cannot be edited.');
+    }
     await _roles(collegeId).doc(role.id).update({
       ...role.toMap(),
       'updatedAt': FieldValue.serverTimestamp(),
@@ -107,6 +113,93 @@ class DataService {
             ),
         ),
   );
+
+  // ------------------------ counts, not documents ----------------------
+  //
+  // The dashboard wants seven integers. Reading the roster to derive them
+  // costs one billed read per student — 2,650 of them on this campus, every
+  // time the app is opened, which is most of a day's free quota for a screen
+  // nobody has interacted with yet.
+  //
+  // count() answers from the index instead. Firestore bills one read per 1,000
+  // index entries matched, so the same figure costs 3 reads rather than 2,650,
+  // and no document data crosses the network.
+  //
+  // The trade is that these are one-shot Futures, not streams: the dashboard
+  // shows a snapshot taken when it loaded rather than numbers that move by
+  // themselves. For a summary screen that is the right way round — and the
+  // operational screens that genuinely need live data still stream.
+
+  Query<Map<String, dynamic>> _usersIn(String collegeId) =>
+      _db.collection('users').where('collegeId', isEqualTo: collegeId);
+
+  /// How many users in [collegeId] match the optional extra filters.
+  ///
+  /// Always scoped by college, never an unscoped count: the security rules
+  /// reject a query that drops the `collegeId` filter (proved in
+  /// rules-tests), and an unscoped total would be meaningless anyway.
+  Future<int> countUsers(
+    String collegeId, {
+    String? roleId,
+    bool? isActive,
+    bool? hasNoRole,
+  }) async {
+    var q = _usersIn(collegeId);
+    if (roleId != null) q = q.where('roleId', isEqualTo: roleId);
+    if (hasNoRole == true) q = q.where('roleId', isNull: true);
+    if (isActive != null) q = q.where('isActive', isEqualTo: isActive);
+
+    final snap = await q.count().get();
+    return snap.count ?? 0;
+  }
+
+  /// Every headline figure the dashboard needs, in one pass.
+  ///
+  /// Counting per role rather than per category is what makes this cheap and
+  /// complete at once: the role documents are already streamed (six of them),
+  /// and one count each yields the total, the student/staff split *and* the
+  /// role breakdown chart. Classifying with [Perm.isResident] keeps that split
+  /// agreeing with the rest of the app rather than re-deciding it here.
+  Future<UserCounts> countUsersByRole(
+    String collegeId,
+    List<AppRole> roles,
+  ) async {
+    // Issued together; each is a separate round trip but they do not contend.
+    final perRole = await Future.wait([
+      for (final r in roles) countUsers(collegeId, roleId: r.id),
+    ]);
+
+    final byRoleName = <String, int>{};
+    var residents = 0;
+    var staff = 0;
+
+    for (var i = 0; i < roles.length; i++) {
+      final role = roles[i];
+      final n = perRole[i];
+      if (n == 0) continue;
+      byRoleName[role.name] = n;
+      if (Perm.isResident(role.permissions)) {
+        residents += n;
+      } else {
+        staff += n;
+      }
+    }
+
+    final results = await Future.wait([
+      countUsers(collegeId),
+      countUsers(collegeId, hasNoRole: true),
+      countUsers(collegeId, isActive: false),
+    ]);
+
+    return UserCounts(
+      total: results[0],
+      unassigned: results[1],
+      inactive: results[2],
+      residents: residents,
+      staff: staff,
+      byRoleName: byRoleName,
+    );
+  }
 
   Future<void> updateUser(String uid, Map<String, dynamic> changes) => _db
       .collection('users')
@@ -238,7 +331,10 @@ class DataService {
     var vacated = false;
     if (user.isAllotted) {
       try {
-        await AllotmentService.instance.vacate(collegeId: collegeId, student: user);
+        await AllotmentService.instance.vacate(
+          collegeId: collegeId,
+          student: user,
+        );
         vacated = true;
       } catch (_) {
         // Recorded by the caller through [vacated]; a stale room must not
@@ -287,7 +383,8 @@ class DataService {
         collegeId: collegeId,
         actor: actor,
         action: 'user.delete',
-        summary: 'Deleted ${user.name}'
+        summary:
+            'Deleted ${user.name}'
             '${user.enrollmentNo == null ? '' : ' (${user.enrollmentNo})'}',
         targetLabel: user.name,
         path: 'users/${user.uid}',
@@ -496,5 +593,33 @@ class BulkDeleteOutcome {
     required this.failures,
     this.stoppedEarly = false,
     this.remaining = 0,
+  });
+}
+
+/// The dashboard's headline figures, counted rather than derived from
+/// documents.
+///
+/// [residents] and [staff] are split by whether the role is a resident one, so
+/// a Mess Manager counts as staff without anyone having to enumerate staff
+/// role names here. Users with no role at all fall into neither and are
+/// reported separately as [unassigned].
+class UserCounts {
+  final int total;
+  final int unassigned;
+  final int inactive;
+  final int residents;
+  final int staff;
+
+  /// Headcount per role name, for the breakdown chart. Roles with nobody in
+  /// them are omitted rather than charted as a zero-width slice.
+  final Map<String, int> byRoleName;
+
+  const UserCounts({
+    this.total = 0,
+    this.unassigned = 0,
+    this.inactive = 0,
+    this.residents = 0,
+    this.staff = 0,
+    this.byRoleName = const {},
   });
 }

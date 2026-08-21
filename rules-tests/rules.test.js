@@ -17,6 +17,15 @@ import {
   assertFails,
   assertSucceeds,
 } from '@firebase/rules-unit-testing';
+// The aggregation tests need the modular API: the compat Firestore that
+// rules-unit-testing hands back has no `.count()`. `_delegate` is the modular
+// instance underneath it.
+import {
+  collection,
+  query,
+  where,
+  getCountFromServer,
+} from 'firebase/firestore';
 
 let testEnv;
 
@@ -243,6 +252,460 @@ describe('allotment.manage is narrower than users.edit', () => {
         roomId: '101',
         roomNumber: '101',
       }),
+    );
+  });
+});
+
+// An office order names one or more students and may or may not carry money.
+// Those two facts are gated by *different* permissions, so the rule has a
+// conditional in it — which is exactly the kind of thing that silently inverts.
+describe('office orders covering several students', () => {
+  const ORDERS = (db) =>
+    db.collection('colleges').doc(COLLEGE_A).collection('officeOrders');
+
+  /** A well-formed group order.
+   *
+   * `fineTotal` is what the rule reads: the per-student amounts live inside
+   * `students[]`, and rules cannot look inside an array. */
+  const order = (uid, extra = {}) => ({
+    orderNo: 'SLIET/HM/2026/17',
+    title: 'Hostel discipline',
+    postedByUid: uid,
+    postedByName: 'Test User',
+    students: [
+      { uid: 'student-a', name: 'A', regNo: '1', fineId: null, fineAmount: null },
+      { uid: 'student-b', name: 'B', regNo: '2', fineId: null, fineAmount: null },
+    ],
+    studentUids: ['student-a', 'student-b'],
+    ...extra,
+  });
+
+  it('fines.manage can issue a group order that fines everyone', async () => {
+    await seed(COLLEGE_A, {
+      wardenRole: ['fines.manage', 'officeOrders.manage'],
+    });
+    await seedUser(COLLEGE_A, 'warden-a', 'warden');
+
+    await assertSucceeds(
+      ORDERS(asUser('warden-a')).doc('o1').set(
+        order('warden-a', { fineTotal: 2500, fineCategory: 'Misconduct' }),
+      ),
+    );
+  });
+
+  it('officeOrders.manage alone can issue a warning with no fine', async () => {
+    // The reason the rule was relaxed: a suspension or notice of enquiry is a
+    // real order that costs nothing, and used to be impossible to record.
+    await seed(COLLEGE_A, { wardenRole: ['officeOrders.manage'] });
+    await seedUser(COLLEGE_A, 'warden-a', 'warden');
+
+    await assertSucceeds(
+      ORDERS(asUser('warden-a')).doc('o1').set(order('warden-a')),
+    );
+  });
+
+  it('officeOrders.manage alone CANNOT levy money', async () => {
+    // The hole this rule exists to close: recording a warning must not imply
+    // authority to fine people.
+    await seed(COLLEGE_A, { wardenRole: ['officeOrders.manage'] });
+    await seedUser(COLLEGE_A, 'warden-a', 'warden');
+
+    await assertFails(
+      ORDERS(asUser('warden-a')).doc('o1').set(
+        order('warden-a', { fineTotal: 2500, fineCategory: 'Misconduct' }),
+      ),
+    );
+  });
+
+  it('fines.manage alone CAN issue a bare warning', async () => {
+    // The starter Warden role has fines.manage but not officeOrders.manage.
+    // Letting them fine a student while refusing to let them record a warning
+    // would be backwards, so the rule is monotonic in that direction.
+    await seed(COLLEGE_A, { wardenRole: ['fines.manage'] });
+    await seedUser(COLLEGE_A, 'warden-a', 'warden');
+
+    await assertSucceeds(
+      ORDERS(asUser('warden-a')).doc('o1').set(order('warden-a')),
+    );
+  });
+
+  it('a warning written with an explicit null amount is still a warning', async () => {
+    // The app's toMap always includes the key, so this is the shape real
+    // warnings actually arrive in — not the absent-key case.
+    await seed(COLLEGE_A, { wardenRole: ['officeOrders.manage'] });
+    await seedUser(COLLEGE_A, 'warden-a', 'warden');
+
+    await assertSucceeds(
+      ORDERS(asUser('warden-a')).doc('o1').set(
+        order('warden-a', { fineTotal: null, fineCategory: null }),
+      ),
+    );
+  });
+
+  it('an order naming nobody is refused', async () => {
+    // It would be a document no student page could ever surface.
+    await seed(COLLEGE_A, { wardenRole: ['officeOrders.manage'] });
+    await seedUser(COLLEGE_A, 'warden-a', 'warden');
+
+    await assertFails(
+      ORDERS(asUser('warden-a')).doc('o1').set(
+        order('warden-a', { students: [], studentUids: [] }),
+      ),
+    );
+  });
+
+  it('studentUids must be a list, not a single id', async () => {
+    await seed(COLLEGE_A, { wardenRole: ['officeOrders.manage'] });
+    await seedUser(COLLEGE_A, 'warden-a', 'warden');
+
+    await assertFails(
+      ORDERS(asUser('warden-a')).doc('o1').set(
+        order('warden-a', { studentUids: 'student-a' }),
+      ),
+    );
+  });
+
+  it('the issuer cannot be spoofed', async () => {
+    await seed(COLLEGE_A, { wardenRole: ['officeOrders.manage'] });
+    await seedUser(COLLEGE_A, 'warden-a', 'warden');
+
+    await assertFails(
+      ORDERS(asUser('warden-a')).doc('o1').set(order('someone-else')),
+    );
+  });
+
+  it('a student cannot issue an order at all', async () => {
+    await seed(COLLEGE_A);
+    await seedUser(COLLEGE_A, 'student-a', 'student');
+
+    await assertFails(
+      ORDERS(asUser('student-a')).doc('o1').set(order('student-a')),
+    );
+  });
+
+  it('an order cannot be planted in another college', async () => {
+    await seed(COLLEGE_A, { wardenRole: ['officeOrders.manage'] });
+    await seed(COLLEGE_B, { wardenRole: ['officeOrders.manage'] });
+    await seedUser(COLLEGE_A, 'warden-a', 'warden');
+
+    const db = asUser('warden-a');
+    await assertFails(
+      db
+        .collection('colleges')
+        .doc(COLLEGE_B)
+        .collection('officeOrders')
+        .doc('o1')
+        .set(order('warden-a')),
+    );
+  });
+});
+
+// The dashboard replaces "download 2,650 students and count them in Dart" with
+// count() aggregations, which bill one read per 1,000 index entries instead of
+// one per document. That only works if the rules permit an aggregation — and
+// the users `list` rule constrains `resource.data`, which an aggregation never
+// produces. These tests establish what Firestore actually does, because the
+// whole optimisation rests on it.
+describe('aggregation queries on users', () => {
+  /** Modular query over users, scoped to a college unless collegeId is null. */
+  const usersQuery = (db, collegeId) => {
+    const col = collection(db._delegate, 'users');
+    return collegeId === null
+      ? query(col)
+      : query(col, where('collegeId', '==', collegeId));
+  };
+
+  it('someone with users.view can count their own college', async () => {
+    await seed(COLLEGE_A, { wardenRole: ['users.view'] });
+    await seedUser(COLLEGE_A, 'warden-a', 'warden');
+    await seedUser(COLLEGE_A, 'student-a', 'student');
+    await seedUser(COLLEGE_A, 'student-b', 'student');
+
+    const snap = await assertSucceeds(
+      getCountFromServer(usersQuery(asUser('warden-a'), COLLEGE_A)),
+    );
+    // warden + two students
+    assert.equal(snap.data().count, 3);
+  });
+
+  it('a student without users.view cannot count anybody', async () => {
+    // The count must not become a side channel for a figure the caller is not
+    // allowed to read document by document.
+    await seed(COLLEGE_A);
+    await seedUser(COLLEGE_A, 'student-a', 'student');
+
+    await assertFails(
+      getCountFromServer(usersQuery(asUser('student-a'), COLLEGE_A)),
+    );
+  });
+
+  it('users.view does not let you count another college', async () => {
+    await seed(COLLEGE_A, { wardenRole: ['users.view'] });
+    await seed(COLLEGE_B);
+    await seedUser(COLLEGE_A, 'warden-a', 'warden');
+    await seedUser(COLLEGE_B, 'student-b', 'student');
+
+    await assertFails(
+      getCountFromServer(usersQuery(asUser('warden-a'), COLLEGE_B)),
+    );
+  });
+
+  it('an unscoped count over every college is refused', async () => {
+    // Dropping the collegeId filter would otherwise reveal the size of every
+    // institution in the project.
+    await seed(COLLEGE_A, { wardenRole: ['users.view'] });
+    await seed(COLLEGE_B);
+    await seedUser(COLLEGE_A, 'warden-a', 'warden');
+    await seedUser(COLLEGE_B, 'student-b', 'student');
+
+    await assertFails(
+      getCountFromServer(usersQuery(asUser('warden-a'), null)),
+    );
+  });
+
+  it('a narrower count inside your own college is allowed', async () => {
+    // What the dashboard actually asks: how many are inactive, unallotted, etc.
+    await seed(COLLEGE_A, { wardenRole: ['users.view'] });
+    await seedUser(COLLEGE_A, 'warden-a', 'warden');
+    await seedUser(COLLEGE_A, 'student-a', 'student', { isActive: false });
+    await seedUser(COLLEGE_A, 'student-b', 'student', { isActive: true });
+
+    const col = collection(asUser('warden-a')._delegate, 'users');
+    const snap = await assertSucceeds(
+      getCountFromServer(
+        query(
+          col,
+          where('collegeId', '==', COLLEGE_A),
+          where('isActive', '==', false),
+        ),
+      ),
+    );
+    assert.equal(snap.data().count, 1);
+  });
+});
+
+// Enrollments carry a student's academic year per session, and their room
+// history. The rule mirrors office orders and fines in shape, but the field
+// it protects (year) matters more: it decides graduation and room
+// entitlement, so getting the permission split wrong here either locks staff
+// out of legitimate promotion or lets a warden edit someone's year through
+// the allotment door.
+describe('enrollments', () => {
+  const enrollmentsOf = (db, collegeId) =>
+    db.collection('colleges').doc(collegeId).collection('enrollments');
+
+  const enrollment = (uid, extra = {}) => ({
+    uid,
+    session: '2026-27',
+    collegeId: COLLEGE_A,
+    year: 2,
+    name: 'Test Student',
+    ...extra,
+  });
+
+  it('academic.manage can create an enrollment record', async () => {
+    await seed(COLLEGE_A, { wardenRole: ['academic.manage'] });
+    await seedUser(COLLEGE_A, 'warden-a', 'warden');
+
+    await assertSucceeds(
+      enrollmentsOf(asUser('warden-a'), COLLEGE_A)
+        .doc('student-a_2026-27')
+        .set(enrollment('student-a')),
+    );
+  });
+
+  it('academic.view alone cannot create one', async () => {
+    await seed(COLLEGE_A, { wardenRole: ['academic.view'] });
+    await seedUser(COLLEGE_A, 'warden-a', 'warden');
+
+    await assertFails(
+      enrollmentsOf(asUser('warden-a'), COLLEGE_A)
+        .doc('student-a_2026-27')
+        .set(enrollment('student-a')),
+    );
+  });
+
+  it('academic.view can list the session roster', async () => {
+    await seed(COLLEGE_A, { wardenRole: ['academic.view'] });
+    await seedUser(COLLEGE_A, 'warden-a', 'warden');
+    await testEnv.withSecurityRulesDisabled(async (ctx) => {
+      await ctx
+        .firestore()
+        .collection('colleges')
+        .doc(COLLEGE_A)
+        .collection('enrollments')
+        .doc('student-a_2026-27')
+        .set(enrollment('student-a'));
+    });
+
+    const snap = await assertSucceeds(
+      enrollmentsOf(asUser('warden-a'), COLLEGE_A)
+        .where('session', '==', '2026-27')
+        .get(),
+    );
+    assert.equal(snap.size, 1);
+  });
+
+  it('a student can read only their own enrollment record', async () => {
+    await seed(COLLEGE_A);
+    await seedUser(COLLEGE_A, 'student-a', 'student');
+    await seedUser(COLLEGE_A, 'student-b', 'student');
+    await testEnv.withSecurityRulesDisabled(async (ctx) => {
+      const col = ctx
+        .firestore()
+        .collection('colleges')
+        .doc(COLLEGE_A)
+        .collection('enrollments');
+      await col.doc('student-a_2026-27').set(enrollment('student-a'));
+      await col.doc('student-b_2026-27').set(enrollment('student-b'));
+    });
+
+    const db = asUser('student-a');
+    await assertSucceeds(
+      enrollmentsOf(db, COLLEGE_A).doc('student-a_2026-27').get(),
+    );
+    await assertFails(
+      enrollmentsOf(db, COLLEGE_A).doc('student-b_2026-27').get(),
+    );
+  });
+
+  it('a student without academic.view cannot list the whole roster', async () => {
+    // Rules run per candidate document on a list — the same isolation the
+    // fines list rule relies on — so a bare where('session', ==) query from a
+    // student must come back empty/denied rather than widened to just theirs.
+    await seed(COLLEGE_A);
+    await seedUser(COLLEGE_A, 'student-a', 'student');
+    await testEnv.withSecurityRulesDisabled(async (ctx) => {
+      await ctx
+        .firestore()
+        .collection('colleges')
+        .doc(COLLEGE_A)
+        .collection('enrollments')
+        .doc('student-a_2026-27')
+        .set(enrollment('student-a'));
+    });
+
+    await assertFails(
+      enrollmentsOf(asUser('student-a'), COLLEGE_A)
+        .where('session', '==', '2026-27')
+        .get(),
+    );
+  });
+
+  it('allotment.manage may update only the room fields on an enrollment', async () => {
+    await seed(COLLEGE_A, { wardenRole: ['allotment.manage'] });
+    await seedUser(COLLEGE_A, 'warden-a', 'warden');
+    await testEnv.withSecurityRulesDisabled(async (ctx) => {
+      await ctx
+        .firestore()
+        .collection('colleges')
+        .doc(COLLEGE_A)
+        .collection('enrollments')
+        .doc('student-a_2026-27')
+        .set(enrollment('student-a'));
+    });
+
+    await assertSucceeds(
+      enrollmentsOf(asUser('warden-a'), COLLEGE_A)
+        .doc('student-a_2026-27')
+        .update({ hostelId: 'h1', hostelName: 'BH-1', roomId: '101' }),
+    );
+  });
+
+  it('allotment.manage may NOT touch the year through the enrollment', async () => {
+    // The whole reason the update rule is split: filling a bed must not be
+    // the same authority as changing what year a student is in.
+    await seed(COLLEGE_A, { wardenRole: ['allotment.manage'] });
+    await seedUser(COLLEGE_A, 'warden-a', 'warden');
+    await testEnv.withSecurityRulesDisabled(async (ctx) => {
+      await ctx
+        .firestore()
+        .collection('colleges')
+        .doc(COLLEGE_A)
+        .collection('enrollments')
+        .doc('student-a_2026-27')
+        .set(enrollment('student-a'));
+    });
+
+    await assertFails(
+      enrollmentsOf(asUser('warden-a'), COLLEGE_A)
+        .doc('student-a_2026-27')
+        .update({ year: 4 }),
+    );
+  });
+
+  it('delete is refused for everyone, including academic.manage', async () => {
+    await seed(COLLEGE_A, { wardenRole: ['academic.manage'] });
+    await seedUser(COLLEGE_A, 'warden-a', 'warden');
+    await testEnv.withSecurityRulesDisabled(async (ctx) => {
+      await ctx
+        .firestore()
+        .collection('colleges')
+        .doc(COLLEGE_A)
+        .collection('enrollments')
+        .doc('student-a_2026-27')
+        .set(enrollment('student-a'));
+    });
+
+    await assertFails(
+      enrollmentsOf(asUser('warden-a'), COLLEGE_A)
+        .doc('student-a_2026-27')
+        .delete(),
+    );
+  });
+
+  it('an enrollment cannot be planted in another college', async () => {
+    await seed(COLLEGE_A, { wardenRole: ['academic.manage'] });
+    await seed(COLLEGE_B, { wardenRole: ['academic.manage'] });
+    await seedUser(COLLEGE_A, 'warden-a', 'warden');
+
+    await assertFails(
+      enrollmentsOf(asUser('warden-a'), COLLEGE_B)
+        .doc('student-a_2026-27')
+        .set(enrollment('student-a', { collegeId: COLLEGE_B })),
+    );
+  });
+});
+
+// The users/{uid} write promotion makes when a student graduates —
+// academic.manage may set `status`, and nothing else.
+describe('academic.manage graduating a student', () => {
+  it('can set status to graduated', async () => {
+    await seed(COLLEGE_A, { wardenRole: ['academic.manage'] });
+    await seedUser(COLLEGE_A, 'warden-a', 'warden');
+    await seedUser(COLLEGE_A, 'student-a', 'student');
+
+    await assertSucceeds(
+      asUser('warden-a')
+        .collection('users')
+        .doc('student-a')
+        .update({ status: 'graduated' }),
+    );
+  });
+
+  it('cannot rename or re-role a student through the same permission', async () => {
+    await seed(COLLEGE_A, { wardenRole: ['academic.manage'] });
+    await seedUser(COLLEGE_A, 'warden-a', 'warden');
+    await seedUser(COLLEGE_A, 'student-a', 'student');
+
+    await assertFails(
+      asUser('warden-a')
+        .collection('users')
+        .doc('student-a')
+        .update({ status: 'graduated', name: 'Renamed' }),
+    );
+  });
+
+  it('academic.view alone cannot graduate anyone', async () => {
+    await seed(COLLEGE_A, { wardenRole: ['academic.view'] });
+    await seedUser(COLLEGE_A, 'warden-a', 'warden');
+    await seedUser(COLLEGE_A, 'student-a', 'student');
+
+    await assertFails(
+      asUser('warden-a')
+        .collection('users')
+        .doc('student-a')
+        .update({ status: 'graduated' }),
     );
   });
 });

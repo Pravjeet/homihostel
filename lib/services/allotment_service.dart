@@ -1,6 +1,7 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
 
 import '../models/app_user.dart';
+import '../models/enrollment.dart';
 import '../models/hostel.dart';
 
 /// Moving students in and out of rooms.
@@ -34,6 +35,36 @@ class AllotmentService {
     String roomId,
   ) => _hostelRef(collegeId, hostelId).collection('rooms').doc(roomId);
 
+  DocumentReference<Map<String, dynamic>> _settingsRef(String collegeId) => _db
+      .collection('colleges')
+      .doc(collegeId)
+      .collection('settings')
+      .doc('config');
+
+  DocumentReference<Map<String, dynamic>> _enrollmentRef(
+    String collegeId,
+    String uid,
+    String session,
+  ) => _db
+      .collection('colleges')
+      .doc(collegeId)
+      .collection('enrollments')
+      .doc(Enrollment.idFor(uid, session));
+
+  /// The running session, straight off the settings doc's raw map — a full
+  /// `CollegeSettings` parse is unwanted work when only one string is needed.
+  /// Null means the workspace hasn't set one yet, in which case every
+  /// enrollment sync below is skipped entirely: allotment must keep working
+  /// exactly as it did before enrollments existed.
+  String? _currentSessionOf(
+    DocumentSnapshot<Map<String, dynamic>> settingsSnap,
+  ) {
+    final data = settingsSnap.data();
+    if (data == null) return null;
+    final session = data['session'] as Map<String, dynamic>?;
+    return session?['current'] as String?;
+  }
+
   // ------------------------------------------------------------------
   // Gender eligibility
   // ------------------------------------------------------------------
@@ -51,6 +82,46 @@ class AllotmentService {
       HostelGender.girls => g == 'female',
       HostelGender.coed => true,
     };
+  }
+
+  /// Students who could take a free bed in [hostel], best match first.
+  ///
+  /// Pure, so the rule can be tested without a widget tree or a database. The
+  /// four exclusions are each here for a reason:
+  ///
+  ///  * **inactive** — a deactivated account can't be allotted at all.
+  ///  * **Super Admin** — staff, not a resident. Same exclusion Room
+  ///    Allotment makes on its worklist.
+  ///  * **already allotted** — [allot] refuses these outright; offering them
+  ///    would be offering a click that always fails. Moving someone is a
+  ///    deliberate act with its own call ([move]).
+  ///  * **wrong gender** — a Boys/Girls hostel can't take them, so the pick
+  ///    would be refused on tap.
+  ///
+  /// Ordering puts students already recorded in this hostel but with no room
+  /// first: after a CSV import that is who a warden is nearly always looking
+  /// for, and burying them under the whole institute makes the list useless.
+  static List<AppUser> bedCandidates({
+    required Hostel hostel,
+    required Iterable<AppUser> roster,
+  }) {
+    final out =
+        roster
+            .where(
+              (u) =>
+                  u.isActive &&
+                  !u.isSuperAdmin &&
+                  !u.isAllotted &&
+                  genderAllows(hostel.gender, u.gender),
+            )
+            .toList()
+          ..sort((a, b) {
+            final aHere = a.hostelId == hostel.id;
+            final bHere = b.hostelId == hostel.id;
+            if (aHere != bHere) return aHere ? -1 : 1;
+            return a.name.toLowerCase().compareTo(b.name.toLowerCase());
+          });
+    return out;
   }
 
   static String genderRefusal(HostelGender hostel, String? studentGender) =>
@@ -83,11 +154,13 @@ class AllotmentService {
     final roomRef = _roomRef(collegeId, hostel.id, room.id);
     final userRef = _db.collection('users').doc(student.uid);
     final hostelRef = _hostelRef(collegeId, hostel.id);
+    final settingsRef = _settingsRef(collegeId);
 
     await _db.runTransaction((tx) async {
       // --- all reads first; Firestore forbids a read after a write ---
       final roomSnap = await tx.get(roomRef);
       final userSnap = await tx.get(userRef);
+      final settingsSnap = await tx.get(settingsRef);
 
       if (!roomSnap.exists) {
         throw AllotmentFailure('That room no longer exists.');
@@ -95,6 +168,18 @@ class AllotmentService {
       if (!userSnap.exists) {
         throw AllotmentFailure('That student no longer exists.');
       }
+
+      // Only relevant if a current session is configured AND that session's
+      // enrollment document already exists (backfill/promotion creates it) —
+      // an allotment made before either of those must not be blocked on
+      // them, so this stays best-effort rather than required.
+      final currentSession = _currentSessionOf(settingsSnap);
+      final enrollmentRef = currentSession == null
+          ? null
+          : _enrollmentRef(collegeId, student.uid, currentSession);
+      final enrollmentSnap = enrollmentRef == null
+          ? null
+          : await tx.get(enrollmentRef);
 
       final fresh = Room.fromMap(roomSnap.id, roomSnap.data()!);
       final freshUser = AppUser.fromMap(userSnap.id, userSnap.data()!);
@@ -134,6 +219,17 @@ class AllotmentService {
         'allottedAt': FieldValue.serverTimestamp(),
       });
       tx.update(hostelRef, {'occupiedBeds': FieldValue.increment(1)});
+
+      if (enrollmentSnap != null && enrollmentSnap.exists) {
+        tx.update(enrollmentRef!, {
+          'hostelId': hostel.id,
+          'hostelName': hostel.name,
+          'roomId': fresh.id,
+          'roomNumber': fresh.number,
+          'roomCapacity': fresh.capacity,
+          'allottedAt': FieldValue.serverTimestamp(),
+        });
+      }
     });
   }
 
@@ -164,9 +260,33 @@ class AllotmentService {
     if (!genderAllows(hostel.gender, student.gender)) {
       throw AllotmentFailure(genderRefusal(hostel.gender, student.gender));
     }
-    await _db.collection('users').doc(student.uid).update({
-      'hostelId': hostel.id,
-      'hostelName': hostel.name,
+
+    final userRef = _db.collection('users').doc(student.uid);
+    final settingsRef = _settingsRef(collegeId);
+
+    // A transaction now, not a plain write — reading the enrollment to sync
+    // onto requires it. Nothing here contends over a shared resource the way
+    // a room's capacity does, so this isn't racing anyone; the transaction
+    // exists only to keep the settings/enrollment read and the two writes
+    // atomic with each other.
+    await _db.runTransaction((tx) async {
+      final settingsSnap = await tx.get(settingsRef);
+      final currentSession = _currentSessionOf(settingsSnap);
+      final enrollmentRef = currentSession == null
+          ? null
+          : _enrollmentRef(collegeId, student.uid, currentSession);
+      final enrollmentSnap = enrollmentRef == null
+          ? null
+          : await tx.get(enrollmentRef);
+
+      tx.update(userRef, {'hostelId': hostel.id, 'hostelName': hostel.name});
+
+      if (enrollmentSnap != null && enrollmentSnap.exists) {
+        tx.update(enrollmentRef!, {
+          'hostelId': hostel.id,
+          'hostelName': hostel.name,
+        });
+      }
     });
   }
 
@@ -182,9 +302,25 @@ class AllotmentService {
         '${student.name} has an actual room — vacate it instead.',
       );
     }
-    await _db.collection('users').doc(student.uid).update({
-      'hostelId': null,
-      'hostelName': null,
+
+    final userRef = _db.collection('users').doc(student.uid);
+    final settingsRef = _settingsRef(collegeId);
+
+    await _db.runTransaction((tx) async {
+      final settingsSnap = await tx.get(settingsRef);
+      final currentSession = _currentSessionOf(settingsSnap);
+      final enrollmentRef = currentSession == null
+          ? null
+          : _enrollmentRef(collegeId, student.uid, currentSession);
+      final enrollmentSnap = enrollmentRef == null
+          ? null
+          : await tx.get(enrollmentRef);
+
+      tx.update(userRef, {'hostelId': null, 'hostelName': null});
+
+      if (enrollmentSnap != null && enrollmentSnap.exists) {
+        tx.update(enrollmentRef!, {'hostelId': null, 'hostelName': null});
+      }
     });
   }
 
@@ -207,9 +343,19 @@ class AllotmentService {
     final roomRef = _roomRef(collegeId, hostelId, roomId);
     final userRef = _db.collection('users').doc(student.uid);
     final hostelRef = _hostelRef(collegeId, hostelId);
+    final settingsRef = _settingsRef(collegeId);
 
     await _db.runTransaction((tx) async {
       final roomSnap = await tx.get(roomRef);
+      final settingsSnap = await tx.get(settingsRef);
+
+      final currentSession = _currentSessionOf(settingsSnap);
+      final enrollmentRef = currentSession == null
+          ? null
+          : _enrollmentRef(collegeId, student.uid, currentSession);
+      final enrollmentSnap = enrollmentRef == null
+          ? null
+          : await tx.get(enrollmentRef);
 
       // Clear the student's side regardless — if the room was deleted out from
       // under them, leaving these fields set would strand the student with a
@@ -221,6 +367,17 @@ class AllotmentService {
         'roomNumber': null,
         'allottedAt': null,
       });
+
+      if (enrollmentSnap != null && enrollmentSnap.exists) {
+        tx.update(enrollmentRef!, {
+          'hostelId': null,
+          'hostelName': null,
+          'roomId': null,
+          'roomNumber': null,
+          'roomCapacity': null,
+          'allottedAt': null,
+        });
+      }
 
       if (roomSnap.exists) {
         final fresh = Room.fromMap(roomSnap.id, roomSnap.data()!);
@@ -296,9 +453,7 @@ class AllotmentService {
           .collection('users')
           .where(FieldPath.documentId, whereIn: chunk)
           .get();
-      results.addAll(
-        snap.docs.map((d) => AppUser.fromMap(d.id, d.data())),
-      );
+      results.addAll(snap.docs.map((d) => AppUser.fromMap(d.id, d.data())));
     }
     return results;
   }

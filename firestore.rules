@@ -66,7 +66,21 @@ service cloud.firestore {
     function onlyAllotmentFields() {
       return request.resource.data.diff(resource.data).affectedKeys()
         .hasOnly(['hostelId', 'hostelName', 'roomId', 'roomNumber',
-                  'allottedAt', 'updatedAt']);
+                  'roomCapacity', 'allottedAt', 'updatedAt']);
+    }
+
+    // 'roomCapacity' only ever appears on an enrollment document, never on
+    // users/{uid} — it's harmless to allow here since nothing writes it on a
+    // user, and one shared list is what keeps the two allotment paths (user
+    // profile, enrollment) from silently drifting apart as fields are added.
+
+    // The only user field annual promotion may touch when a student
+    // graduates. Deliberately not folded into onlyAllotmentFields — academic
+    // records staff can mark someone graduated, but that is not the same
+    // authority as filling their bed, and the reverse should not hold either.
+    function onlyGraduationFields() {
+      return request.resource.data.diff(resource.data).affectedKeys()
+        .hasOnly(['status', 'updatedAt']);
     }
 
     // ---------------- colleges ----------------
@@ -173,6 +187,16 @@ service cloud.firestore {
                         hasPerm('allotment.manage') &&
                         resource.data.collegeId == myCollege() &&
                         onlyAllotmentFields()
+                      )
+                      ||
+                      // Promotion marking a student graduated. Narrower than
+                      // users.edit for the same reason as the allotment
+                      // branch above — a role that can run promotion is not
+                      // thereby trusted to rename or re-role anyone either.
+                      (
+                        hasPerm('academic.manage') &&
+                        resource.data.collegeId == myCollege() &&
+                        onlyGraduationFields()
                       )
                     );
 
@@ -411,7 +435,7 @@ service cloud.firestore {
       // Imposing. Must be in your own name and must start unpaid — nobody
       // files a fine as already settled. Every fine is issued under an office
       // order (the two are written in the same batch by the app — see
-      // FineService.imposeWithOfficeOrder), so officeOrderId is required too.
+      // FineService.publishOfficeOrder), so officeOrderId is required too.
       //
       // This only checks the field is present, not that it points at a real
       // document: a batch write can't `exists()`-check a sibling write still
@@ -448,17 +472,57 @@ service cloud.firestore {
     match /colleges/{collegeId}/officeOrders/{orderId} {
       allow read: if sameCollege(collegeId) && hasPerm('officeOrders.view');
 
-      // Published in your own name only — the issuer can't be spoofed. Every
-      // order now comes from imposing a fine (see the fines match block
-      // above), so this checks fines.manage rather than officeOrders.manage,
-      // and requires the student it's against to be named. Same reasoning as
-      // the fine's officeOrderId: a shape check, not a cross-batch exists()
-      // check against the fine being written alongside it.
+      // Published in your own name only — the issuer can't be spoofed.
+      //
+      // An order names one or more students: `studentUids` is a flat array of
+      // uids (it exists so "orders against this student" can be a query, since
+      // array-contains can't reach inside `students[].uid`). At least one is
+      // required — an order against nobody is a document nothing can ever find.
+      //
+      // Money is the thing that needs the higher authority. An order carrying
+      // `fineTotal` writes a fine per fined student in the same batch, so it
+      // needs fines.manage — which is what a Warden holds, and why imposing a
+      // fine keeps working exactly as before. An order fining nobody is a
+      // warning,
+      // suspension or notice of enquiry and writes no fines, so
+      // officeOrders.manage is enough for that on its own.
+      //
+      // Deliberately monotonic: fines.manage alone permits both, because
+      // someone trusted to levy money is obviously trusted to record a
+      // warning, and the starter Warden role has fines.manage *without*
+      // officeOrders.manage. The reverse does not hold — officeOrders.manage
+      // alone cannot attach an amount.
+      //
+      // `fineTotal` is the flat signal for "this order levies money". The
+      // per-student amounts live inside `students[]`, and rules cannot look
+      // inside an array — which is exactly why the total is denormalised onto
+      // the document. Tested via keys() rather than read directly: the app
+      // always writes the key (null for a warning), but a direct REST call
+      // could omit it, and reading an absent field aborts the whole rule.
+      //
+      // A caller could lie and claim a null total while naming fines. It buys
+      // them nothing: each fine is its own document and the fines rules demand
+      // fines.manage independently, so the lie produces an order referencing
+      // fines that were never allowed to exist.
+      //
+      // Shape checks only, not exists() checks: a batch write can't verify a
+      // sibling write still in the same batch, because rules evaluate against
+      // committed state. Same reasoning as the fine's officeOrderId.
       allow create: if sameCollege(collegeId)
-                    && hasPerm('fines.manage')
                     && request.resource.data.postedByUid == request.auth.uid
-                    && request.resource.data.studentUid is string
-                    && request.resource.data.fineId is string;
+                    && request.resource.data.studentUids is list
+                    && request.resource.data.studentUids.size() > 0
+                    && (
+                         hasPerm('fines.manage')
+                         || (
+                              hasPerm('officeOrders.manage')
+                              && (
+                                   !request.resource.data.keys()
+                                     .hasAny(['fineTotal'])
+                                   || request.resource.data.fineTotal == null
+                                 )
+                            )
+                       );
 
       // No updates: an office order printed wrong is deleted and re-published,
       // same as a notice.
@@ -470,6 +534,52 @@ service cloud.firestore {
                         && resource.data.postedByUid == request.auth.uid
                       )
                     );
+    }
+
+    // ---------------- enrollments ----------------
+    //
+    // One document per student per academic session, id `{uid}_{session}`.
+    // Year lives here, never on `users/{uid}` — see DEVELOPMENT.md. Backfill
+    // and promotion both write with `.set()` on that deterministic id, so a
+    // re-run after a crash overwrites rather than duplicates; the rule below
+    // allows create and update identically for exactly that reason — there
+    // is no meaningful distinction between "first write" and "re-run" here.
+
+    match /colleges/{collegeId}/enrollments/{enrollmentId} {
+      allow get: if sameCollege(collegeId) && (
+                   resource.data.uid == request.auth.uid
+                   || hasPerm('academic.view')
+                   || hasPerm('academic.manage')
+                 );
+
+      allow list: if sameCollege(collegeId) && (
+                    hasPerm('academic.view')
+                    || hasPerm('academic.manage')
+                    || resource.data.uid == request.auth.uid
+                  );
+
+      allow create: if sameCollege(collegeId)
+                    && hasPerm('academic.manage')
+                    && request.resource.data.collegeId == collegeId;
+
+      // academic.manage rewrites the whole record (backfill, promotion).
+      // allotment.manage may only touch the room fields — the same narrowing
+      // applied to users/{uid} above, for the same reason: a warden who can
+      // fill beds must not be able to edit which year a student is in.
+      allow update: if sameCollege(collegeId) && (
+                      (
+                        hasPerm('academic.manage')
+                        && request.resource.data.collegeId == collegeId
+                      )
+                      || (
+                        hasPerm('allotment.manage')
+                        && onlyAllotmentFields()
+                      )
+                    );
+
+      // Never from the client — a wrong-year record is fixed by re-running
+      // promotion/backfill (both idempotent), not by deleting history.
+      allow delete: if false;
     }
 
     // ---------------- future modules ----------------

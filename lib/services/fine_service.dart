@@ -42,39 +42,63 @@ class FineService {
         .map((s) => s.docs.map((d) => Fine.fromMap(d.id, d.data())).toList()),
   );
 
+  final CachedStreamPool<List<Fine>> _minePool = CachedStreamPool();
+
   /// One student's own fines. Not ordered in the query — an `orderBy` next to
   /// the `where` would need a composite index, and sorting a handful of
   /// documents client-side is free.
+  ///
+  /// Pooled per student. The document count is small, but this sits in
+  /// `build()` on the student dashboard and the fines page — the two screens
+  /// every one of a few thousand residents opens — so an unpooled re-read on
+  /// each rebuild is a per-student cost paid thousands of times over.
   Stream<List<Fine>> watchMine(String collegeId, String uid) =>
-      _col(collegeId).where('studentUid', isEqualTo: uid).snapshots().map((s) {
-        final list = s.docs
-            .map((d) => Fine.fromMap(d.id, d.data()))
-            .toList();
-        list.sort((a, b) {
-          final at = a.createdAt, bt = b.createdAt;
-          if (at == null && bt == null) return 0;
-          if (at == null) return 1;
-          if (bt == null) return -1;
-          return bt.compareTo(at);
+      _minePool.stream('$collegeId/$uid', () {
+        return _col(collegeId).where('studentUid', isEqualTo: uid).snapshots().map((
+          s,
+        ) {
+          final list = s.docs.map((d) => Fine.fromMap(d.id, d.data())).toList();
+          list.sort((a, b) {
+            final at = a.createdAt, bt = b.createdAt;
+            if (at == null && bt == null) return 0;
+            if (at == null) return 1;
+            if (bt == null) return -1;
+            return bt.compareTo(at);
+          });
+          return list;
         });
-        return list;
       });
 
   // ------------------------------ writes -----------------------------
 
-  /// Imposes a fine and publishes its office order together, in one batch.
+  /// Publishes one office order against one or more students, fining each of
+  /// them whatever they individually deserve, in a single batch.
   ///
-  /// The two documents are created with pre-generated ids so each can carry
-  /// the other's: `fine.officeOrderId` and `order.fineId`. Every fine raised
-  /// this way has a real order behind it — there is no path to impose a fine
-  /// without one, because in this college a fine only exists because an order
-  /// was issued for it.
-  Future<({String fineId, String orderId})> imposeWithOfficeOrder({
+  /// One incident is one order. Five students in the same fight get one order
+  /// naming all five, not five near-identical orders — which is how the office
+  /// actually issues them, and it keeps the scanned photo stored once instead
+  /// of five times (it is base64 in the document, so five copies is five times
+  /// the storage and five times the read cost).
+  ///
+  /// **Amounts are per student.** [charges] pairs each student with what they
+  /// owe, and a null or zero amount means that student is named on the order
+  /// but not fined. That is a normal outcome, not an edge case: the ringleader
+  /// and the bystander rarely pay the same, and letting one off with a warning
+  /// while fining the others is exactly what a real order does. An order where
+  /// nobody is fined is a warning, suspension or notice of enquiry, and writes
+  /// no fine documents at all.
+  ///
+  /// [category] is shared — one incident is one reason — and is only required
+  /// when somebody is actually being fined.
+  ///
+  /// Ids are pre-generated so the cross-links can be written in the same
+  /// batch: each `fine.officeOrderId` points at the order, and each
+  /// `order.students[].fineId` points back at that student's fine.
+  Future<({List<String> fineIds, String orderId})> publishOfficeOrder({
     required String collegeId,
-    required AppUser student,
+    required List<({AppUser student, num? amount})> charges,
     required AppUser imposedBy,
-    required num amount,
-    required String category,
+    String? category,
     String reason = '',
     required String orderNo,
     required String orderTitle,
@@ -83,35 +107,79 @@ class FineService {
     String? orderDescription,
     DateTime? orderDate,
   }) async {
-    if (amount <= 0) {
-      throw ArgumentError('A fine must be for more than zero.');
+    if (charges.isEmpty) {
+      throw ArgumentError('An office order must name at least one student.');
+    }
+    // The same student twice would raise two fines for one incident.
+    final uids = charges.map((c) => c.student.uid).toSet();
+    if (uids.length != charges.length) {
+      throw ArgumentError('The same student is listed twice on this order.');
+    }
+    if (charges.any((c) => (c.amount ?? 0) < 0)) {
+      throw ArgumentError('A fine cannot be for a negative amount.');
     }
 
-    final fineRef = _col(collegeId).doc();
-    final orderRef = _ordersCol(collegeId).doc();
+    final fined = charges.where((c) => (c.amount ?? 0) > 0).toList();
+    if (fined.isNotEmpty && (category == null || category.trim().isEmpty)) {
+      throw ArgumentError('A fine needs a category.');
+    }
 
-    final fine = Fine(
-      id: fineRef.id,
-      studentUid: student.uid,
-      studentName: student.name,
-      studentRegNo: student.enrollmentNo,
-      hostelId: student.hostelId,
-      hostelName: student.hostelName,
-      roomNumber: student.roomNumber,
-      trade: student.trade,
-      batch: student.batch,
-      sem: student.sem,
-      // Fall back to parsing the address, so a student whose `state` field was
-      // never filled in still lands on the right bar instead of "Not set".
-      state: student.state ?? stateFromAddress(student.address),
-      amount: amount,
-      category: category,
-      reason: reason.trim(),
-      officeOrderId: orderRef.id,
-      officeOrderNo: orderNo.trim(),
-      imposedByUid: imposedBy.uid,
-      imposedByName: imposedBy.name,
-    );
+    final orderRef = _ordersCol(collegeId).doc();
+    final batch = _db.batch();
+
+    final fineIds = <String>[];
+    final covered = <OrderStudent>[];
+    num total = 0;
+
+    for (final charge in charges) {
+      final student = charge.student;
+      final amount = charge.amount;
+      String? fineId;
+
+      if (amount != null && amount > 0) {
+        final fineRef = _col(collegeId).doc();
+        fineId = fineRef.id;
+        fineIds.add(fineRef.id);
+        total += amount;
+
+        final fine = Fine(
+          id: fineRef.id,
+          studentUid: student.uid,
+          studentName: student.name,
+          studentRegNo: student.enrollmentNo,
+          hostelId: student.hostelId,
+          hostelName: student.hostelName,
+          roomNumber: student.roomNumber,
+          trade: student.trade,
+          batch: student.batch,
+          sem: student.sem,
+          // Fall back to parsing the address, so a student whose `state` field
+          // was never filled in still lands on the right bar than "Not set".
+          state: student.state ?? stateFromAddress(student.address),
+          amount: amount,
+          category: category!.trim(),
+          reason: reason.trim(),
+          officeOrderId: orderRef.id,
+          officeOrderNo: orderNo.trim(),
+          imposedByUid: imposedBy.uid,
+          imposedByName: imposedBy.name,
+        );
+        batch.set(fineRef, {
+          ...fine.toMap(),
+          'createdAt': FieldValue.serverTimestamp(),
+        });
+      }
+
+      covered.add(
+        OrderStudent(
+          uid: student.uid,
+          name: student.name,
+          regNo: student.enrollmentNo,
+          fineId: fineId,
+          fineAmount: fineId == null ? null : amount,
+        ),
+      );
+    }
 
     final order = OfficeOrder(
       id: orderRef.id,
@@ -125,32 +193,40 @@ class FineService {
       imageMimeType: orderImageMimeType,
       postedByUid: imposedBy.uid,
       postedByName: imposedBy.name,
-      studentUid: student.uid,
-      studentName: student.name,
-      studentRegNo: student.enrollmentNo,
-      fineId: fineRef.id,
-      fineAmount: amount,
-      fineCategory: category,
+      students: covered,
+      // Null rather than 0 when nobody was fined: the rules read this field to
+      // decide whether the write needs fines.manage, and "absent" is the
+      // clearest way to say "this order levies nothing".
+      fineTotal: fined.isEmpty ? null : total,
+      fineCategory: fined.isEmpty ? null : category!.trim(),
     );
 
-    final batch = _db.batch();
-    batch.set(fineRef, {...fine.toMap(), 'createdAt': FieldValue.serverTimestamp()});
-    batch.set(orderRef, {...order.toMap(), 'createdAt': FieldValue.serverTimestamp()});
+    batch.set(orderRef, {
+      ...order.toMap(),
+      'createdAt': FieldValue.serverTimestamp(),
+    });
     await batch.commit();
 
-    // No `before` — the fine did not exist, so undo deletes it.
+    final who = charges.length == 1
+        ? charges.first.student.name
+        : '${charges.length} students';
     await AuditService.instance.record(
       collegeId: collegeId,
       actor: imposedBy,
-      action: 'fine.impose',
-      summary: 'Fined ${student.name} ₹$amount for $category '
-          '(order $orderNo)',
-      targetLabel: student.name,
-      path: 'colleges/$collegeId/fines/${fineRef.id}',
-      reversible: true,
+      action: fined.isEmpty ? 'officeOrder.publish' : 'fine.impose',
+      summary: fined.isEmpty
+          ? 'Issued order $orderNo against $who'
+          : 'Fined ${fined.length} of $who '
+                '\u20b9$total total for ${category!.trim()} (order $orderNo)',
+      targetLabel: who,
+      // Points at the order, which is the one document that always exists —
+      // a group order has many fines and an order-only has none, so neither
+      // makes a stable target.
+      path: 'colleges/$collegeId/officeOrders/${orderRef.id}',
+      reversible: false,
     );
 
-    return (fineId: fineRef.id, orderId: orderRef.id);
+    return (fineIds: fineIds, orderId: orderRef.id);
   }
 
   /// Marks a fine paid or waived, recording who decided.
@@ -178,7 +254,8 @@ class FineService {
       collegeId: collegeId,
       actor: handler,
       action: 'fine.${status.name}',
-      summary: 'Marked ${fine.studentName}\'s ₹${fine.amount} fine '
+      summary:
+          'Marked ${fine.studentName}\'s ₹${fine.amount} fine '
           '${status.label.toLowerCase()}',
       targetLabel: fine.studentName,
       path: 'colleges/$collegeId/fines/${fine.id}',
@@ -220,8 +297,9 @@ class FineService {
   /// reasoning as [deleteAll]: the person the money was owed by is gone, so
   /// there is nothing left to collect against.
   Future<int> deleteForStudent(String collegeId, String uid) async {
-    final snap =
-        await _col(collegeId).where('studentUid', isEqualTo: uid).get();
+    final snap = await _col(
+      collegeId,
+    ).where('studentUid', isEqualTo: uid).get();
     if (snap.docs.isEmpty) return 0;
 
     for (var i = 0; i < snap.docs.length; i += 400) {

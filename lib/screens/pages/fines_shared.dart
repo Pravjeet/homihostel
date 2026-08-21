@@ -20,8 +20,18 @@ String compactAmount(num v) {
 
 String shortDate(DateTime d) {
   const months = [
-    'Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun',
-    'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec',
+    'Jan',
+    'Feb',
+    'Mar',
+    'Apr',
+    'May',
+    'Jun',
+    'Jul',
+    'Aug',
+    'Sep',
+    'Oct',
+    'Nov',
+    'Dec',
   ];
   return '${d.day} ${months[d.month - 1]}';
 }
@@ -153,10 +163,7 @@ class FineRow extends StatelessWidget {
                     if (fine.createdAt != null) shortDate(fine.createdAt!),
                   ].join(' · '),
                   overflow: TextOverflow.ellipsis,
-                  style: TextStyle(
-                    color: AppColors.textMuted,
-                    fontSize: 12.5,
-                  ),
+                  style: TextStyle(color: AppColors.textMuted, fontSize: 12.5),
                 ),
                 if (fine.reason.isNotEmpty) ...[
                   const SizedBox(height: 5),
@@ -171,10 +178,7 @@ class FineRow extends StatelessWidget {
           const SizedBox(width: 12),
           Text(
             '₹${fine.amount}',
-            style: const TextStyle(
-              fontSize: 15.5,
-              fontWeight: FontWeight.w800,
-            ),
+            style: const TextStyle(fontSize: 15.5, fontWeight: FontWeight.w800),
           ),
           const SizedBox(width: 12),
           StatusPill(fine.status.label.toUpperCase(), c.fg, c.bg),

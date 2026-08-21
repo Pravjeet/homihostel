@@ -264,7 +264,10 @@ class _Confirm extends StatelessWidget {
         ),
         if (error != null) ...[
           const SizedBox(height: 10),
-          Text(error!, style: TextStyle(color: AppColors.danger, fontSize: 12.5)),
+          Text(
+            error!,
+            style: TextStyle(color: AppColors.danger, fontSize: 12.5),
+          ),
         ],
       ],
     ),

@@ -77,9 +77,7 @@ class _ImportStudentsDialogState extends State<ImportStudentsDialog> {
       if (has != _hasText) setState(() => _hasText = has);
     });
     final assignable = widget.roles.where((r) => !r.isSystem).toList();
-    final student = assignable.where(
-      (r) => r.name.toLowerCase() == 'student',
-    );
+    final student = assignable.where((r) => r.name.toLowerCase() == 'student');
     _defaultRole = student.isNotEmpty
         ? student.first.name
         : (assignable.isEmpty ? '' : assignable.first.name);
@@ -178,13 +176,11 @@ class _ImportStudentsDialogState extends State<ImportStudentsDialog> {
   @override
   Widget build(BuildContext context) {
     return AlertDialog(
-      title: Text(
-        switch (_step) {
-          0 => 'Import people from a spreadsheet',
-          1 => 'Check before importing',
-          _ => _running ? 'Importing…' : 'Import finished',
-        },
-      ),
+      title: Text(switch (_step) {
+        0 => 'Import people from a spreadsheet',
+        1 => 'Check before importing',
+        _ => _running ? 'Importing…' : 'Import finished',
+      }),
       // The preview earns more room than the other two steps: it is a
       // spreadsheet, and 720px shows about four columns of one.
       //
@@ -794,7 +790,6 @@ class _Tally extends StatelessWidget {
   );
 }
 
-
 // ------------------------------- step 3 -------------------------------
 
 class _RunStep extends StatelessWidget {
@@ -854,10 +849,7 @@ class _RunStep extends StatelessWidget {
                         'Re-running is safe — existing people are updated, '
                         'not duplicated.',
               textAlign: TextAlign.center,
-              style: TextStyle(
-                color: AppColors.textMuted,
-                fontSize: 12.5,
-              ),
+              style: TextStyle(color: AppColors.textMuted, fontSize: 12.5),
             ),
           ],
         ),

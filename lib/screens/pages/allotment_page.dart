@@ -130,18 +130,30 @@ class _AllotmentPageState extends State<AllotmentPage> {
                         spacing: 30,
                         runSpacing: 14,
                         children: [
-                          _Metric('Awaiting a room', '${pending.length}',
-                              pending.isEmpty
-                                  ? AppColors.success
-                                  : AppColors.warning),
-                          _Metric('Allotted', '${allotted.length}',
-                              AppColors.primary),
-                          _Metric('Free beds', '$freeBeds',
-                              freeBeds == 0
-                                  ? AppColors.danger
-                                  : AppColors.success),
-                          _Metric('Total beds', '$totalBeds',
-                              AppColors.textStrong),
+                          _Metric(
+                            'Awaiting a room',
+                            '${pending.length}',
+                            pending.isEmpty
+                                ? AppColors.success
+                                : AppColors.warning,
+                          ),
+                          _Metric(
+                            'Allotted',
+                            '${allotted.length}',
+                            AppColors.primary,
+                          ),
+                          _Metric(
+                            'Free beds',
+                            '$freeBeds',
+                            freeBeds == 0
+                                ? AppColors.danger
+                                : AppColors.success,
+                          ),
+                          _Metric(
+                            'Total beds',
+                            '$totalBeds',
+                            AppColors.textStrong,
+                          ),
                         ],
                       ),
                       if (hostels.isEmpty) ...[
@@ -468,8 +480,7 @@ class _PersonRow extends StatelessWidget {
               person.isAllotted
                   ? PopupMenuButton<String>(
                       icon: const Icon(Icons.more_horiz_rounded, size: 20),
-                      onSelected: (v) =>
-                          v == 'move' ? onMove() : onVacate(),
+                      onSelected: (v) => v == 'move' ? onMove() : onVacate(),
                       itemBuilder: (_) => [
                         PopupMenuItem(
                           value: 'move',

@@ -163,9 +163,8 @@ class _RegisterCollegeScreenState extends State<RegisterCollegeScreen> {
                       icon: Icons.lock_outline_rounded,
                       enabled: !_busy,
                       obscure: _obscure,
-                      validator: (v) => v != _password.text
-                          ? 'Passwords don\'t match'
-                          : null,
+                      validator: (v) =>
+                          v != _password.text ? 'Passwords don\'t match' : null,
                     ),
                     const SizedBox(height: 10),
                     ElevatedButton(

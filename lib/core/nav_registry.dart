@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 
+import '../screens/pages/academic_page.dart';
 import '../screens/pages/allotment_page.dart';
 import '../screens/pages/audit_page.dart';
 import '../screens/pages/fees_page.dart';
@@ -82,6 +83,13 @@ const List<NavSection> _allSections = [
         icon: Icons.group_rounded,
         requires: [Perm.usersView],
         builder: _users,
+      ),
+      NavItem(
+        id: 'academic',
+        label: 'Academic Records',
+        icon: Icons.event_available_rounded,
+        requires: [Perm.academicView, Perm.academicManage],
+        builder: _academic,
       ),
       NavItem(
         id: 'student-overview',
@@ -224,6 +232,8 @@ List<NavSection> navigationFor(Session session) {
 // function references are const — which `_allSections` requires.
 Widget _overview(BuildContext c) => const OverviewPage();
 Widget _users(BuildContext c) => const UsersPage();
+Widget _academic(BuildContext c) => const AcademicPage();
+
 Widget _studentOverview(BuildContext c) => const StudentOverviewPage();
 Widget _roles(BuildContext c) => const RolesPage();
 Widget _myRoom(BuildContext c) => const MyRoomPage();

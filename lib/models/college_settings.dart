@@ -25,6 +25,12 @@ class CollegeSettings {
   /// dropdown. Once edited, this is the authoritative list everywhere.
   final List<Trade> trades;
 
+  /// Course lengths and seating policy, one entry per course name. Empty
+  /// means "use [kDefaultCourseRules]" — the same never-empty-in-practice
+  /// pattern as [trades] — so promotion and the seating policy work before
+  /// anyone has opened this screen.
+  final List<CourseRule> courseRules;
+
   final DateTime? updatedAt;
   final String? updatedByName;
 
@@ -34,6 +40,7 @@ class CollegeSettings {
     this.session = const AcademicSession(),
     this.fineCategories = const [],
     this.trades = const [],
+    this.courseRules = const [],
     this.updatedAt,
     this.updatedByName,
   });
@@ -56,6 +63,10 @@ class CollegeSettings {
         .whereType<Map>()
         .map((e) => Trade.fromMap(e.cast<String, dynamic>()))
         .toList(),
+    courseRules: ((m['courseRules'] as List?) ?? const [])
+        .whereType<Map>()
+        .map((e) => CourseRule.fromMap(e.cast<String, dynamic>()))
+        .toList(),
     updatedAt: (m['updatedAt'] as Timestamp?)?.toDate(),
     updatedByName: m['updatedByName'] as String?,
   );
@@ -66,6 +77,7 @@ class CollegeSettings {
     'session': session.toMap(),
     'fineCategories': fineCategories.map((c) => c.toMap()).toList(),
     'trades': trades.map((t) => t.toMap()).toList(),
+    'courseRules': courseRules.map((c) => c.toMap()).toList(),
   };
 
   /// The category names the impose-fine form should offer. Falls back to the
@@ -88,6 +100,29 @@ class CollegeSettings {
     }
     return tradeLabel(code);
   }
+
+  List<CourseRule> get _rules =>
+      courseRules.isEmpty ? kDefaultCourseRules : courseRules;
+
+  CourseRule? _ruleFor(String? course) {
+    final c = course?.trim() ?? '';
+    if (c.isEmpty) return null;
+    for (final r in _rules) {
+      if (r.course.toLowerCase() == c.toLowerCase()) return r;
+    }
+    return null;
+  }
+
+  /// How many years [course] runs. Unlike [tradeLabelFor], there is no
+  /// built-in-name fallback beyond a flat 4 — a course nobody has configured
+  /// should get a visibly generic answer, not a guess dressed up as fact, so
+  /// promotion can flag it for review rather than silently graduate someone
+  /// early or late.
+  int totalYearsFor(String? course) => _ruleFor(course)?.totalYears ?? 4;
+
+  /// The seating rule configured for [course], or null when none is —
+  /// meaning [requiredRoomCapacity] should enforce nothing rather than guess.
+  CourseRule? courseRuleFor(String? course) => _ruleFor(course);
 
   num? defaultAmountFor(String category) {
     for (final c in fineCategories) {
@@ -318,18 +353,27 @@ class AcademicSession {
   /// "2026-27".
   final String? current;
 
+  /// The session promotion will move everyone into, set ahead of the rollover.
+  ///
+  /// Optional: [nextSessionAfter] derives "2027-28" from "2026-27" when this
+  /// is blank. It exists for the college whose sessions are not a simple +1,
+  /// and so the next session can be agreed before the switch actually happens.
+  final String? next;
+
   /// Which half of the year is running. Drives the default Sem filter.
   final bool oddSemester;
 
-  const AcademicSession({this.current, this.oddSemester = true});
+  const AcademicSession({this.current, this.next, this.oddSemester = true});
 
   factory AcademicSession.fromMap(Map<String, dynamic> m) => AcademicSession(
     current: m['current'] as String?,
+    next: m['next'] as String?,
     oddSemester: m['oddSemester'] as bool? ?? true,
   );
 
   Map<String, dynamic> toMap() => {
     'current': current,
+    'next': next,
     'oddSemester': oddSemester,
   };
 
@@ -341,6 +385,101 @@ class AcademicSession {
       ? (oddSemester ? 'Odd semester' : 'Even semester')
       : '$current · ${oddSemester ? 'Odd' : 'Even'} semester';
 }
+
+// =====================================================================
+// Course rules
+// =====================================================================
+
+/// How a course's rooms are assigned.
+///
+/// Deliberately a rule per course rather than a hardcoded list of course
+/// names: this college runs "UG", "ICD" and "PG", another runs "B.E." and
+/// "Diploma", and neither should need a code change. A course with no rule
+/// configured has *no* policy — see [requiredRoomCapacity], which returns null
+/// rather than guessing a default.
+enum CourseSeating {
+  /// Every year in a shared room. Diploma/ICD, whose students never move up.
+  alwaysShared,
+
+  /// Shared for the first two years, then a single **if** the student earned
+  /// one on second-year results ([AppUser.singleRoomEligible]) — otherwise
+  /// shared again. The UG rule.
+  meritSingle,
+
+  /// A single throughout, regardless of year or merit. Masters and PhD.
+  alwaysSingle,
+}
+
+extension CourseSeatingX on CourseSeating {
+  String get label => switch (this) {
+    CourseSeating.alwaysShared => 'Shared every year',
+    CourseSeating.meritSingle => 'Shared, then single on merit',
+    CourseSeating.alwaysSingle => 'Single every year',
+  };
+
+  static CourseSeating parse(String? v) => CourseSeating.values.firstWhere(
+    (e) => e.name == v,
+    orElse: () => CourseSeating.alwaysShared,
+  );
+}
+
+/// One course, how long it runs, and how its rooms are assigned.
+///
+/// [course] is matched case-insensitively against [AppUser.course], which is
+/// free text — so the rule follows whatever the sheets already say rather than
+/// forcing a rename.
+class CourseRule {
+  final String course;
+  final int totalYears;
+  final CourseSeating seating;
+
+  /// What "shared" means in this college — 3 here, but a college with
+  /// two-seaters as its default should say so rather than have 3 assumed.
+  final int sharedCapacity;
+
+  const CourseRule({
+    required this.course,
+    required this.totalYears,
+    this.seating = CourseSeating.alwaysShared,
+    this.sharedCapacity = 3,
+  });
+
+  factory CourseRule.fromMap(Map<String, dynamic> m) => CourseRule(
+    course: m['course'] as String? ?? '',
+    totalYears: (m['totalYears'] as num?)?.toInt() ?? 4,
+    seating: CourseSeatingX.parse(m['seating'] as String?),
+    sharedCapacity: (m['sharedCapacity'] as num?)?.toInt() ?? 3,
+  );
+
+  Map<String, dynamic> toMap() => {
+    'course': course,
+    'totalYears': totalYears,
+    'seating': seating.name,
+    'sharedCapacity': sharedCapacity,
+  };
+
+  CourseRule copyWith({
+    String? course,
+    int? totalYears,
+    CourseSeating? seating,
+    int? sharedCapacity,
+  }) => CourseRule(
+    course: course ?? this.course,
+    totalYears: totalYears ?? this.totalYears,
+    seating: seating ?? this.seating,
+    sharedCapacity: sharedCapacity ?? this.sharedCapacity,
+  );
+}
+
+/// What a brand-new workspace starts with, matching this institute's courses.
+///
+/// Seeded rather than left empty so promotion and the seating policy work on
+/// day one; every value is editable under Settings.
+const List<CourseRule> kDefaultCourseRules = [
+  CourseRule(course: 'UG', totalYears: 4, seating: CourseSeating.meritSingle),
+  CourseRule(course: 'ICD', totalYears: 3, seating: CourseSeating.alwaysShared),
+  CourseRule(course: 'PG', totalYears: 2, seating: CourseSeating.alwaysSingle),
+];
 
 // =====================================================================
 // Fine categories

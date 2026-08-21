@@ -46,8 +46,7 @@ class Session {
   /// than a descendant, and SessionScope sits below that Navigator. Read the
   /// session in the page that opens the dialog and pass what you need in.
   static Session of(BuildContext context) {
-    final scope = context
-        .dependOnInheritedWidgetOfExactType<SessionScope>();
+    final scope = context.dependOnInheritedWidgetOfExactType<SessionScope>();
     if (scope == null) {
       throw FlutterError(
         'Session.of() found no SessionScope above this widget.\n'
@@ -64,11 +63,7 @@ class Session {
 class SessionScope extends InheritedWidget {
   final Session session;
 
-  const SessionScope({
-    super.key,
-    required this.session,
-    required super.child,
-  });
+  const SessionScope({super.key, required this.session, required super.child});
 
   @override
   bool updateShouldNotify(SessionScope oldWidget) =>

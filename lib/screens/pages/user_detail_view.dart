@@ -172,20 +172,13 @@ class _Header extends StatelessWidget {
                 const SizedBox(height: 3),
                 Text(
                   '${Identity.display(user.email)} · ${user.displayRole}',
-                  style: TextStyle(
-                    fontSize: 13,
-                    color: AppColors.textMuted,
-                  ),
+                  style: TextStyle(fontSize: 13, color: AppColors.textMuted),
                 ),
               ],
             ),
           ),
           if (!user.isActive)
-            StatusPill(
-              'DISABLED',
-              AppColors.danger,
-              AppColors.dangerSoft,
-            ),
+            StatusPill('DISABLED', AppColors.danger, AppColors.dangerSoft),
         ],
       ),
     );
@@ -292,8 +285,7 @@ class _FinesSection extends StatelessWidget {
                 ),
                 const SizedBox(height: 8),
                 for (var i = 0; i < fines.length; i++) ...[
-                  if (i != 0)
-                    Divider(height: 1, color: AppColors.border),
+                  if (i != 0) Divider(height: 1, color: AppColors.border),
                   Padding(
                     // FineRow brings its own horizontal padding, which would
                     // double up inside a card that already has some.
@@ -416,8 +408,12 @@ class _OfficeOrdersSection extends StatelessWidget {
                                       orders[i].orderNo,
                                     if (orders[i].dateLabel != null)
                                       orders[i].dateLabel!,
-                                    if (orders[i].fineAmount != null)
-                                      '₹${orders[i].fineAmount} · '
+                                    // This student's own share of the order,
+                                    // not its total. On a group order the
+                                    // others may have paid more, less, or
+                                    // nothing, and none of that is their bill.
+                                    if (orders[i].amountFor(user.uid) != null)
+                                      '₹${orders[i].amountFor(user.uid)} · '
                                           '${orders[i].fineCategory ?? ''}',
                                   ].join(' · '),
                                   overflow: TextOverflow.ellipsis,
@@ -615,7 +611,8 @@ class _DetailFormState extends State<_DetailForm> {
     return StreamBuilder<AppRole?>(
       stream: AuthService.instance.watchRole(u.collegeId, u.roleId!),
       builder: (context, roleSnap) {
-        final managesHostels = roleSnap.data != null &&
+        final managesHostels =
+            roleSnap.data != null &&
             Perm.managesHostels(roleSnap.data!.permissions);
         if (!managesHostels) {
           return _buildCard(context, managesHostels: false, hostels: const []);
@@ -721,7 +718,16 @@ class _DetailFormState extends State<_DetailForm> {
                         labelText: 'Blood group',
                       ),
                       items:
-                          const ['A+', 'A-', 'B+', 'B-', 'O+', 'O-', 'AB+', 'AB-']
+                          const [
+                                'A+',
+                                'A-',
+                                'B+',
+                                'B-',
+                                'O+',
+                                'O-',
+                                'AB+',
+                                'AB-',
+                              ]
                               .map(
                                 (g) =>
                                     DropdownMenuItem(value: g, child: Text(g)),
@@ -844,10 +850,8 @@ class _DetailFormState extends State<_DetailForm> {
                         ),
                         items: List.generate(8, (i) => i + 1)
                             .map(
-                              (s) => DropdownMenuItem(
-                                value: s,
-                                child: Text('$s'),
-                              ),
+                              (s) =>
+                                  DropdownMenuItem(value: s, child: Text('$s')),
                             )
                             .toList(),
                         onChanged: on ? (v) => setState(() => _sem = v) : null,
@@ -911,11 +915,7 @@ class _DetailFormState extends State<_DetailForm> {
                   ),
                 ],
               ),
-              _Field(
-                _c['motherName']!,
-                "Mother's name",
-                enabled: on,
-              ),
+              _Field(_c['motherName']!, "Mother's name", enabled: on),
 
               const SizedBox(height: 8),
               const _SectionLabel('Other'),
@@ -945,8 +945,7 @@ class _DetailFormState extends State<_DetailForm> {
                         ),
                         items: kIndianStates
                             .map(
-                              (s) =>
-                                  DropdownMenuItem(value: s, child: Text(s)),
+                              (s) => DropdownMenuItem(value: s, child: Text(s)),
                             )
                             .toList(),
                         onChanged: on
@@ -959,9 +958,7 @@ class _DetailFormState extends State<_DetailForm> {
               ),
               Row(
                 children: [
-                  Expanded(
-                    child: _Field(_c['city']!, 'City', enabled: on),
-                  ),
+                  Expanded(child: _Field(_c['city']!, 'City', enabled: on)),
                   const SizedBox(width: 12),
                   Expanded(
                     child: _Field(
@@ -1099,10 +1096,7 @@ class _RoomSection extends StatelessWidget {
                       : hostelOnly
                       ? 'Assigned to this hostel — no room yet'
                       : 'This person hasn\'t been given a bed yet.',
-                  style: TextStyle(
-                    fontSize: 12.5,
-                    color: AppColors.textMuted,
-                  ),
+                  style: TextStyle(fontSize: 12.5, color: AppColors.textMuted),
                 ),
               ],
             ),
@@ -1230,7 +1224,10 @@ class _RoomSection extends StatelessWidget {
     if (ok != true) return;
 
     try {
-      await AllotmentService.instance.vacate(collegeId: u.collegeId, student: u);
+      await AllotmentService.instance.vacate(
+        collegeId: u.collegeId,
+        student: u,
+      );
       messenger.showSnackBar(const SnackBar(content: Text('Room vacated')));
     } catch (e) {
       messenger.showSnackBar(SnackBar(content: Text(_describe(e))));

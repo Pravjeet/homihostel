@@ -58,9 +58,7 @@ class _ProfilePageState extends State<ProfilePage> {
         currentPassword: result.currentPassword,
         newPassword: result.newPassword,
       );
-      messenger.showSnackBar(
-        const SnackBar(content: Text('Password changed')),
-      );
+      messenger.showSnackBar(const SnackBar(content: Text('Password changed')));
     } catch (e) {
       messenger.showSnackBar(
         SnackBar(content: Text(AuthService.describeError(e))),
@@ -210,9 +208,7 @@ class _ProfilePageState extends State<ProfilePage> {
                       ),
                       if (!Identity.isSynthetic(user.email)) ...[
                         OutlinedButton(
-                          onPressed: _busy
-                              ? null
-                              : () => _changeEmail(context),
+                          onPressed: _busy ? null : () => _changeEmail(context),
                           child: const Text('Change email'),
                         ),
                         OutlinedButton(
@@ -222,10 +218,9 @@ class _ProfilePageState extends State<ProfilePage> {
                                   final messenger = ScaffoldMessenger.of(
                                     context,
                                   );
-                                  await AuthService.instance
-                                      .sendPasswordReset(
-                                        Identity.display(user.email),
-                                      );
+                                  await AuthService.instance.sendPasswordReset(
+                                    Identity.display(user.email),
+                                  );
                                   messenger.showSnackBar(
                                     const SnackBar(
                                       content: Text(

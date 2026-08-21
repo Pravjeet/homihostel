@@ -34,16 +34,27 @@ class HostelService {
 
   Stream<List<Hostel>> watchHostels(String collegeId) => _hostelPool.stream(
     collegeId,
-    () => _hostels(collegeId).orderBy('name').snapshots().map(
-      (s) => s.docs.map((d) => Hostel.fromMap(d.id, d.data())).toList(),
+    // Sorted client-side, not by `orderBy`: Firestore compares strings
+    // lexicographically, which files BH-10 between BH-1 and BH-2. There are a
+    // few dozen hostels at most, so ordering them here costs nothing and reads
+    // the way the buildings are actually numbered.
+    () => _hostels(collegeId).snapshots().map(
+      (s) =>
+          s.docs.map((d) => Hostel.fromMap(d.id, d.data())).toList()
+            ..sort(Hostel.compareByCode),
     ),
   );
 
+  final CachedStreamPool<Hostel?> _onePool = CachedStreamPool();
+
   Stream<Hostel?> watchHostel(String collegeId, String hostelId) =>
-      _hostels(collegeId)
-          .doc(hostelId)
-          .snapshots()
-          .map((d) => d.exists ? Hostel.fromMap(d.id, d.data()!) : null);
+      _onePool.stream(
+        '$collegeId/$hostelId',
+        () => _hostels(collegeId)
+            .doc(hostelId)
+            .snapshots()
+            .map((d) => d.exists ? Hostel.fromMap(d.id, d.data()!) : null),
+      );
 
   /// Rooms sorted by floor then number. Sorting client-side keeps this to a
   /// single-field Firestore index instead of a composite one.
@@ -325,12 +336,38 @@ class HostelService {
   /// exist. `vacate` only ever clears one student's own room; nothing else
   /// repairs a room that's gone stale on its own. Skips rooms that are
   /// already empty, so re-running this after a partial run is cheap.
-  Future<({int roomsCleared, int bedsFreed})> emptyAllRooms(
+  /// Empties every room in the college, on **both** sides of the relationship.
+  ///
+  /// An allotment is stored twice — `occupantUids` on the room, and
+  /// `hostelId`/`roomId` on the student — written together by
+  /// [AllotmentService.allot] precisely so they cannot disagree. This used to
+  /// clear only the room half, which produced exactly the failure that
+  /// invariant exists to prevent: room tiles showed `0/3` while the room's own
+  /// dialog listed three residents (it derives occupancy from the roster), and
+  /// Room Allotment went on reporting them as allotted. The buildings looked
+  /// empty and the students were still living in them.
+  ///
+  /// So this clears the student side too, and clears `hostelId` along with the
+  /// room: a student with a hostel but no bed is not a state this app tracks
+  /// any more. Afterwards every student is unallotted everywhere at once.
+  ///
+  /// **Order matters.** The student half is *read* before anything is written.
+  /// It used to run last, after the rooms were already emptied — so when that
+  /// read failed (it needs a composite index, which was missing from
+  /// `firestore.indexes.json` for a long time and never deployed), the rooms
+  /// were cleared, the students were not, and the operation left behind
+  /// precisely the split-brain state described above. Reading first means a
+  /// failure aborts with nothing changed instead of half-changed.
+  Future<({int roomsCleared, int bedsFreed, int studentsFreed})> emptyAllRooms(
     String collegeId,
   ) async {
+    // Fail fast, before any write.
+    final allotted = await _allottedStudentRefs(collegeId);
+
     final hostels = await _hostels(collegeId).get();
     var roomsCleared = 0;
     var bedsFreed = 0;
+    final seenUids = <String>{};
 
     for (final hostelDoc in hostels.docs) {
       final roomsSnap = await _rooms(collegeId, hostelDoc.id).get();
@@ -338,27 +375,164 @@ class HostelService {
         final list = d.data()['occupantUids'] as List?;
         return list != null && list.isNotEmpty;
       }).toList();
-      if (occupied.isEmpty) continue;
 
-      for (var start = 0; start < occupied.length; start += _batchLimit) {
-        final end = (start + _batchLimit).clamp(0, occupied.length);
-        final batch = _db.batch();
-        for (final d in occupied.sublist(start, end)) {
-          bedsFreed += (d.data()['occupantUids'] as List).length;
-          batch.update(d.reference, {'occupantUids': <String>[]});
+      if (occupied.isNotEmpty) {
+        for (var start = 0; start < occupied.length; start += _batchLimit) {
+          final end = (start + _batchLimit).clamp(0, occupied.length);
+          final batch = _db.batch();
+          for (final d in occupied.sublist(start, end)) {
+            final uids = d.data()['occupantUids'] as List;
+            bedsFreed += uids.length;
+            // Kept so a student the query missed — one whose own doc lost its
+            // hostelId while the room still listed them — is cleared too.
+            seenUids.addAll(uids.whereType<String>());
+            batch.update(d.reference, {'occupantUids': <String>[]});
+          }
+          await batch.commit();
         }
-        await batch.commit();
+        roomsCleared += occupied.length;
       }
-      roomsCleared += occupied.length;
 
+      // Reset regardless of whether any room held anyone: a counter that has
+      // drifted above zero is exactly what this operation is for.
       await _hostels(collegeId).doc(hostelDoc.id).update({'occupiedBeds': 0});
     }
 
-    return (roomsCleared: roomsCleared, bedsFreed: bedsFreed);
+    final refs = {
+      for (final r in allotted) r.path: r,
+      for (final uid in seenUids) 'users/$uid': _db.collection('users').doc(uid),
+    }.values.toList();
+    final studentsFreed = await _clearStudentAllotments(refs);
+
+    return (
+      roomsCleared: roomsCleared,
+      bedsFreed: bedsFreed,
+      studentsFreed: studentsFreed,
+    );
+  }
+
+  /// Every user in the college who currently holds a hostel.
+  ///
+  /// Queried on `hostelId` rather than reading the whole roster, so the cost
+  /// is the number of allotted students rather than the entire institute.
+  /// That economy is why this needs the `collegeId + hostelId` composite index
+  /// in `firestore.indexes.json` — an equality and an inequality on different
+  /// fields. Without it the query throws `failed-precondition`, so if you ever
+  /// see that here, the indexes have not been deployed.
+  Future<List<DocumentReference<Map<String, dynamic>>>> _allottedStudentRefs(
+    String collegeId,
+  ) async {
+    final snap = await _db
+        .collection('users')
+        .where('collegeId', isEqualTo: collegeId)
+        .where('hostelId', isNull: false)
+        .get();
+    return snap.docs.map((d) => d.reference).toList();
+  }
+
+  /// Clears the room fields on the given users.
+  Future<int> _clearStudentAllotments(
+    List<DocumentReference<Map<String, dynamic>>> refs,
+  ) async {
+    if (refs.isEmpty) return 0;
+
+    for (var start = 0; start < refs.length; start += _batchLimit) {
+      final end = (start + _batchLimit).clamp(0, refs.length);
+      final batch = _db.batch();
+      for (final ref in refs.sublist(start, end)) {
+        batch.update(ref, {
+          'hostelId': null,
+          'hostelName': null,
+          'roomId': null,
+          'roomNumber': null,
+          'allottedAt': null,
+          'updatedAt': FieldValue.serverTimestamp(),
+        });
+      }
+      await batch.commit();
+    }
+
+    return refs.length;
   }
 
   /// Recomputes the denormalised counters from the rooms themselves.
   /// Useful if a write ever fails halfway and the numbers drift.
+  /// Changes the seater type of rooms on one floor, in place.
+  ///
+  /// Two shapes, both of which a warden actually asks for:
+  ///
+  ///  * `from` given — convert only that size ("make the 2-seaters into
+  ///    3-seaters"), leaving the rest of the floor alone.
+  ///  * `from` null — make **every** room on the floor [to] seater.
+  ///
+  /// This edits existing rooms rather than regenerating them, so room numbers,
+  /// features and — critically — current occupants all survive. Regenerating
+  /// would delete and recreate, which throws away who lives where.
+  ///
+  /// **Refuses to shrink a room below the number of people already in it.** A
+  /// 3-seater holding three students cannot become a 2-seater without deciding
+  /// which student is evicted, and that is not a decision a bulk action should
+  /// make silently. The whole operation is checked before anything is written,
+  /// so it either applies to the entire floor or to none of it.
+  Future<({int roomsChanged, int bedsDelta})> retypeFloor({
+    required String collegeId,
+    required String hostelId,
+    required int floor,
+    int? fromCapacity,
+    required int toCapacity,
+  }) async {
+    if (toCapacity < 1) {
+      throw ArgumentError('A room must hold at least one student.');
+    }
+
+    final snap = await _rooms(collegeId, hostelId).get();
+    final onFloor = snap.docs
+        .map((d) => Room.fromMap(d.id, d.data()))
+        .where((r) => r.floor == floor)
+        .where((r) => fromCapacity == null || r.capacity == fromCapacity)
+        .where((r) => r.capacity != toCapacity)
+        .toList();
+
+    if (onFloor.isEmpty) {
+      return (roomsChanged: 0, bedsDelta: 0);
+    }
+
+    // Checked up front, across the whole floor, so a refusal never leaves half
+    // the floor converted.
+    final tooSmall = onFloor.where((r) => r.occupied > toCapacity).toList();
+    if (tooSmall.isNotEmpty) {
+      final names = tooSmall.take(4).map((r) => r.number).join(', ');
+      throw StateError(
+        'Room${tooSmall.length == 1 ? '' : 's'} $names '
+        '${tooSmall.length > 4 ? 'and others ' : ''}'
+        'already hold more than $toCapacity student'
+        '${toCapacity == 1 ? '' : 's'}. Move somebody out first, or pick a '
+        'larger seater type.',
+      );
+    }
+
+    var bedsDelta = 0;
+    for (var start = 0; start < onFloor.length; start += _batchLimit) {
+      final end = (start + _batchLimit).clamp(0, onFloor.length);
+      final batch = _db.batch();
+      for (final r in onFloor.sublist(start, end)) {
+        bedsDelta += toCapacity - r.capacity;
+        batch.update(_rooms(collegeId, hostelId).doc(r.id), {
+          'capacity': toCapacity,
+        });
+      }
+      await batch.commit();
+    }
+
+    // bedCount is denormalised on the hostel, so it moves with the rooms or
+    // the occupancy percentage everywhere else goes wrong.
+    await _hostels(
+      collegeId,
+    ).doc(hostelId).update({'bedCount': FieldValue.increment(bedsDelta)});
+
+    return (roomsChanged: onFloor.length, bedsDelta: bedsDelta);
+  }
+
   Future<void> recalculateCounters(String collegeId, String hostelId) async {
     final snap = await _rooms(collegeId, hostelId).get();
     var beds = 0;

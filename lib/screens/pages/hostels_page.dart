@@ -76,9 +76,7 @@ class _HostelsPageState extends State<HostelsPage> {
         return StreamBuilder<List<AppUser>>(
           stream: DataService.instance.watchUsers(collegeId),
           builder: (context, userSnap) {
-            final heads = HostelHeadcount.byHostel(
-              userSnap.data ?? const <AppUser>[],
-            );
+            final heads = studentsByHostel(userSnap.data ?? const <AppUser>[]);
             return _body(
               context,
               session: session,
@@ -101,18 +99,14 @@ class _HostelsPageState extends State<HostelsPage> {
     required Session session,
     required String collegeId,
     required List<Hostel> hostels,
-    required Map<String, HostelHeadcount> heads,
+    required Map<String, int> heads,
     required bool showCounts,
     required bool countsReady,
   }) {
     final totalRooms = hostels.fold<int>(0, (s, h) => s + h.roomCount);
     final totalBeds = hostels.fold<int>(0, (s, h) => s + h.bedCount);
     final totalOccupied = hostels.fold<int>(0, (s, h) => s + h.occupiedBeds);
-    final totalStudents = heads.values.fold<int>(0, (s, h) => s + h.total);
-    final totalAwaiting = heads.values.fold<int>(
-      0,
-      (s, h) => s + h.awaitingRoom,
-    );
+    final totalStudents = heads.values.fold<int>(0, (s, n) => s + n);
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
@@ -179,16 +173,10 @@ class _HostelsPageState extends State<HostelsPage> {
                           ? '0%'
                           : '${(totalOccupied / totalBeds * 100).round()}%',
                     ),
-                    // Everyone in a hostel, whether or not a bed has been
-                    // assigned — the figure the bed counters cannot show.
-                    if (showCounts) ...[
+                    // Counted from the roster rather than from the bed
+                    // counters, so it stays honest if the two ever drift.
+                    if (showCounts)
                       _Metric('Students', countsReady ? '$totalStudents' : '—'),
-                      _Metric(
-                        'Awaiting room',
-                        countsReady ? '$totalAwaiting' : '—',
-                        color: totalAwaiting > 0 ? AppColors.warning : null,
-                      ),
-                    ],
                   ],
                 ),
               ],
@@ -224,7 +212,7 @@ class _HostelsPageState extends State<HostelsPage> {
                         width: cardWidth,
                         child: _HostelCard(
                           hostel: h,
-                          head: heads[h.id] ?? const HostelHeadcount(),
+                          students: heads[h.id] ?? 0,
                           showCounts: showCounts,
                           countsReady: countsReady,
                           canManage: session.can(Perm.hostelsManage),
@@ -265,10 +253,11 @@ class _HostelsPageState extends State<HostelsPage> {
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 const Text(
-                  'Every room in every hostel will be marked unoccupied, and '
-                  'each hostel\'s occupied-bed count reset to zero. Do this '
-                  'only when nobody actually holds a room — it does not '
-                  'check who still needs one.',
+                  'Every room in every hostel is emptied, and every student '
+                  'loses their hostel and room. They stay on the roster and '
+                  'reappear in Room Allotment awaiting a room, so nobody is '
+                  'deleted — but every allotment in the college is undone, '
+                  'and there is no undo.',
                   style: TextStyle(fontSize: 13, height: 1.5),
                 ),
                 const SizedBox(height: 16),
@@ -317,7 +306,8 @@ class _HostelsPageState extends State<HostelsPage> {
         SnackBar(
           content: Text(
             'Cleared ${result.roomsCleared} room(s), freed '
-            '${result.bedsFreed} bed(s)',
+            '${result.bedsFreed} bed(s), unallotted '
+            '${result.studentsFreed} student(s)',
           ),
         ),
       );
@@ -374,8 +364,7 @@ class _HostelsPageState extends State<HostelsPage> {
 class _Metric extends StatelessWidget {
   final String label;
   final String value;
-  final Color? color;
-  const _Metric(this.label, this.value, {this.color});
+  const _Metric(this.label, this.value);
 
   @override
   Widget build(BuildContext context) => Column(
@@ -393,11 +382,7 @@ class _Metric extends StatelessWidget {
       const SizedBox(height: 2),
       Text(
         value,
-        style: TextStyle(
-          fontSize: 21,
-          fontWeight: FontWeight.w800,
-          color: color,
-        ),
+        style: const TextStyle(fontSize: 21, fontWeight: FontWeight.w800),
       ),
     ],
   );
@@ -462,7 +447,7 @@ class _EmptyState extends StatelessWidget {
 
 class _HostelCard extends StatelessWidget {
   final Hostel hostel;
-  final HostelHeadcount head;
+  final int students;
 
   /// False when the viewer lacks `users.view`, so the roster was never read
   /// and the student figures are hidden rather than shown as a stuck dash.
@@ -475,7 +460,7 @@ class _HostelCard extends StatelessWidget {
 
   const _HostelCard({
     required this.hostel,
-    required this.head,
+    required this.students,
     required this.showCounts,
     required this.countsReady,
     required this.canManage,
@@ -575,49 +560,13 @@ class _HostelCard extends StatelessWidget {
                 _MiniStat(label: 'Rooms', value: '${hostel.roomCount}'),
                 _MiniStat(label: 'Beds', value: '${hostel.bedCount}'),
                 _MiniStat(label: 'Free', value: '${hostel.freeBeds}'),
-                // Students attached to this hostel, bed or not. Sits beside
-                // the bed figures because the gap between them is the point.
                 if (showCounts)
                   _MiniStat(
                     label: 'Students',
-                    value: countsReady ? '${head.total}' : '—',
+                    value: countsReady ? '$students' : '—',
                   ),
               ],
             ),
-            if (showCounts && countsReady && head.awaitingRoom > 0) ...[
-              const SizedBox(height: 12),
-              Container(
-                width: double.infinity,
-                padding: const EdgeInsets.symmetric(
-                  horizontal: 10,
-                  vertical: 8,
-                ),
-                decoration: BoxDecoration(
-                  color: AppColors.warningSoft,
-                  borderRadius: BorderRadius.circular(8),
-                ),
-                child: Row(
-                  children: [
-                    Icon(
-                      Icons.hourglass_empty_rounded,
-                      size: 14,
-                      color: AppColors.warning,
-                    ),
-                    const SizedBox(width: 6),
-                    Expanded(
-                      child: Text(
-                        '${head.awaitingRoom} awaiting a room',
-                        style: TextStyle(
-                          fontSize: 12,
-                          fontWeight: FontWeight.w700,
-                          color: AppColors.warning,
-                        ),
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-            ],
             const SizedBox(height: 14),
             Row(
               children: [

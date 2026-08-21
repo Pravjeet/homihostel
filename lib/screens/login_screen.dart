@@ -242,115 +242,121 @@ class _LoginScreenState extends State<LoginScreen> {
                                 _identifier.clear();
                                 _password.clear();
                               }),
-                        icon: const Icon(Icons.person_add_alt_rounded, size: 18),
+                        icon: const Icon(
+                          Icons.person_add_alt_rounded,
+                          size: 18,
+                        ),
                         label: const Text('Use another account'),
                       ),
                     ] else ...[
-                    TextFormField(
-                      controller: _identifier,
-                      enabled: !_busy,
-                      autofillHints: const [AutofillHints.username],
-                      textInputAction: TextInputAction.next,
-                      decoration: const InputDecoration(
-                        labelText: 'Email or registration number',
-                        helperText: 'Students: just your registration number',
-                        prefixIcon: Icon(Icons.person_outline_rounded),
-                      ),
-                      validator: (v) {
-                        final s = v?.trim() ?? '';
-                        if (s.isEmpty) {
-                          return 'Enter your email or registration number';
-                        }
-                        if (Identity.looksLikeEmail(s)) {
-                          if (!RegExp(
-                            r'^[^@\s]+@[^@\s]+\.[^@\s]+$',
-                          ).hasMatch(s)) {
-                            return 'That email address doesn\'t look valid';
+                      TextFormField(
+                        controller: _identifier,
+                        enabled: !_busy,
+                        autofillHints: const [AutofillHints.username],
+                        textInputAction: TextInputAction.next,
+                        decoration: const InputDecoration(
+                          labelText: 'Email or registration number',
+                          helperText: 'Students: just your registration number',
+                          prefixIcon: Icon(Icons.person_outline_rounded),
+                        ),
+                        validator: (v) {
+                          final s = v?.trim() ?? '';
+                          if (s.isEmpty) {
+                            return 'Enter your email or registration number';
                           }
-                        } else if (!Identity.isValidRegistrationNumber(s)) {
-                          return 'Registration numbers use letters, digits, '
-                              '. _ or - only';
-                        }
-                        return null;
-                      },
-                    ),
-                    const SizedBox(height: 16),
-                    TextFormField(
-                      controller: _password,
-                      enabled: !_busy,
-                      obscureText: _obscure,
-                      autofillHints: const [AutofillHints.password],
-                      textInputAction: TextInputAction.done,
-                      onFieldSubmitted: (_) => _busy ? null : _submit(),
-                      decoration: InputDecoration(
-                        labelText: 'Password',
-                        prefixIcon: const Icon(Icons.lock_outline_rounded),
-                        suffixIcon: IconButton(
-                          icon: Icon(
-                            _obscure
-                                ? Icons.visibility_off_outlined
-                                : Icons.visibility_outlined,
-                          ),
-                          onPressed: () => setState(() => _obscure = !_obscure),
-                        ),
+                          if (Identity.looksLikeEmail(s)) {
+                            if (!RegExp(
+                              r'^[^@\s]+@[^@\s]+\.[^@\s]+$',
+                            ).hasMatch(s)) {
+                              return 'That email address doesn\'t look valid';
+                            }
+                          } else if (!Identity.isValidRegistrationNumber(s)) {
+                            return 'Registration numbers use letters, digits, '
+                                '. _ or - only';
+                          }
+                          return null;
+                        },
                       ),
-                      validator: (v) =>
-                          (v == null || v.isEmpty) ? 'Password is required' : null,
-                    ),
-                    Row(
-                      children: [
-                        Expanded(
-                          child: SavedAccounts.instance.passwordsSupported
-                              ? CheckboxListTile(
-                                  value: _remember,
-                                  onChanged: _busy
-                                      ? null
-                                      : (v) =>
-                                            setState(() => _remember = v ?? false),
-                                  title: const Text(
-                                    'Keep me signed in on this PC',
-                                    style: TextStyle(fontSize: 13),
-                                  ),
-                                  controlAffinity:
-                                      ListTileControlAffinity.leading,
-                                  contentPadding: EdgeInsets.zero,
-                                  dense: true,
-                                )
-                              : const SizedBox.shrink(),
+                      const SizedBox(height: 16),
+                      TextFormField(
+                        controller: _password,
+                        enabled: !_busy,
+                        obscureText: _obscure,
+                        autofillHints: const [AutofillHints.password],
+                        textInputAction: TextInputAction.done,
+                        onFieldSubmitted: (_) => _busy ? null : _submit(),
+                        decoration: InputDecoration(
+                          labelText: 'Password',
+                          prefixIcon: const Icon(Icons.lock_outline_rounded),
+                          suffixIcon: IconButton(
+                            icon: Icon(
+                              _obscure
+                                  ? Icons.visibility_off_outlined
+                                  : Icons.visibility_outlined,
+                            ),
+                            onPressed: () =>
+                                setState(() => _obscure = !_obscure),
+                          ),
                         ),
-                        TextButton(
-                          onPressed: _busy ? null : _resetPassword,
-                          child: const Text('Forgot password?'),
+                        validator: (v) => (v == null || v.isEmpty)
+                            ? 'Password is required'
+                            : null,
+                      ),
+                      Row(
+                        children: [
+                          Expanded(
+                            child: SavedAccounts.instance.passwordsSupported
+                                ? CheckboxListTile(
+                                    value: _remember,
+                                    onChanged: _busy
+                                        ? null
+                                        : (v) => setState(
+                                            () => _remember = v ?? false,
+                                          ),
+                                    title: const Text(
+                                      'Keep me signed in on this PC',
+                                      style: TextStyle(fontSize: 13),
+                                    ),
+                                    controlAffinity:
+                                        ListTileControlAffinity.leading,
+                                    contentPadding: EdgeInsets.zero,
+                                    dense: true,
+                                  )
+                                : const SizedBox.shrink(),
+                          ),
+                          TextButton(
+                            onPressed: _busy ? null : _resetPassword,
+                            child: const Text('Forgot password?'),
+                          ),
+                        ],
+                      ),
+                      const SizedBox(height: 6),
+                      ElevatedButton(
+                        onPressed: _busy ? null : _submit,
+                        child: _busy
+                            ? const SizedBox(
+                                height: 20,
+                                width: 20,
+                                child: CircularProgressIndicator(
+                                  strokeWidth: 2.4,
+                                  color: Colors.white,
+                                ),
+                              )
+                            : const Text('Sign in'),
+                      ),
+                      if ((_saved?.isNotEmpty ?? false)) ...[
+                        const SizedBox(height: 8),
+                        TextButton.icon(
+                          onPressed: _busy
+                              ? null
+                              : () => setState(() {
+                                  _showForm = false;
+                                  _error = null;
+                                }),
+                          icon: const Icon(Icons.arrow_back_rounded, size: 17),
+                          label: const Text('Back to saved accounts'),
                         ),
                       ],
-                    ),
-                    const SizedBox(height: 6),
-                    ElevatedButton(
-                      onPressed: _busy ? null : _submit,
-                      child: _busy
-                          ? const SizedBox(
-                              height: 20,
-                              width: 20,
-                              child: CircularProgressIndicator(
-                                strokeWidth: 2.4,
-                                color: Colors.white,
-                              ),
-                            )
-                          : const Text('Sign in'),
-                    ),
-                    if ((_saved?.isNotEmpty ?? false)) ...[
-                      const SizedBox(height: 8),
-                      TextButton.icon(
-                        onPressed: _busy
-                            ? null
-                            : () => setState(() {
-                                _showForm = false;
-                                _error = null;
-                              }),
-                        icon: const Icon(Icons.arrow_back_rounded, size: 17),
-                        label: const Text('Back to saved accounts'),
-                      ),
-                    ],
                     ],
                     const SizedBox(height: 18),
                     Wrap(
@@ -459,10 +465,7 @@ class _AccountCard extends StatelessWidget {
                         : account.hasPassword
                         ? 'Tap to sign in'
                         : 'Tap to enter your password',
-                    style: TextStyle(
-                      fontSize: 12,
-                      color: AppColors.textMuted,
-                    ),
+                    style: TextStyle(fontSize: 12, color: AppColors.textMuted),
                   ),
                 ],
               ),
@@ -495,11 +498,7 @@ class ErrorBanner extends StatelessWidget {
     child: Row(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        Icon(
-          Icons.error_outline_rounded,
-          color: AppColors.danger,
-          size: 19,
-        ),
+        Icon(Icons.error_outline_rounded, color: AppColors.danger, size: 19),
         const SizedBox(width: 10),
         Expanded(
           child: Text(

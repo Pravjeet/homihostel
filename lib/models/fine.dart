@@ -211,10 +211,11 @@ class FineSummary {
       final label = (k == null || k.isEmpty) ? unknownLabel : k;
       (buckets[label] ??= <String>{}).add(f.studentUid);
     }
-    final entries = buckets.entries
-        .map((e) => MapEntry(e.key, e.value.length as num))
-        .toList()
-      ..sort((a, b) => b.value.compareTo(a.value));
+    final entries =
+        buckets.entries
+            .map((e) => MapEntry(e.key, e.value.length as num))
+            .toList()
+          ..sort((a, b) => b.value.compareTo(a.value));
     return (limit == null || entries.length <= limit)
         ? entries
         : entries.sublist(0, limit);

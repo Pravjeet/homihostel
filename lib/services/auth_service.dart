@@ -210,22 +210,41 @@ class AuthService {
   // Session loading
   // ---------------------------------------------------------------------
 
+  // These three sit in nested StreamBuilders at the root of AuthGate, so they
+  // are re-evaluated on every rebuild of the entire app. Single documents each,
+  // but the most frequently re-created streams in the codebase — and the pool
+  // is what stops each rebuild from re-reading them. See [CachedStream].
+
+  final CachedStreamPool<AppUser?> _profilePool = CachedStreamPool();
+  final CachedStreamPool<AppRole?> _rolePool = CachedStreamPool();
+  final CachedStreamPool<String> _collegeNamePool = CachedStreamPool();
+
   /// Live view of the signed-in user's profile document.
-  Stream<AppUser?> watchProfile(String uid) => _db
-      .collection('users')
-      .doc(uid)
-      .snapshots()
-      .map((d) => d.exists ? AppUser.fromMap(d.id, d.data()!) : null);
+  ///
+  /// Also called with other people's uids from the user detail page, hence
+  /// keying by uid rather than holding a single stream.
+  Stream<AppUser?> watchProfile(String uid) => _profilePool.stream(
+    uid,
+    () => _db
+        .collection('users')
+        .doc(uid)
+        .snapshots()
+        .map((d) => d.exists ? AppUser.fromMap(d.id, d.data()!) : null),
+  );
 
   /// Live view of a role document, so a permission change applied by the
   /// admin reaches the affected user's sidebar without them re-logging in.
-  Stream<AppRole?> watchRole(String collegeId, String roleId) => _db
-      .collection('colleges')
-      .doc(collegeId)
-      .collection('roles')
-      .doc(roleId)
-      .snapshots()
-      .map((d) => d.exists ? AppRole.fromMap(d.id, d.data()!) : null);
+  Stream<AppRole?> watchRole(String collegeId, String roleId) =>
+      _rolePool.stream(
+        '$collegeId/$roleId',
+        () => _db
+            .collection('colleges')
+            .doc(collegeId)
+            .collection('roles')
+            .doc(roleId)
+            .snapshots()
+            .map((d) => d.exists ? AppRole.fromMap(d.id, d.data()!) : null),
+      );
 
   Future<String> collegeName(String collegeId) async {
     final doc = await _db.collection('colleges').doc(collegeId).get();
@@ -234,11 +253,14 @@ class AuthService {
 
   /// Live college name, so renaming the institution in System Settings shows
   /// up in the sidebar immediately rather than after a re-login.
-  Stream<String> watchCollegeName(String collegeId) => _db
-      .collection('colleges')
-      .doc(collegeId)
-      .snapshots()
-      .map((d) => d.data()?['name'] as String? ?? 'Institution');
+  Stream<String> watchCollegeName(String collegeId) => _collegeNamePool.stream(
+    collegeId,
+    () => _db
+        .collection('colleges')
+        .doc(collegeId)
+        .snapshots()
+        .map((d) => d.data()?['name'] as String? ?? 'Institution'),
+  );
 
   // ---------------------------------------------------------------------
   // Creating a sub-user without kicking the admin out of their own session.
@@ -373,11 +395,9 @@ class AuthService {
     FirebaseApp? temp = app;
     try {
       temp ??= await openProvisioningApp();
-      final cred = await FirebaseAuth.instanceFor(app: temp)
-          .createUserWithEmailAndPassword(
-            email: email.trim(),
-            password: password,
-          );
+      final cred = await FirebaseAuth.instanceFor(
+        app: temp,
+      ).createUserWithEmailAndPassword(email: email.trim(), password: password);
       final uid = cred.user!.uid;
 
       // Deliberately NOT calling updateDisplayName: it is a whole extra network

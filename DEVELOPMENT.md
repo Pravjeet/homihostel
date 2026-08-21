@@ -88,6 +88,35 @@ college yet. Room allotment is denormalised onto both the room
 (`occupantUids`) and the user (`roomId`, `roomNumber`), written in one
 transaction so they cannot disagree.
 
+**An office order covers one *or more* students.** One incident is one order:
+five students in the same fight get a single order naming all five, not five
+near-identical ones — which is how the office issues them, and it stores the
+scanned photo once instead of five times. The shape is three fields that must
+stay in step:
+
+  * `students[]`  — `{uid, name, regNo, fineId, fineAmount}` per person
+  * `studentUids[]` — a flat array of the same uids, existing **only** so
+    "orders against this student" can be a query; array-contains cannot reach
+    inside `students[].uid`
+  * `fineTotal` — the sum, denormalised for the same class of reason: security
+    rules cannot look inside an array, so this is what tells them "this order
+    levies money, require fines.manage"
+
+Amounts are per student and optional. The ringleader and the bystander do not
+pay the same, and a student can be named on an order with no fine at all. An
+order fining nobody is a warning or suspension and writes no fine documents.
+Each fined student still gets their own `fines/{id}`, so each is settled,
+waived and counted independently.
+
+**A role is staff or resident, and it is decided by permissions, not name.**
+`Perm.isResident` returns true only when a role holds nothing reaching beyond
+itself — no `.manage`, no `.viewAll`, no user-directory access. The
+user-creation form asks it to decide whether to collect a full student record
+(every CSV column) or a staff one. Tested that way round on purpose: a *new*
+self-service permission added later must not be misfiled as staff. Do not
+substitute `Perm.managesHostels` — an accountant runs no hostel but is
+emphatically not a student.
+
 ## Things that will bite you
 
 **Allotment must be a transaction, never a batch.** Two wardens clicking the
@@ -127,9 +156,54 @@ box doesn't make `StreamBuilder` tear down and re-read. Never call
 per rebuild. The pool outlives the widget tree, so `StreamCaches.disposeAll()`
 must run on sign-out or the next user inherits the previous one's data.
 
+Every `watch…` in `lib/services/` goes through a pool — there are no
+exceptions left, and a new one is a bug rather than a style choice. The rule
+holds for single documents too: `watchProfile`, `watchRole` and
+`watchCollegeName` sit in nested `StreamBuilder`s at the root of `AuthGate`,
+so they are re-evaluated on every rebuild of the whole app, and the per-student
+`watchMine` queries are small but paid once per resident across a few thousand
+of them.
+
+**A `Future` built inside `build()` is the same mistake, and harder to see.**
+`FutureBuilder(future: service.thing())` re-runs the read on every rebuild,
+and unlike a stream there is no pool to catch it — the fix is to memoise the
+future in a `State` field, keyed on whatever genuinely invalidates it, so a
+real change still refetches. See `_MyRoomPageState._roomFor` (keyed on the
+allotment) and `_FeedState._countsFor` (keyed on the role set).
+
+**Counting is not reading.** The dashboard wants seven integers, and deriving
+them from the roster cost one billed read per student — 2,650 on this campus,
+every time the app opened, before anyone clicked anything. `count()` answers
+from the index instead, billed one read per 1,000 entries matched: the same
+figure costs 3 reads, and no document data crosses the network. See
+`DataService.countUsersByRole`, which counts per role so one batch yields the
+total, the resident/staff split *and* the breakdown chart.
+
+Aggregations are subject to the same rules as the underlying query, and the
+users `list` rule constrains `resource.data`, which an aggregation never
+produces — so whether it worked at all was an open question. It does, and
+`rules-tests` pins it along with the denials that matter: no `users.view`, no
+count; another college, no count; unscoped across all colleges, no count. If
+you touch that rule, run those tests before assuming the dashboard still
+loads.
+
+The trade is that a `count()` is a `Future`, not a `Stream` — the dashboard
+shows a snapshot from when it loaded. That is right for a summary screen and
+wrong for Room Allotment, where two wardens genuinely race. Memoise the
+futures (see `_FeedState._countsFor`) or every rebuild re-fires the batch,
+which is the cost the change exists to remove.
+
 **There is no Firebase Storage** (Spark plan, no billing account). Images —
 the college logo, office-order scans, fine attachments — are base64 strings
 inside Firestore documents. Mind the 1 MB per-document limit.
+
+**Office-order photos are still inside the order documents**, and the register
+streams every one of them. Forty orders is roughly 35 MB transferred to render
+forty rows of text. The reads are cheap — forty documents — but the bandwidth
+and memory are not, and it worsens with every order issued. Moving the image
+to `officeOrders/{id}/media/photo` would let the register stream metadata only
+and fetch a photo when someone actually opens one. Not done yet; know about it
+before adding anything else to that page.
 
 **`tools/lib.js` deliberately mirrors Dart code and must stay in step.** CSV
 parsing, header aliases, synthetic login emails, sem/batch derivation and the
@@ -137,6 +211,15 @@ trade list exist twice: `lib.js` ↔ `csv_import.dart`, `identity.dart`,
 `app_user.dart`. A student imported by the script and one imported in-app must
 come out byte-identical, or the fines dashboard buckets them separately. The
 mapping table is at the bottom of `tools/README.md`.
+
+**`Session.of(context)` throws inside a dialog.** `showDialog` pushes onto the
+root Navigator, so the dialog's context sits *above* `SessionScope` and the
+lookup fails the moment it opens — a full-screen red error, not a subtle bug.
+`flutter analyze` cannot see it, because it fails at runtime. Read the session
+in the calling page and pass what the dialog needs as constructor arguments;
+`BulkDeleteUsersDialog` and `RoomDetailDialog` both document the pattern, and
+`test/room_detail_dialog_test.dart` pins it by pumping the dialog with no
+scope above it. This has already shipped broken once.
 
 **A widget that returns `Expanded` or `Spacer` needs a bounded parent.** A
 card inside a `Wrap` has unbounded height; a vertical flex child there fails

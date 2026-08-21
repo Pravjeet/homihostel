@@ -19,21 +19,36 @@ import '../../services/fine_service.dart';
 const int _maxOrderImageBytes = 700 * 1024;
 
 const _monthNames = [
-  'Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun',
-  'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec',
+  'Jan',
+  'Feb',
+  'Mar',
+  'Apr',
+  'May',
+  'Jun',
+  'Jul',
+  'Aug',
+  'Sep',
+  'Oct',
+  'Nov',
+  'Dec',
 ];
 
-/// Form for staff to impose a fine on a resident.
+/// Form for issuing an office order, and optionally fining the students it
+/// names.
 ///
-/// The student is chosen from a live search rather than typed, so the fine
-/// always lands on a real uid — a fine attached to a mistyped name would be
+/// Students are chosen from a live search rather than typed, so the order
+/// always lands on real uids — one attached to a mistyped name would be
 /// invisible to the student it was meant for.
 ///
-/// Every fine here comes with the office order it was issued under — the two
-/// are created together in one write ([FineService.imposeWithOfficeOrder]),
-/// so this form collects both: the fine's amount/category/reason, and the
-/// order's number/date/photo. There is no path to impose a fine without an
-/// order behind it.
+/// One incident is one order. A fight involving five students produces a
+/// single order naming all five, which is how the office issues them, and it
+/// stores the scanned photo once rather than five times (it is base64 inside
+/// the document).
+///
+/// The fine is optional. Given an amount, each named student gets their own
+/// fine for it, all written in the same batch as the order
+/// ([FineService.publishOfficeOrder]). Without one the order stands alone — a
+/// warning, a suspension, a notice of enquiry.
 class ImposeFineView extends StatefulWidget {
   final VoidCallback onBack;
   final VoidCallback onDone;
@@ -54,7 +69,6 @@ class ImposeFineView extends StatefulWidget {
 
 class _ImposeFineViewState extends State<ImposeFineView> {
   final _formKey = GlobalKey<FormState>();
-  final _amount = TextEditingController();
   final _reason = TextEditingController();
   final _search = TextEditingController();
 
@@ -66,7 +80,20 @@ class _ImposeFineViewState extends State<ImposeFineView> {
   String? _orderImageMimeType;
   String? _orderImageName;
 
-  AppUser? _student;
+  /// Everyone this order is against. One incident is one order, so a fight
+  /// involving five students is five entries here, not five orders.
+  final List<AppUser> _students = [];
+
+  /// What each student owes, keyed by uid.
+  ///
+  /// A student with no controller text is named on the order but not fined —
+  /// which is a real outcome, not an omission. The ringleader and the person
+  /// who happened to be standing there do not pay the same, and one of them
+  /// may pay nothing.
+  final Map<String, TextEditingController> _amounts = {};
+
+  TextEditingController _amountFor(AppUser u) =>
+      _amounts.putIfAbsent(u.uid, () => TextEditingController());
 
   /// Null until the first build reads the workspace's configured categories —
   /// Session isn't available from initState.
@@ -77,16 +104,25 @@ class _ImposeFineViewState extends State<ImposeFineView> {
   @override
   void initState() {
     super.initState();
-    _student = widget.student;
+    if (widget.student != null) _students.add(widget.student!);
   }
 
-  /// Pre-fills the amount when the chosen category has a configured default,
-  /// but never overwrites something already typed.
+  /// Pre-fills each student's amount when the chosen category has a default
+  /// configured for the workspace.
+  ///
+  /// Only fills *blank* boxes — a figure already typed for one student is
+  /// theirs, and picking a category should not quietly overwrite it. That is
+  /// what makes the per-student amounts and the college's default amounts get
+  /// along: the default is a starting point, not a rule.
   void _applyDefault(List<FineCategory> configured, String category) {
-    if (_amount.text.trim().isNotEmpty) return;
     for (final c in configured) {
       if (c.name == category && c.defaultAmount != null) {
-        _amount.text = '${c.defaultAmount}';
+        setState(() {
+          for (final u in _students) {
+            final box = _amountFor(u);
+            if (box.text.trim().isEmpty) box.text = '${c.defaultAmount}';
+          }
+        });
         return;
       }
     }
@@ -94,7 +130,9 @@ class _ImposeFineViewState extends State<ImposeFineView> {
 
   @override
   void dispose() {
-    _amount.dispose();
+    for (final c in _amounts.values) {
+      c.dispose();
+    }
     _reason.dispose();
     _search.dispose();
     _orderNo.dispose();
@@ -121,7 +159,8 @@ class _ImposeFineViewState extends State<ImposeFineView> {
 
     if (file.bytes!.lengthInBytes > _maxOrderImageBytes) {
       setState(() {
-        _error = 'That photo is too large '
+        _error =
+            'That photo is too large '
             '(${(file.bytes!.lengthInBytes / 1024).round()} KB). Please '
             'keep it under ${_maxOrderImageBytes ~/ 1024} KB — a phone camera '
             'shot usually compresses well below that.';
@@ -150,14 +189,83 @@ class _ImposeFineViewState extends State<ImposeFineView> {
     setState(() => _orderDate = picked);
   }
 
+  /// The amount typed for one student, or null when they are not being fined.
+  num? _chargeFor(AppUser u) {
+    final raw = _amounts[u.uid]?.text.trim() ?? '';
+    if (raw.isEmpty) return null;
+    final n = num.tryParse(raw);
+    return (n == null || n <= 0) ? null : n;
+  }
+
+  /// Everyone actually being fined.
+  List<AppUser> get _fined =>
+      _students.where((u) => _chargeFor(u) != null).toList();
+
+  /// The order's total, so the whole bill is visible before submitting rather
+  /// than being a surprise in the fines ledger.
+  num get _total =>
+      _students.fold<num>(0, (sum, u) => sum + (_chargeFor(u) ?? 0));
+
+  /// Fills every blank amount with the same figure, for the common case where
+  /// most of a group are fined alike. Deliberately fills rather than locks —
+  /// each field stays editable afterwards.
+  void _applyToAll(num value) {
+    setState(() {
+      for (final u in _students) {
+        _amountFor(u).text = '$value';
+      }
+    });
+  }
+
+  /// Asks for one figure to drop into every student's box.
+  Future<num?> _askSameAmount(BuildContext context) async {
+    final controller = TextEditingController();
+    final value = await showDialog<num>(
+      context: context,
+      builder: (c) => AlertDialog(
+        title: const Text('Fine everyone the same?'),
+        content: TextField(
+          controller: controller,
+          autofocus: true,
+          keyboardType: TextInputType.number,
+          decoration: const InputDecoration(
+            labelText: 'Amount for each',
+            prefixText: '\u20b9 ',
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(c),
+            child: const Text('Cancel'),
+          ),
+          FilledButton(
+            onPressed: () {
+              final n = num.tryParse(controller.text.trim());
+              Navigator.pop(c, n != null && n > 0 ? n : null);
+            },
+            child: const Text('Fill in'),
+          ),
+        ],
+      ),
+    );
+    controller.dispose();
+    return value;
+  }
+
   Future<void> _submit() async {
-    if (_student == null) {
-      setState(() => _error = 'Choose the student this fine is against.');
+    if (_students.isEmpty) {
+      setState(() => _error = 'Choose at least one student for this order.');
       return;
     }
     if (!_formKey.currentState!.validate()) return;
+    if (_fined.isNotEmpty && (_category ?? '').trim().isEmpty) {
+      setState(() => _error = 'Pick a category for the fines.');
+      return;
+    }
     if (_orderImageBytes == null) {
-      setState(() => _error = 'Add a photo of the office order before submitting');
+      setState(
+        () => _error = 'Add a photo of the office order before submitting',
+      );
       return;
     }
 
@@ -169,12 +277,15 @@ class _ImposeFineViewState extends State<ImposeFineView> {
     final session = Session.of(context);
     final messenger = ScaffoldMessenger.of(context);
     try {
-      await FineService.instance.imposeWithOfficeOrder(
+      await FineService.instance.publishOfficeOrder(
         collegeId: session.user.collegeId,
-        student: _student!,
+        // Each student with their own amount; a null amount means named on the
+        // order but not fined.
+        charges: [
+          for (final u in _students) (student: u, amount: _chargeFor(u)),
+        ],
         imposedBy: session.user,
-        amount: num.parse(_amount.text.trim()),
-        category: _category ?? kFineCategories.first,
+        category: _fined.isEmpty ? null : (_category ?? kFineCategories.first),
         reason: _reason.text,
         orderNo: _orderNo.text,
         orderTitle: _orderTitle.text,
@@ -183,8 +294,18 @@ class _ImposeFineViewState extends State<ImposeFineView> {
         orderDescription: _orderDescription.text,
         orderDate: _orderDate,
       );
+      final n = _fined.length;
       messenger.showSnackBar(
-        SnackBar(content: Text('Fine imposed on ${_student!.name}')),
+        SnackBar(
+          content: Text(
+            n == 0
+                ? 'Order ${_orderNo.text.trim()} issued against '
+                      '${_students.length} student'
+                      '${_students.length == 1 ? '' : 's'} — no fines'
+                : 'Order issued — $n of ${_students.length} fined, '
+                      '₹$_total total',
+          ),
+        ),
       );
       widget.onDone();
     } catch (e) {
@@ -221,10 +342,15 @@ class _ImposeFineViewState extends State<ImposeFineView> {
                     tooltip: 'Back to fines',
                   ),
                   const SizedBox(width: 4),
-                  const Expanded(
+                  Expanded(
+                    // The form issues an order that may or may not carry a
+                    // fine, so a fixed "Impose a fine" would be wrong half the
+                    // time — it follows the switch.
                     child: Text(
-                      'Impose a fine',
-                      style: TextStyle(
+                      _fined.isEmpty
+                          ? 'Issue an office order'
+                          : 'Issue an office order with fines',
+                      style: const TextStyle(
                         fontSize: 19,
                         fontWeight: FontWeight.w800,
                       ),
@@ -248,10 +374,7 @@ class _ImposeFineViewState extends State<ImposeFineView> {
                     Expanded(
                       child: Text(
                         _error!,
-                        style: TextStyle(
-                          color: AppColors.danger,
-                          fontSize: 13,
-                        ),
+                        style: TextStyle(color: AppColors.danger, fontSize: 13),
                       ),
                     ),
                   ],
@@ -266,7 +389,9 @@ class _ImposeFineViewState extends State<ImposeFineView> {
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   Text(
-                    'Student',
+                    _students.length > 1
+                        ? 'Students (${_students.length})'
+                        : 'Student',
                     style: TextStyle(
                       fontSize: 12,
                       fontWeight: FontWeight.w700,
@@ -275,34 +400,116 @@ class _ImposeFineViewState extends State<ImposeFineView> {
                     ),
                   ),
                   const SizedBox(height: 12),
-                  if (_student != null)
-                    _SelectedStudent(
-                      student: _student!,
-                      onClear: _busy
-                          ? null
-                          : () => setState(() => _student = null),
-                    )
-                  else ...[
-                    TextField(
-                      controller: _search,
-                      enabled: !_busy,
-                      onChanged: (_) => setState(() {}),
-                      decoration: const InputDecoration(
-                        hintText: 'Search by name, registration number or room',
-                        prefixIcon: Icon(Icons.search_rounded),
-                        isDense: true,
-                      ),
+                  // Everyone chosen so far. The search below stays open rather
+                  // than collapsing on the first pick, because adding the
+                  // second and third student is the normal case for a group
+                  // order, not an edge case.
+                  for (final u in _students) ...[
+                    Row(
+                      crossAxisAlignment: CrossAxisAlignment.center,
+                      children: [
+                        Expanded(
+                          child: _SelectedStudent(
+                            student: u,
+                            onClear: _busy
+                                ? null
+                                : () => setState(() {
+                                    _students.remove(u);
+                                    _amounts.remove(u.uid)?.dispose();
+                                  }),
+                          ),
+                        ),
+                        const SizedBox(width: 10),
+                        // One box per student, because on a real order they do
+                        // not all pay the same. Left blank, this student is
+                        // named on the order but not fined.
+                        SizedBox(
+                          width: 130,
+                          child: TextFormField(
+                            controller: _amountFor(u),
+                            enabled: !_busy,
+                            keyboardType: TextInputType.number,
+                            onChanged: (_) => setState(() {}),
+                            decoration: const InputDecoration(
+                              labelText: 'Fine',
+                              hintText: 'none',
+                              prefixText: '\u20b9 ',
+                              isDense: true,
+                            ),
+                            validator: (v) {
+                              final raw = (v ?? '').trim();
+                              if (raw.isEmpty) return null; // not fined
+                              final n = num.tryParse(raw);
+                              if (n == null) return 'Number';
+                              if (n <= 0) return '> 0';
+                              return null;
+                            },
+                          ),
+                        ),
+                      ],
                     ),
-                    const SizedBox(height: 12),
-                    _StudentResults(
-                      collegeId: collegeId,
-                      query: _search.text,
-                      onPick: (u) => setState(() {
-                        _student = u;
-                        _error = null;
-                      }),
+                    const SizedBox(height: 8),
+                  ],
+                  if (_students.length > 1) ...[
+                    const SizedBox(height: 2),
+                    Row(
+                      children: [
+                        Text(
+                          _fined.isEmpty
+                              ? 'Nobody is being fined \u2014 this will be a '
+                                    'warning.'
+                              : '${_fined.length} of ${_students.length} fined '
+                                    '\u2014 \u20b9$_total total',
+                          style: TextStyle(
+                            fontSize: 12.5,
+                            fontWeight: FontWeight.w700,
+                            color: _fined.isEmpty
+                                ? AppColors.textMuted
+                                : AppColors.primary,
+                          ),
+                        ),
+                        const Spacer(),
+                        // The common case is "mostly the same, with
+                        // exceptions" — fill them all, then edit the outliers.
+                        if (!_busy)
+                          TextButton(
+                            onPressed: () async {
+                              final v = await _askSameAmount(context);
+                              if (v != null) _applyToAll(v);
+                            },
+                            child: const Text('Same for all'),
+                          ),
+                      ],
                     ),
                   ],
+                  TextField(
+                    controller: _search,
+                    enabled: !_busy,
+                    onChanged: (_) => setState(() {}),
+                    decoration: InputDecoration(
+                      hintText: _students.isEmpty
+                          ? 'Search by name, registration number or room'
+                          : 'Add another student to this order',
+                      prefixIcon: const Icon(Icons.search_rounded),
+                      isDense: true,
+                    ),
+                  ),
+                  const SizedBox(height: 12),
+                  _StudentResults(
+                    collegeId: collegeId,
+                    query: _search.text,
+                    // Already-added students are filtered out of the results,
+                    // so the same person can't be listed twice and be fined
+                    // twice for one incident.
+                    excludeUids: {for (final u in _students) u.uid},
+                    onPick: (u) => setState(() {
+                      _students.add(u);
+                      _error = null;
+                      // Clearing the box readies it for the next name and
+                      // collapses a long result list.
+                      _search.clear();
+                    }),
+                  ),
                 ],
               ),
             ),
@@ -313,52 +520,31 @@ class _ImposeFineViewState extends State<ImposeFineView> {
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  Row(
-                    children: [
-                      Expanded(
-                        child: TextFormField(
-                          controller: _amount,
-                          enabled: !_busy,
-                          keyboardType: TextInputType.number,
-                          decoration: const InputDecoration(
-                            labelText: 'Amount',
-                            prefixText: '₹ ',
-                          ),
-                          validator: (v) {
-                            final n = num.tryParse(v?.trim() ?? '');
-                            if (n == null) return 'Enter an amount';
-                            if (n <= 0) return 'Must be more than zero';
-                            return null;
+                  // No "does this carry a fine?" switch any more: that is
+                  // decided per student by whether their amount box is filled.
+                  // An order where nobody is fined is a warning, and needs no
+                  // separate toggle to say so.
+                  DropdownButtonFormField<String>(
+                    initialValue: _category,
+                    isExpanded: true,
+                    decoration: InputDecoration(
+                      labelText: 'Reason category',
+                      helperText: _fined.isEmpty
+                          ? 'Only needed once somebody is being fined'
+                          : null,
+                    ),
+                    items: categories
+                        .map((c) => DropdownMenuItem(value: c, child: Text(c)))
+                        .toList(),
+                    onChanged: _busy
+                        ? null
+                        : (v) {
+                            setState(() => _category = v ?? categories.first);
+                            _applyDefault(
+                              session.settings.fineCategories,
+                              _category!,
+                            );
                           },
-                        ),
-                      ),
-                      const SizedBox(width: 14),
-                      Expanded(
-                        flex: 2,
-                        child: DropdownButtonFormField<String>(
-                          initialValue: _category,
-                          isExpanded: true,
-                          decoration: const InputDecoration(
-                            labelText: 'Reason category',
-                          ),
-                          items: categories
-                              .map(
-                                (c) =>
-                                    DropdownMenuItem(value: c, child: Text(c)),
-                              )
-                              .toList(),
-                          onChanged: _busy
-                              ? null
-                              : (v) => setState(() {
-                                  _category = v ?? categories.first;
-                                  _applyDefault(
-                                    session.settings.fineCategories,
-                                    _category!,
-                                  );
-                                }),
-                        ),
-                      ),
-                    ],
                   ),
                   const SizedBox(height: 18),
                   TextFormField(
@@ -368,7 +554,8 @@ class _ImposeFineViewState extends State<ImposeFineView> {
                     decoration: const InputDecoration(
                       labelText: 'Details',
                       alignLabelWithHint: true,
-                      hintText: 'What happened, and when. The student sees '
+                      hintText:
+                          'What happened, and when. The student sees '
                           'this on their fines list.',
                     ),
                     validator: (v) => (v == null || v.trim().length < 5)
@@ -398,7 +585,10 @@ class _ImposeFineViewState extends State<ImposeFineView> {
                   Text(
                     'Every fine is issued under an order — fill in what was '
                     'printed and attach a photo of it.',
-                    style: TextStyle(fontSize: 12.5, color: AppColors.textMuted),
+                    style: TextStyle(
+                      fontSize: 12.5,
+                      color: AppColors.textMuted,
+                    ),
                   ),
                   const SizedBox(height: 14),
                   Row(
@@ -446,7 +636,8 @@ class _ImposeFineViewState extends State<ImposeFineView> {
                     enabled: !_busy,
                     decoration: const InputDecoration(
                       labelText: 'Subject',
-                      hintText: 'e.g., Disciplinary action for curfew violation',
+                      hintText:
+                          'e.g., Disciplinary action for curfew violation',
                     ),
                     validator: (v) => (v == null || v.trim().length < 3)
                         ? 'Subject is required (at least 3 characters)'
@@ -513,7 +704,9 @@ class _ImposeFineViewState extends State<ImposeFineView> {
                     OutlinedButton.icon(
                       onPressed: _busy ? null : _pickOrderImage,
                       icon: const Icon(Icons.add_photo_alternate_outlined),
-                      label: const Text('Choose a photo (JPG/PNG, under 700 KB)'),
+                      label: const Text(
+                        'Choose a photo (JPG/PNG, under 700 KB)',
+                      ),
                     ),
                   const SizedBox(height: 18),
                   TextFormField(
@@ -523,7 +716,8 @@ class _ImposeFineViewState extends State<ImposeFineView> {
                     decoration: const InputDecoration(
                       labelText: 'Summary (optional)',
                       alignLabelWithHint: true,
-                      hintText: 'A line or two on what the order says, so '
+                      hintText:
+                          'A line or two on what the order says, so '
                           'people can find it without opening the photo.',
                     ),
                   ),
@@ -547,7 +741,13 @@ class _ImposeFineViewState extends State<ImposeFineView> {
                                   color: Colors.white,
                                 ),
                               )
-                            : const Text('Impose fine'),
+                            : Text(
+                                _fined.isEmpty
+                                    ? 'Issue order'
+                                    : _fined.length > 1
+                                    ? 'Issue order \u2014 ${_fined.length} fines'
+                                    : 'Issue order \u2014 1 fine',
+                              ),
                       ),
                     ],
                   ),
@@ -603,10 +803,7 @@ class _SelectedStudent extends StatelessWidget {
               const SizedBox(height: 2),
               Text(
                 _subtitleFor(student),
-                style: TextStyle(
-                  fontSize: 12.5,
-                  color: AppColors.textMuted,
-                ),
+                style: TextStyle(fontSize: 12.5, color: AppColors.textMuted),
               ),
             ],
           ),
@@ -630,11 +827,18 @@ String _subtitleFor(AppUser u) => [
 class _StudentResults extends StatelessWidget {
   final String collegeId;
   final String query;
+
+  /// Students already named on this order. Excluded from results so the same
+  /// person can't be added twice — which would raise two fines against them
+  /// for one incident, and is rejected by the service anyway.
+  final Set<String> excludeUids;
+
   final ValueChanged<AppUser> onPick;
 
   const _StudentResults({
     required this.collegeId,
     required this.query,
+    this.excludeUids = const {},
     required this.onPick,
   });
 
@@ -666,6 +870,7 @@ class _StudentResults extends StatelessWidget {
 
         final matches = snap.data!
             .where((u) => !u.isSuperAdmin)
+            .where((u) => !excludeUids.contains(u.uid))
             .where(
               (u) =>
                   u.name.toLowerCase().contains(q) ||

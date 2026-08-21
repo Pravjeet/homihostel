@@ -66,7 +66,8 @@ String templateHeaderRow({String delimiter = ','}) =>
 /// Split one field per line rather than run together: the previous version
 /// was two commas short, so every value from `state` onwards sat under the
 /// wrong header — the template itself taught people the wrong shape.
-String templateWithExample() => '${kImportColumns.join(',')}\n'
+String templateWithExample() =>
+    '${kImportColumns.join(',')}\n'
     '${[
       'Aarav Sharma', // name
       '2040353', // registrationNo
@@ -274,8 +275,9 @@ class ImportRow {
     return Identity.toAuthEmail(registrationNo);
   }
 
-  String get loginLabel =>
-      (values['email']?.isNotEmpty ?? false) ? values['email']! : registrationNo;
+  String get loginLabel => (values['email']?.isNotEmpty ?? false)
+      ? values['email']!
+      : registrationNo;
 
   bool get isValid => action != RowAction.skip;
   bool get wantsAllotment => hostel != null && roomNumber != null;
@@ -332,7 +334,8 @@ ImportPlan analyseImport({
       .toList();
 
   final hasLoginColumn =
-      table.headers.contains('registrationNo') || table.headers.contains('email');
+      table.headers.contains('registrationNo') ||
+      table.headers.contains('email');
   if (!hasLoginColumn) missing.add('registrationNo or email');
 
   if (missing.isNotEmpty) {
@@ -420,7 +423,9 @@ ImportPlan analyseImport({
 
     final rawState = values['state'];
     if (rawState != null && normaliseState(rawState) == null) {
-      warnings.add('State "$rawState" isn\'t recognised — will try the address');
+      warnings.add(
+        'State "$rawState" isn\'t recognised — will try the address',
+      );
     }
 
     // Resolve the role by name. An unrecognised name is NOT fatal — we fall
@@ -445,9 +450,7 @@ ImportPlan analyseImport({
         }
       }
       role ??= assignable.first;
-      warnings.add(
-        'No role called "$wantedRole" — using ${role.name} instead',
-      );
+      warnings.add('No role called "$wantedRole" — using ${role.name} instead');
     }
 
     final existing = byEmail[authEmail];
@@ -458,7 +461,9 @@ ImportPlan analyseImport({
       );
     }
     if (existing != null && existing.isSuperAdmin) {
-      problems.add('That login belongs to the Super Admin and won\'t be touched');
+      problems.add(
+        'That login belongs to the Super Admin and won\'t be touched',
+      );
     }
 
     // Allotment target, if named.
@@ -707,7 +712,9 @@ Future<ImportOutcome> runImport({
   final creates = work.where((r) => r.action == RowAction.create).toList();
   final updates = work.where((r) => r.action != RowAction.create).toList();
   final allotWork = work
-      .where((r) => r.wantsAllotment || (r.hostel != null && r.roomNumber == null))
+      .where(
+        (r) => r.wantsAllotment || (r.hostel != null && r.roomNumber == null),
+      )
       .toList();
 
   // Progress is counted in units of work, not rows: a student who also needs
@@ -779,9 +786,7 @@ Future<ImportOutcome> runImport({
 
   // ---- phase 2: account creation, on a self-limiting pool ----------------
 
-  final lanes = creates.isEmpty
-      ? 0
-      : (cancelled() ? 0 : kCreateConcurrency);
+  final lanes = creates.isEmpty ? 0 : (cancelled() ? 0 : kCreateConcurrency);
 
   // One provisioning app PER LANE. Sharing a single FirebaseApp across
   // concurrent creates would have them fighting over one Auth session and its
@@ -1019,8 +1024,14 @@ int? parseSem(String? raw) {
   }
   // Roman numerals, which a few departments still use on their sheets.
   const roman = {
-    'i': 1, 'ii': 2, 'iii': 3, 'iv': 4, 'v': 5, 'vi': 6,
-    'vii': 7, 'viii': 8,
+    'i': 1,
+    'ii': 2,
+    'iii': 3,
+    'iv': 4,
+    'v': 5,
+    'vi': 6,
+    'vii': 7,
+    'viii': 8,
   };
   final key = raw.toLowerCase().replaceAll(RegExp(r'[^ivx]'), '');
   return roman[key];

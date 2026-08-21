@@ -7,6 +7,14 @@
         { "fieldPath": "collegeId", "order": "ASCENDING" },
         { "fieldPath": "roleId", "order": "ASCENDING" }
       ]
+    },
+    {
+      "collectionGroup": "users",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "collegeId", "order": "ASCENDING" },
+        { "fieldPath": "hostelId", "order": "ASCENDING" }
+      ]
     }
   ],
   "fieldOverrides": []

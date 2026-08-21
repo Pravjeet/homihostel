@@ -61,7 +61,9 @@ class HostelPickerChips extends StatelessWidget {
           backgroundColor: Colors.white,
           selectedColor: AppColors.primarySoft,
           side: BorderSide(color: isOn ? AppColors.primary : AppColors.border),
-          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(20),
+          ),
         );
       }).toList(),
     );

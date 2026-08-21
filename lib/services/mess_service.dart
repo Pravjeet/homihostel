@@ -28,22 +28,19 @@ class MessService {
 
   Stream<MessMenu> watchMenu(String collegeId) => _menuPool.stream(
     collegeId,
-    () => _doc(collegeId, 'menu')
-        .snapshots()
-        .map((d) => d.exists ? MessMenu.fromMap(d.data()!) : const MessMenu()),
+    () => _doc(collegeId, 'menu').snapshots().map(
+      (d) => d.exists ? MessMenu.fromMap(d.data()!) : const MessMenu(),
+    ),
   );
 
   /// Writes the whole grid. `set` with merge so a save never wipes fields a
   /// newer version of the app might have added.
-  Future<void> saveMenu(
-    String collegeId,
-    MessMenu menu, {
-    String? byName,
-  }) => _doc(collegeId, 'menu').set({
-    ...menu.toMap(),
-    'updatedAt': FieldValue.serverTimestamp(),
-    if (byName != null) 'updatedByName': byName,
-  }, SetOptions(merge: true));
+  Future<void> saveMenu(String collegeId, MessMenu menu, {String? byName}) =>
+      _doc(collegeId, 'menu').set({
+        ...menu.toMap(),
+        'updatedAt': FieldValue.serverTimestamp(),
+        if (byName != null) 'updatedByName': byName,
+      }, SetOptions(merge: true));
 
   /// Updates one cell of the grid without sending the other 27.
   Future<void> saveMeal(

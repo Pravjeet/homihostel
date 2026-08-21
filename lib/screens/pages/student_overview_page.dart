@@ -11,20 +11,23 @@ import '../../services/data_service.dart';
 import '../../services/hostel_service.dart';
 
 /// A filterable directory of residents — trade, year, semester, hostel,
-/// home state.
+/// home state, batch.
 ///
-/// Reads straight off [AppUser]: this app has no per-session academic ledger
-/// (see helloworld's `Enrollment`/`EnrollmentService` for that shape), so
-/// there's no "current session" gate and no promotion history here — just
-/// whatever each profile's fields currently say. `year` in particular is
-/// whatever free text a sheet or a warden typed ("2nd", "II", ...), not a
-/// normalised ordinal, so the filter options are exactly the distinct
-/// strings actually in use rather than a clean 1st/2nd/3rd/4th list.
+/// Reads straight off [AppUser], not off `Enrollment` (see
+/// enrollment_service.dart) — this page's job is a snapshot of the whole
+/// roster right now, not a session-scoped view, so it stays independent of
+/// whether backfill has been run and never gates on a current session being
+/// set. `year` in particular is whatever free text a sheet or a warden typed
+/// ("2nd", "II", ...), not a normalised ordinal, so the filter options are
+/// exactly the distinct strings actually in use rather than a clean
+/// 1st/2nd/3rd/4th list. `batch` is cleaner — see
+/// `batchFromRegistrationNo` — but is filtered the same way for consistency.
 ///
 /// Deliberately read-only: no drill-down, no editing. Users & Roles already
-/// owns editing a student; Room Allotment already owns moving them. This
-/// page answers one question — "who, filtered by these five things" — and
-/// stops there.
+/// owns editing a student; Room Allotment already owns moving them; Academic
+/// Records owns promotion and the year-by-session breakdown. This page
+/// answers one question — "who, filtered by these six things" — and stops
+/// there.
 ///
 /// Paginated the same way as Users / Room Allotment: rendering every match
 /// at once is what makes a large roster crawl.
@@ -41,6 +44,7 @@ class _StudentOverviewPageState extends State<StudentOverviewPage> {
   int? _sem;
   String? _hostel;
   String? _state;
+  String? _batch;
 
   static const _pageSize = 50;
   int _page = 0;
@@ -67,14 +71,16 @@ class _StudentOverviewPageState extends State<StudentOverviewPage> {
       (_year == null || u.year == _year) &&
       (_sem == null || u.sem == _sem) &&
       (_hostel == null || _hostelLabel(u.hostelName) == _hostel) &&
-      (_state == null || _stateLabel(u.state) == _state);
+      (_state == null || _stateLabel(u.state) == _state) &&
+      (_batch == null || u.batch == _batch);
 
   bool get _anyFilter =>
       _trade != null ||
       _year != null ||
       _sem != null ||
       _hostel != null ||
-      _state != null;
+      _state != null ||
+      _batch != null;
 
   void _clearAll() => setState(() {
     _trade = null;
@@ -82,6 +88,7 @@ class _StudentOverviewPageState extends State<StudentOverviewPage> {
     _sem = null;
     _hostel = null;
     _state = null;
+    _batch = null;
     _page = 0;
   });
 
@@ -165,7 +172,8 @@ class _StudentOverviewPageState extends State<StudentOverviewPage> {
                 }.toList()..sort());
                 final hostelOptions = ({
                   for (final u in roster) _hostelLabel(u.hostelName),
-                }.toList()..sort());
+                  // BH-10 belongs after BH-9, not between BH-1 and BH-2.
+                }.toList()..sort(Hostel.compareLabels));
                 // 'Not set' is not a place, so it sorts to the end instead of
                 // landing between Nagaland and Odisha.
                 final stateOptions =
@@ -175,6 +183,12 @@ class _StudentOverviewPageState extends State<StudentOverviewPage> {
                         if (b == _noState) return -1;
                         return a.compareTo(b);
                       }));
+                // Descending: the most recent intake is what a warden is
+                // usually looking for, not the oldest one still on the books.
+                final batchOptions = ({
+                  for (final u in roster)
+                    if (u.batch != null) u.batch!,
+                }.toList()..sort((a, b) => b.compareTo(a)));
 
                 final pageCount = shown.isEmpty
                     ? 1
@@ -202,11 +216,13 @@ class _StudentOverviewPageState extends State<StudentOverviewPage> {
                       sems: semOptions,
                       hostelOptions: hostelOptions,
                       stateOptions: stateOptions,
+                      batchOptions: batchOptions,
                       trade: _trade,
                       year: _year,
                       sem: _sem,
                       hostel: _hostel,
                       state: _state,
+                      batch: _batch,
                       tradeLabelFor: session.settings.tradeLabelFor,
                       onTrade: (v) => setState(() {
                         _trade = v;
@@ -226,6 +242,10 @@ class _StudentOverviewPageState extends State<StudentOverviewPage> {
                       }),
                       onState: (v) => setState(() {
                         _state = v;
+                        _page = 0;
+                      }),
+                      onBatch: (v) => setState(() {
+                        _batch = v;
                         _page = 0;
                       }),
                     ),
@@ -333,17 +353,20 @@ class _Filters extends StatelessWidget {
   final List<int> sems;
   final List<String> hostelOptions;
   final List<String> stateOptions;
+  final List<String> batchOptions;
   final String? trade;
   final String? year;
   final int? sem;
   final String? hostel;
   final String? state;
+  final String? batch;
   final String Function(String) tradeLabelFor;
   final ValueChanged<String?> onTrade;
   final ValueChanged<String?> onYear;
   final ValueChanged<int?> onSem;
   final ValueChanged<String?> onHostel;
   final ValueChanged<String?> onState;
+  final ValueChanged<String?> onBatch;
 
   const _Filters({
     required this.tradeOptions,
@@ -351,17 +374,20 @@ class _Filters extends StatelessWidget {
     required this.sems,
     required this.hostelOptions,
     required this.stateOptions,
+    required this.batchOptions,
     required this.trade,
     required this.year,
     required this.sem,
     required this.hostel,
     required this.state,
+    required this.batch,
     required this.tradeLabelFor,
     required this.onTrade,
     required this.onYear,
     required this.onSem,
     required this.onHostel,
     required this.onState,
+    required this.onBatch,
   });
 
   @override
@@ -407,6 +433,13 @@ class _Filters extends StatelessWidget {
           options: stateOptions,
           onChanged: onState,
           width: 200,
+        ),
+        _Drop<String>(
+          label: 'Batch',
+          value: batch,
+          options: batchOptions,
+          onChanged: onBatch,
+          width: 140,
         ),
       ],
     ),

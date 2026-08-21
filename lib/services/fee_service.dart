@@ -87,10 +87,9 @@ class FeeService {
     final totals = <String, num>{};
     await Future.wait(
       periods.map((p) async {
-        final snap = await _col(collegeId)
-            .where('period', isEqualTo: p)
-            .aggregate(sum('amount'))
-            .get();
+        final snap = await _col(
+          collegeId,
+        ).where('period', isEqualTo: p).aggregate(sum('amount')).get();
         totals[p] = snap.getSum('amount') ?? 0;
       }),
     );
@@ -107,22 +106,30 @@ class FeeService {
     String collegeId, {
     int limit = 12,
   }) async {
-    final snap = await _col(collegeId)
-        .orderBy('createdAt', descending: true)
-        .limit(limit)
-        .get();
+    final snap = await _col(
+      collegeId,
+    ).orderBy('createdAt', descending: true).limit(limit).get();
     return snap.docs.map((d) => FeeRecord.fromMap(d.id, d.data())).toList();
   }
 
-  /// One student's own history, newest month first.
+  final CachedStreamPool<List<FeeRecord>> _minePool = CachedStreamPool();
+
+  /// One student's own history, newest month first. Pooled per student for the
+  /// same reason as [FineService.watchMine] — it lives in `build()` on a page
+  /// every resident opens.
   Stream<List<FeeRecord>> watchMine(String collegeId, String uid) =>
-      _col(collegeId).where('studentUid', isEqualTo: uid).snapshots().map((s) {
-        final list = s.docs
-            .map((d) => FeeRecord.fromMap(d.id, d.data()))
-            .toList();
-        // Periods are `YYYY-MM`, so a plain string sort is chronological.
-        list.sort((a, b) => b.period.compareTo(a.period));
-        return list;
+      _minePool.stream('$collegeId/$uid', () {
+        return _col(collegeId)
+            .where('studentUid', isEqualTo: uid)
+            .snapshots()
+            .map((s) {
+              final list = s.docs
+                  .map((d) => FeeRecord.fromMap(d.id, d.data()))
+                  .toList();
+              // Periods are `YYYY-MM`, so a plain string sort is chronological.
+              list.sort((a, b) => b.period.compareTo(a.period));
+              return list;
+            });
       });
 
   // ------------------------------ writes -----------------------------
@@ -199,7 +206,8 @@ class FeeService {
         collegeId: collegeId,
         actor: actor,
         action: 'fee.markUnpaid',
-        summary: 'Un-marked ${before['studentName']} for '
+        summary:
+            'Un-marked ${before['studentName']} for '
             '${periodLabel(period)}',
         targetLabel: '${before['studentName']}',
         path: 'colleges/$collegeId/feeRecords/$id',
@@ -308,9 +316,9 @@ class FeeService {
   /// Called when a single user is deleted, so their payment history goes with
   /// them instead of lingering as a row pointing at a missing uid.
   Future<int> deleteForStudent(String collegeId, String uid) async {
-    final snap = await _col(collegeId)
-        .where('studentUid', isEqualTo: uid)
-        .get();
+    final snap = await _col(
+      collegeId,
+    ).where('studentUid', isEqualTo: uid).get();
     if (snap.docs.isEmpty) return 0;
 
     for (var i = 0; i < snap.docs.length; i += 400) {

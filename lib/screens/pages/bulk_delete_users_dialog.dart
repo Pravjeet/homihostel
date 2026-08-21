@@ -99,13 +99,15 @@ class _BulkDeleteUsersDialogState extends State<BulkDeleteUsersDialog> {
         width: 560,
         child: _outcome != null
             ? _Result(outcome: _outcome!)
-            : (_running ? _Progress(done: _done, total: n) : _Confirm(
-                users: widget.users,
-                scopeLabel: widget.scopeLabel,
-                controller: _confirm,
-                phrase: _phrase,
-                error: _error,
-              )),
+            : (_running
+                  ? _Progress(done: _done, total: n)
+                  : _Confirm(
+                      users: widget.users,
+                      scopeLabel: widget.scopeLabel,
+                      controller: _confirm,
+                      phrase: _phrase,
+                      error: _error,
+                    )),
       ),
       actions: _outcome != null
           ? [
@@ -174,7 +176,7 @@ class _Confirm extends StatelessWidget {
             'This permanently deletes ${users.length} user profile'
             '${users.length == 1 ? '' : 's'} matching: $scopeLabel'
             '${allotted > 0 ? '\n\n$allotted of them hold a room — those beds '
-                'will be freed first.' : ''}',
+                      'will be freed first.' : ''}',
             style: TextStyle(
               color: AppColors.danger,
               fontSize: 13,
@@ -382,10 +384,7 @@ class _Result extends StatelessWidget {
                     padding: const EdgeInsets.only(bottom: 4),
                     child: Text(
                       f,
-                      style: TextStyle(
-                        fontSize: 12.5,
-                        color: AppColors.danger,
-                      ),
+                      style: TextStyle(fontSize: 12.5, color: AppColors.danger),
                     ),
                   ),
                 )

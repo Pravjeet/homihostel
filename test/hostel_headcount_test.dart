@@ -2,12 +2,13 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:hostel_app/models/app_user.dart';
 import 'package:hostel_app/models/hostel.dart';
 
-/// Membership vs. bed occupancy.
+/// Students per hostel, counted from the roster.
 ///
-/// The distinction exists because a CSV import can put a whole intake into a
-/// hostel with no rooms assigned — `occupiedBeds` stays zero while hundreds of
-/// students are genuinely in the building. Getting this wrong under-reports a
-/// hostel to empty, so it is worth pinning down.
+/// Deliberately independent of `occupiedBeds`, which is denormalised onto the
+/// hostel document by the allotment transaction. The two should agree now that
+/// every student is given a hostel and a room together — and because this one
+/// is derived from the students themselves, a disagreement means the stored
+/// counter has drifted, not the roster.
 void main() {
   AppUser student(
     String uid, {
@@ -24,107 +25,84 @@ void main() {
     isActive: isActive,
     hostelId: hostelId,
     roomId: roomId,
-    roomNumber: roomId == null ? null : '101',
+    roomNumber: roomId,
   );
 
-  group('HostelHeadcount.byHostel', () {
-    test('counts a hostel-only assignment, which has no bed at all', () {
-      final heads = HostelHeadcount.byHostel([
-        student('a', hostelId: 'h1'),
-        student('b', hostelId: 'h1'),
-        student('c', hostelId: 'h1'),
+  group('studentsByHostel', () {
+    test('counts everyone attached to a hostel', () {
+      final counts = studentsByHostel([
+        student('a', hostelId: 'h1', roomId: '101'),
+        student('b', hostelId: 'h1', roomId: '101'),
+        student('c', hostelId: 'h1', roomId: '102'),
       ]);
 
-      expect(heads['h1']!.total, 3);
-      expect(heads['h1']!.withBed, 0);
-      expect(heads['h1']!.awaitingRoom, 3);
-    });
-
-    test('separates those who hold a room from those who do not', () {
-      final heads = HostelHeadcount.byHostel([
-        student('a', hostelId: 'h1', roomId: 'r1'),
-        student('b', hostelId: 'h1', roomId: 'r1'),
-        student('c', hostelId: 'h1'),
-      ]);
-
-      expect(heads['h1']!.total, 3);
-      expect(heads['h1']!.withBed, 2);
-      expect(heads['h1']!.awaitingRoom, 1);
+      expect(counts['h1'], 3);
     });
 
     test('keeps hostels apart', () {
-      final heads = HostelHeadcount.byHostel([
-        student('a', hostelId: 'h1'),
-        student('b', hostelId: 'h2', roomId: 'r9'),
-        student('c', hostelId: 'h2'),
+      final counts = studentsByHostel([
+        student('a', hostelId: 'h1', roomId: '101'),
+        student('b', hostelId: 'h2', roomId: '201'),
+        student('c', hostelId: 'h2', roomId: '202'),
       ]);
 
-      expect(heads['h1']!.total, 1);
-      expect(heads['h2']!.total, 2);
-      expect(heads['h2']!.withBed, 1);
+      expect(counts['h1'], 1);
+      expect(counts['h2'], 2);
     });
 
     test('ignores students with no hostel', () {
-      final heads = HostelHeadcount.byHostel([
+      final counts = studentsByHostel([
         student('a'),
         student('b', hostelId: ''),
-        student('c', hostelId: 'h1'),
+        student('c', hostelId: 'h1', roomId: '101'),
       ]);
 
-      expect(heads.keys, ['h1']);
-      expect(heads['h1']!.total, 1);
+      expect(counts.keys, ['h1']);
+      expect(counts['h1'], 1);
     });
 
     test('excludes deactivated accounts', () {
-      // They cannot be allotted, so counting them would show a hostel as
+      // They cannot hold a bed, so counting them would show a hostel as
       // fuller than it can actually be filled.
-      final heads = HostelHeadcount.byHostel([
-        student('a', hostelId: 'h1'),
-        student('b', hostelId: 'h1', isActive: false),
-        student('c', hostelId: 'h1', roomId: 'r1', isActive: false),
+      final counts = studentsByHostel([
+        student('a', hostelId: 'h1', roomId: '101'),
+        student('b', hostelId: 'h1', roomId: '102', isActive: false),
       ]);
 
-      expect(heads['h1']!.total, 1);
-      expect(heads['h1']!.withBed, 0);
+      expect(counts['h1'], 1);
     });
 
     test('a hostel with nobody in it is absent, not zero', () {
-      final heads = HostelHeadcount.byHostel([student('a', hostelId: 'h1')]);
+      final counts = studentsByHostel([student('a', hostelId: 'h1')]);
 
-      expect(heads['h2'], isNull);
-      // Callers substitute an empty count, which reads as zeros.
-      expect(const HostelHeadcount().total, 0);
-      expect(const HostelHeadcount().awaitingRoom, 0);
+      expect(counts['h2'], isNull);
+      // Callers read a missing key as zero.
+      expect(counts['h2'] ?? 0, 0);
     });
 
     test('an empty roster yields no entries', () {
-      expect(HostelHeadcount.byHostel(const []), isEmpty);
+      expect(studentsByHostel(const []), isEmpty);
     });
 
-    test('awaitingRoom never goes negative', () {
-      // withBed cannot exceed total in practice, but the getter is used in UI
-      // arithmetic and a negative badge would be nonsense.
-      const odd = HostelHeadcount(total: 2, withBed: 5);
-      expect(odd.awaitingRoom, 0);
-    });
+    test('counts a student whose room is not yet set', () {
+      // Not a state the app creates deliberately any more, but an import with
+      // a blank room cell still produces it, and such a student is genuinely
+      // in the hostel — they just show up in Room Allotment as pending.
+      final counts = studentsByHostel([
+        student('a', hostelId: 'h1', roomId: '101'),
+        student('b', hostelId: 'h1'),
+      ]);
 
-    test('a room without a hostel is not counted as membership', () {
-      // isAllotted requires both, so a half-written user cannot inflate the
-      // bed figure.
-      final heads = HostelHeadcount.byHostel([student('a', roomId: 'r1')]);
-      expect(heads, isEmpty);
+      expect(counts['h1'], 2);
     });
 
     test('scales over a full intake', () {
       final roster = [
         for (var i = 0; i < 400; i++)
-          student('s$i', hostelId: 'h1', roomId: i < 60 ? 'r$i' : null),
+          student('s$i', hostelId: 'h1', roomId: '${100 + i}'),
       ];
 
-      final heads = HostelHeadcount.byHostel(roster);
-      expect(heads['h1']!.total, 400);
-      expect(heads['h1']!.withBed, 60);
-      expect(heads['h1']!.awaitingRoom, 340);
+      expect(studentsByHostel(roster)['h1'], 400);
     });
   });
 }

@@ -31,13 +31,11 @@ class SettingsService {
 
   Stream<CollegeSettings> watch(String collegeId) => _pool.stream(
     collegeId,
-    () => _doc(collegeId)
-        .snapshots()
-        .map(
-          (d) => d.exists
-              ? CollegeSettings.fromMap(d.data()!)
-              : const CollegeSettings(),
-        ),
+    () => _doc(collegeId).snapshots().map(
+      (d) => d.exists
+          ? CollegeSettings.fromMap(d.data()!)
+          : const CollegeSettings(),
+    ),
   );
 
   Future<CollegeSettings> read(String collegeId) async {
@@ -69,11 +67,8 @@ class SettingsService {
     String? byName,
   }) => saveSection(collegeId, 'institution', v.toMap(), byName: byName);
 
-  Future<void> saveTheming(
-    String collegeId,
-    AppTheming v, {
-    String? byName,
-  }) => saveSection(collegeId, 'theming', v.toMap(), byName: byName);
+  Future<void> saveTheming(String collegeId, AppTheming v, {String? byName}) =>
+      saveSection(collegeId, 'theming', v.toMap(), byName: byName);
 
   Future<void> saveSession(
     String collegeId,
@@ -91,21 +86,27 @@ class SettingsService {
     if (byName != null) 'updatedByName': byName,
   }, SetOptions(merge: true));
 
-  Future<void> saveTrades(
+  Future<void> saveTrades(String collegeId, List<Trade> v, {String? byName}) =>
+      _doc(collegeId).set({
+        'trades': v.map((t) => t.toMap()).toList(),
+        'updatedAt': FieldValue.serverTimestamp(),
+        if (byName != null) 'updatedByName': byName,
+      }, SetOptions(merge: true));
+
+  Future<void> saveCourseRules(
     String collegeId,
-    List<Trade> v, {
+    List<CourseRule> v, {
     String? byName,
   }) => _doc(collegeId).set({
-    'trades': v.map((t) => t.toMap()).toList(),
+    'courseRules': v.map((r) => r.toMap()).toList(),
     'updatedAt': FieldValue.serverTimestamp(),
     if (byName != null) 'updatedByName': byName,
   }, SetOptions(merge: true));
 
   /// Renames the college itself. Stored on the college document, not in
   /// settings, because that is what every user's session reads at login.
-  Future<void> renameCollege(String collegeId, String name) =>
-      _db.collection('colleges').doc(collegeId).update({
-        'name': name.trim(),
-        'updatedAt': FieldValue.serverTimestamp(),
-      });
+  Future<void> renameCollege(String collegeId, String name) => _db
+      .collection('colleges')
+      .doc(collegeId)
+      .update({'name': name.trim(), 'updatedAt': FieldValue.serverTimestamp()});
 }

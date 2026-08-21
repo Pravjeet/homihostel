@@ -18,6 +18,27 @@ class AppUser {
 
   final bool isSuperAdmin;
   final bool isActive;
+
+  /// Lifecycle state, distinct from [isActive] (which is about login access).
+  /// 'active' unless annual promotion has moved this student past their
+  /// course's length, at which point it becomes 'graduated' and no further
+  /// enrollment document gets created for them. Never null in practice —
+  /// defaults to 'active' so every existing account reads correctly with no
+  /// migration.
+  final String status;
+
+  /// Earned a single room by performing well in 2nd year, per the college's
+  /// seating policy (see [CourseRule] / `requiredRoomCapacity` in
+  /// enrollment_helpers.dart).
+  ///
+  /// Set once by staff after results come out and never auto-cleared — it's
+  /// a permanent merit designation, not something re-evaluated every session.
+  /// Only meaningful for a course whose [CourseSeating] is `meritSingle`; a
+  /// course that is unconditionally shared or unconditionally single ignores
+  /// this flag entirely — the policy function is what actually decides, this
+  /// is just one of its inputs.
+  final bool singleRoomEligible;
+
   final String? phone;
   final String? gender;
   final String? enrollmentNo;
@@ -102,6 +123,8 @@ class AppUser {
     this.roleName,
     this.isSuperAdmin = false,
     this.isActive = true,
+    this.status = 'active',
+    this.singleRoomEligible = false,
     this.phone,
     this.gender,
     this.enrollmentNo,
@@ -148,6 +171,8 @@ class AppUser {
       roleName: m['roleName'] as String?,
       isSuperAdmin: m['isSuperAdmin'] as bool? ?? false,
       isActive: m['isActive'] as bool? ?? true,
+      status: m['status'] as String? ?? 'active',
+      singleRoomEligible: m['singleRoomEligible'] as bool? ?? false,
       phone: m['phone'] as String?,
       gender: m['gender'] as String?,
       enrollmentNo: m['enrollmentNo'] as String?,
@@ -194,6 +219,8 @@ class AppUser {
     'roleName': roleName,
     'isSuperAdmin': isSuperAdmin,
     'isActive': isActive,
+    'status': status,
+    'singleRoomEligible': singleRoomEligible,
     'phone': phone,
     'gender': gender,
     'enrollmentNo': enrollmentNo,
@@ -238,9 +265,13 @@ class AppUser {
 
   bool get isAllotted => roomId != null && hostelId != null;
 
+  /// True once annual promotion has moved this student past their course's
+  /// length. A graduated student is not deleted or deactivated — they simply
+  /// stop being included in the next session's enrollment roster.
+  bool get isGraduated => status == 'graduated';
+
   /// "Block A · Room 101", or null when not allotted.
-  String? get roomLabel =>
-      isAllotted ? '$hostelName · Room $roomNumber' : null;
+  String? get roomLabel => isAllotted ? '$hostelName · Room $roomNumber' : null;
 }
 
 /// Trade/branch codes a workspace starts with, taken from SLIET's own
@@ -355,14 +386,42 @@ String tradeLabel(String code) {
 
 /// States and union territories, as the dashboard should label them.
 const List<String> kIndianStates = [
-  'Andhra Pradesh', 'Arunachal Pradesh', 'Assam', 'Bihar', 'Chhattisgarh',
-  'Delhi', 'Goa', 'Gujarat', 'Haryana', 'Himachal Pradesh',
-  'Jammu and Kashmir', 'Jharkhand', 'Karnataka', 'Kerala', 'Ladakh',
-  'Madhya Pradesh', 'Maharashtra', 'Manipur', 'Meghalaya', 'Mizoram',
-  'Nagaland', 'Odisha', 'Puducherry', 'Punjab', 'Rajasthan', 'Sikkim',
-  'Tamil Nadu', 'Telangana', 'Tripura', 'Uttar Pradesh', 'Uttarakhand',
-  'West Bengal', 'Andaman and Nicobar Islands', 'Chandigarh',
-  'Dadra and Nagar Haveli and Daman and Diu', 'Lakshadweep',
+  'Andhra Pradesh',
+  'Arunachal Pradesh',
+  'Assam',
+  'Bihar',
+  'Chhattisgarh',
+  'Delhi',
+  'Goa',
+  'Gujarat',
+  'Haryana',
+  'Himachal Pradesh',
+  'Jammu and Kashmir',
+  'Jharkhand',
+  'Karnataka',
+  'Kerala',
+  'Ladakh',
+  'Madhya Pradesh',
+  'Maharashtra',
+  'Manipur',
+  'Meghalaya',
+  'Mizoram',
+  'Nagaland',
+  'Odisha',
+  'Puducherry',
+  'Punjab',
+  'Rajasthan',
+  'Sikkim',
+  'Tamil Nadu',
+  'Telangana',
+  'Tripura',
+  'Uttar Pradesh',
+  'Uttarakhand',
+  'West Bengal',
+  'Andaman and Nicobar Islands',
+  'Chandigarh',
+  'Dadra and Nagar Haveli and Daman and Diu',
+  'Lakshadweep',
 ];
 
 /// What people actually type. Without this, "UP" and "Uttar Pradesh" become
@@ -404,8 +463,7 @@ const Map<String, String> _stateAliases = {
   'ch': 'Chandigarh',
 };
 
-String _stateKey(String s) =>
-    s.toLowerCase().replaceAll(RegExp(r'[^a-z]'), '');
+String _stateKey(String s) => s.toLowerCase().replaceAll(RegExp(r'[^a-z]'), '');
 
 /// Canonicalises a state name someone typed. Returns null if it isn't one.
 String? normaliseState(String? raw) {

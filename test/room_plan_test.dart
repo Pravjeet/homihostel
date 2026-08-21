@@ -1,151 +1,183 @@
 import 'package:flutter_test/flutter_test.dart';
-
 import 'package:hostel_app/models/hostel.dart';
 
-/// [RoomPlan.build] is what turns the "add hostel" form into real room
-/// documents, and the hostel editor's confirmation line (`rangeSummary`) has
-/// to describe the exact same thing it will create — see
-/// hostel_editor_dialog.dart. Both were rewritten to support multiple room
-/// types sharing a building, which is exactly the kind of floor-numbering
-/// arithmetic that goes quietly wrong under a fencepost error.
+/// [RoomPlan.build] turns the "add hostel" form into real room documents, so
+/// what it produces is what the building becomes. It is floor-first: each
+/// floor is described independently and can mix seater types, because real
+/// buildings do — the corner rooms are smaller, a wing was converted.
 void main() {
-  group('RoomBlock.floorCount', () {
-    test('divides evenly when totalRooms is a multiple of roomsPerFloor', () {
-      const block = RoomBlock(capacity: 2, totalRooms: 50, roomsPerFloor: 25);
-      expect(block.floorCount, 2);
-    });
-
-    test('rounds up when the last floor is short', () {
-      // 61 rooms at 25/floor: 25, 25, 11 — three floors, not two.
-      const block = RoomBlock(capacity: 1, totalRooms: 61, roomsPerFloor: 25);
-      expect(block.floorCount, 3);
-    });
-
-    test('is zero when roomsPerFloor is zero, not a division error', () {
-      const block = RoomBlock(capacity: 2, totalRooms: 25, roomsPerFloor: 0);
-      expect(block.floorCount, 0);
-    });
-
-    test('totalBeds is rooms times capacity', () {
-      const block = RoomBlock(capacity: 3, totalRooms: 10, roomsPerFloor: 10);
-      expect(block.totalBeds, 30);
-    });
-  });
-
-  group('RoomPlan.build — single block', () {
-    test('numbers rooms floor-prefixed starting at floor 1', () {
+  group('one floor, one seater type', () {
+    test('numbers rooms from the floor prefix', () {
       const plan = RoomPlan(
-        blocks: [RoomBlock(capacity: 2, totalRooms: 3, roomsPerFloor: 2)],
-      );
-      final rooms = plan.build();
-      // Floor 1 gets 2 rooms (101, 102), floor 2 gets the remaining 1 (201).
-      expect(
-        rooms.map((r) => r.number).toList(),
-        ['101', '102', '201'],
-      );
-      expect(rooms.every((r) => r.capacity == 2), isTrue);
-    });
-
-    test('every generated room carries the block\'s features', () {
-      const plan = RoomPlan(
-        blocks: [
-          RoomBlock(
-            capacity: 1,
-            totalRooms: 2,
-            roomsPerFloor: 2,
-            features: ['Ceiling Fan'],
-          ),
+        floorPlans: [
+          FloorPlan(groups: [RoomGroup(capacity: 2, count: 3)]),
         ],
       );
       final rooms = plan.build();
-      expect(rooms, everyElement(predicate<Room>((r) => r.features.contains('Ceiling Fan'))));
+
+      expect(rooms.map((r) => r.number), ['101', '102', '103']);
+      expect(rooms.every((r) => r.floor == 1), isTrue);
+      expect(rooms.every((r) => r.capacity == 2), isTrue);
     });
 
-    test('room id matches its number, so duplicates are structurally impossible', () {
+    test('the room number is also the document id', () {
+      // Rooms are addressed by number throughout the app; a mismatch here
+      // would break every lookup.
       const plan = RoomPlan(
-        blocks: [RoomBlock(capacity: 2, totalRooms: 4, roomsPerFloor: 2)],
+        floorPlans: [
+          FloorPlan(groups: [RoomGroup(capacity: 1, count: 2)]),
+        ],
       );
       for (final r in plan.build()) {
         expect(r.id, r.number);
       }
     });
-
-    test('a block with zero rooms produces nothing', () {
-      const plan = RoomPlan(
-        blocks: [RoomBlock(capacity: 2, totalRooms: 0, roomsPerFloor: 25)],
-      );
-      expect(plan.build(), isEmpty);
-    });
   });
 
-  group('RoomPlan.build — multiple room types in one building', () {
-    test('the second block starts on the floor after the first block ends', () {
+  group('several floors', () {
+    test('each floor gets its own prefix', () {
+      final plan = RoomPlan.uniform(
+        floors: 3,
+        roomsPerFloor: 2,
+        capacity: 2,
+      );
+      expect(plan.build().map((r) => r.number), [
+        '101', '102',
+        '201', '202',
+        '301', '302',
+      ]);
+    });
+
+    test('floors can differ from one another', () {
       const plan = RoomPlan(
-        blocks: [
-          // 2 floors of 3-seaters (floors 1-2), then singles start at floor 3.
-          RoomBlock(capacity: 3, totalRooms: 50, roomsPerFloor: 25),
-          RoomBlock(capacity: 1, totalRooms: 10, roomsPerFloor: 25),
+        floorPlans: [
+          FloorPlan(groups: [RoomGroup(capacity: 3, count: 2)]),
+          FloorPlan(groups: [RoomGroup(capacity: 1, count: 3)]),
         ],
       );
       final rooms = plan.build();
-      final threeSeaterFloors = rooms
-          .where((r) => r.capacity == 3)
-          .map((r) => r.floor)
-          .toSet();
-      final singleFloors =
-          rooms.where((r) => r.capacity == 1).map((r) => r.floor).toSet();
 
-      expect(threeSeaterFloors, {1, 2});
-      expect(singleFloors, {3});
-      // No floor is shared between two room types.
-      expect(threeSeaterFloors.intersection(singleFloors), isEmpty);
-    });
-
-    test('plan.floors sums every block\'s floor count', () {
-      const plan = RoomPlan(
-        blocks: [
-          RoomBlock(capacity: 3, totalRooms: 50, roomsPerFloor: 25), // 2
-          RoomBlock(capacity: 1, totalRooms: 61, roomsPerFloor: 25), // 3
-        ],
+      expect(rooms.where((r) => r.floor == 1).map((r) => r.capacity), [3, 3]);
+      expect(
+        rooms.where((r) => r.floor == 2).map((r) => r.capacity),
+        [1, 1, 1],
       );
-      expect(plan.floors, 5);
-    });
-
-    test('plan.totalRooms and totalBeds sum across blocks', () {
-      const plan = RoomPlan(
-        blocks: [
-          RoomBlock(capacity: 3, totalRooms: 50, roomsPerFloor: 25),
-          RoomBlock(capacity: 1, totalRooms: 10, roomsPerFloor: 25),
-        ],
-      );
-      expect(plan.totalRooms, 60);
-      expect(plan.totalBeds, 50 * 3 + 10 * 1);
     });
   });
 
-  group('RoomPlan.rangeSummary', () {
-    test('describes an empty plan without crashing', () {
-      expect(const RoomPlan().rangeSummary, '—');
+  group('mixed seater types on one floor', () {
+    // The thing the old floors × rooms-per-floor × capacity form could not
+    // express at all.
+    const plan = RoomPlan(
+      floorPlans: [
+        FloorPlan(
+          groups: [
+            RoomGroup(capacity: 3, count: 8),
+            RoomGroup(capacity: 1, count: 4),
+          ],
+        ),
+      ],
+    );
+
+    test('all of them land on the same floor', () {
+      expect(plan.build().every((r) => r.floor == 1), isTrue);
+      expect(plan.totalRooms, 12);
     });
 
-    test('names the seater type and floor range for each block', () {
+    test('numbering runs straight through the groups, in order', () {
+      final rooms = plan.build();
+      expect(rooms.first.number, '101');
+      expect(rooms.last.number, '112');
+      expect(rooms[7].capacity, 3, reason: '101-108 are the three-seaters');
+      expect(rooms[8].capacity, 1, reason: '109 onward are the singles');
+    });
+
+    test('beds count each group at its own size', () {
+      expect(plan.totalBeds, 8 * 3 + 4 * 1);
+    });
+
+    test('a floor knows whether it is uniform', () {
+      expect(plan.floorPlans.first.isUniform, isFalse);
+      expect(
+        const FloorPlan(groups: [RoomGroup(capacity: 2, count: 5)]).isUniform,
+        isTrue,
+      );
+    });
+  });
+
+  group('degenerate input must not produce junk', () {
+    test('an empty plan builds nothing', () {
+      expect(const RoomPlan().build(), isEmpty);
+      expect(const RoomPlan().totalRooms, 0);
+      expect(const RoomPlan().totalBeds, 0);
+    });
+
+    test('a floor with zero rooms contributes nothing but still counts', () {
       const plan = RoomPlan(
-        blocks: [
-          RoomBlock(capacity: 3, totalRooms: 50, roomsPerFloor: 25),
-          RoomBlock(capacity: 1, totalRooms: 10, roomsPerFloor: 25),
+        floorPlans: [
+          FloorPlan(groups: [RoomGroup(capacity: 2, count: 0)]),
+          FloorPlan(groups: [RoomGroup(capacity: 2, count: 2)]),
         ],
       );
-      final summary = plan.rangeSummary;
-      expect(summary, contains('3 Seater'));
-      expect(summary, contains('Single'));
+      expect(plan.build().length, 2);
+      expect(plan.floors, 2, reason: 'the empty floor still exists');
+      // Numbered on floor 2, not renumbered to floor 1.
+      expect(plan.build().first.number, '201');
     });
 
-    test('a single-capacity block is labelled "Single", not "1 Seater"', () {
+    test('a group with zero rooms is skipped, not built as one', () {
       const plan = RoomPlan(
-        blocks: [RoomBlock(capacity: 1, totalRooms: 5, roomsPerFloor: 25)],
+        floorPlans: [
+          FloorPlan(
+            groups: [
+              RoomGroup(capacity: 3, count: 0),
+              RoomGroup(capacity: 2, count: 2),
+            ],
+          ),
+        ],
       );
-      expect(plan.rangeSummary, contains('Single'));
-      expect(plan.rangeSummary, isNot(contains('1 Seater')));
+      final rooms = plan.build();
+      expect(rooms.length, 2);
+      expect(rooms.every((r) => r.capacity == 2), isTrue);
+      expect(rooms.first.number, '101', reason: 'numbering is not skipped');
+    });
+  });
+
+  group('rangeSummary', () {
+    test('reads floor by floor', () {
+      const plan = RoomPlan(
+        floorPlans: [
+          FloorPlan(
+            groups: [
+              RoomGroup(capacity: 3, count: 8),
+              RoomGroup(capacity: 1, count: 4),
+            ],
+          ),
+          FloorPlan(groups: [RoomGroup(capacity: 2, count: 10)]),
+        ],
+      );
+      expect(
+        plan.rangeSummary,
+        'Floor 1: 8 × 3 Seater, 4 × Single  ·  Floor 2: 10 × 2 Seater',
+      );
+    });
+
+    test('an empty plan says so rather than showing a blank', () {
+      expect(const RoomPlan().rangeSummary, '—');
+    });
+  });
+
+  group('the uniform shortcut', () {
+    test('builds identical floors', () {
+      final plan = RoomPlan.uniform(
+        floors: 4,
+        roomsPerFloor: 25,
+        capacity: 2,
+      );
+      expect(plan.floors, 4);
+      expect(plan.totalRooms, 100);
+      expect(plan.totalBeds, 200);
+      expect(plan.floorPlans.every((f) => f.isUniform), isTrue);
     });
   });
 }

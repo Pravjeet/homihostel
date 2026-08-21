@@ -207,10 +207,7 @@ class _FinesPageState extends State<FinesPage> {
                 canViewAll
                     ? 'Every fine on record. Open Overview for the dashboard.'
                     : 'Fines raised against you, and what is still owed.',
-                style: TextStyle(
-                  fontSize: 13,
-                  color: AppColors.textMuted,
-                ),
+                style: TextStyle(fontSize: 13, color: AppColors.textMuted),
               ),
               if (canViewAll) ...[
                 const SizedBox(height: 16),
@@ -220,7 +217,8 @@ class _FinesPageState extends State<FinesPage> {
                       child: TextField(
                         onChanged: (v) => setState(() => _query = v),
                         decoration: const InputDecoration(
-                          hintText: 'Search student, registration number, '
+                          hintText:
+                              'Search student, registration number, '
                               'room or reason',
                           prefixIcon: Icon(Icons.search_rounded),
                           isDense: true,

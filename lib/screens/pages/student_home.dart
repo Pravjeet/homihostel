@@ -71,10 +71,8 @@ class StudentHome extends StatelessWidget {
         const SizedBox(height: 18),
         LayoutBuilder(
           builder: (context, c) {
-            final requests = session.canAny([
-              Perm.requestsViewOwn,
-              Perm.requestsCreate,
-            ])
+            final requests =
+                session.canAny([Perm.requestsViewOwn, Perm.requestsCreate])
                 ? _MyRequests(collegeId: collegeId, uid: user.uid)
                 : null;
             final notices = session.can(Perm.noticesView)
@@ -162,10 +160,7 @@ class _Greeting extends StatelessWidget {
                     if (user.sem != null) 'Sem ${user.sem}',
                     if (user.roomLabel != null) user.roomLabel!,
                   ].join('  ·  '),
-                  style: TextStyle(
-                    fontSize: 13,
-                    color: AppColors.textMuted,
-                  ),
+                  style: TextStyle(fontSize: 13, color: AppColors.textMuted),
                 ),
               ],
             ),
@@ -183,10 +178,7 @@ class _Greeting extends StatelessWidget {
               const SizedBox(height: 2),
               Text(
                 _longDate(now),
-                style: TextStyle(
-                  fontSize: 12.5,
-                  color: AppColors.textMuted,
-                ),
+                style: TextStyle(fontSize: 12.5, color: AppColors.textMuted),
               ),
             ],
           ),
@@ -198,8 +190,18 @@ class _Greeting extends StatelessWidget {
 
 String _longDate(DateTime d) {
   const months = [
-    'January', 'February', 'March', 'April', 'May', 'June',
-    'July', 'August', 'September', 'October', 'November', 'December',
+    'January',
+    'February',
+    'March',
+    'April',
+    'May',
+    'June',
+    'July',
+    'August',
+    'September',
+    'October',
+    'November',
+    'December',
   ];
   return '${d.day} ${months[d.month - 1]} ${d.year}';
 }
@@ -420,10 +422,7 @@ class _TodaysMess extends StatelessWidget {
                   padding: EdgeInsets.symmetric(vertical: 22),
                   child: Text(
                     'The menu hasn\'t been published yet.',
-                    style: TextStyle(
-                      color: AppColors.textMuted,
-                      fontSize: 13,
-                    ),
+                    style: TextStyle(color: AppColors.textMuted, fontSize: 13),
                   ),
                 )
               else
@@ -503,18 +502,12 @@ class _MealRow extends StatelessWidget {
                   style: TextStyle(
                     fontSize: 13,
                     fontWeight: FontWeight.w700,
-                    color: highlight
-                        ? AppColors.primary
-                        : AppColors.textStrong,
+                    color: highlight ? AppColors.primary : AppColors.textStrong,
                   ),
                 ),
                 if (highlight) ...[
                   const SizedBox(width: 8),
-                  StatusPill(
-                    'NOW',
-                    AppColors.primary,
-                    AppColors.primarySoft,
-                  ),
+                  StatusPill('NOW', AppColors.primary, AppColors.primarySoft),
                 ],
               ],
             ),
@@ -663,8 +656,7 @@ class _MyRequests extends StatelessWidget {
                 )
               else
                 for (var i = 0; i < shown.length; i++) ...[
-                  if (i != 0)
-                    Divider(height: 16, color: AppColors.border),
+                  if (i != 0) Divider(height: 16, color: AppColors.border),
                   _MiniRow(
                     icon: switch (shown[i].type) {
                       RequestType.leave => Icons.flight_takeoff_rounded,
@@ -735,16 +727,12 @@ class _LatestNotices extends StatelessWidget {
                   padding: EdgeInsets.symmetric(vertical: 22),
                   child: Text(
                     'No active notices.',
-                    style: TextStyle(
-                      color: AppColors.textMuted,
-                      fontSize: 13,
-                    ),
+                    style: TextStyle(color: AppColors.textMuted, fontSize: 13),
                   ),
                 )
               else
                 for (var i = 0; i < active.length; i++) ...[
-                  if (i != 0)
-                    Divider(height: 16, color: AppColors.border),
+                  if (i != 0) Divider(height: 16, color: AppColors.border),
                   _MiniRow(
                     icon: Icons.campaign_rounded,
                     title: active[i].title,
@@ -813,10 +801,7 @@ class _MiniRow extends StatelessWidget {
               subtitle,
               maxLines: 1,
               overflow: TextOverflow.ellipsis,
-              style: TextStyle(
-                fontSize: 12,
-                color: AppColors.textMuted,
-              ),
+              style: TextStyle(fontSize: 12, color: AppColors.textMuted),
             ),
           ],
         ),

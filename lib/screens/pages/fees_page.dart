@@ -5,6 +5,7 @@ import '../../core/session.dart';
 import '../../core/theme.dart';
 import '../../models/app_user.dart';
 import '../../models/fee.dart';
+import '../../models/hostel.dart';
 import '../../models/mess.dart';
 import '../../services/auth_service.dart';
 import '../../services/data_service.dart';
@@ -274,7 +275,8 @@ class _Roster extends StatelessWidget {
                     .whereType<String>()
                     .toSet()
                     .toList()
-                  ..sort();
+                  // BH-10 belongs after BH-9, not between BH-1 and BH-2.
+                  ..sort(Hostel.compareLabels);
 
             final q = query.trim().toLowerCase();
             final shown = all.where((s) {
