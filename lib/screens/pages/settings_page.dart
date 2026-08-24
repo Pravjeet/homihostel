@@ -803,6 +803,68 @@ class _SessionSectionState extends State<_SessionSection> with _Saving {
     super.dispose();
   }
 
+  /// Puts the session back to the state a brand-new workspace starts in.
+  ///
+  /// Writes nulls rather than empty strings, which is the whole point of doing
+  /// this in one action instead of asking someone to clear two boxes: Academic
+  /// Records decides whether to show its "No academic session set" screen by
+  /// testing `session.current == null`, and a stray `''` slips past that test
+  /// and renders a blank name into "Backfill ".
+  ///
+  /// [name] is read by the caller from `Session.of(context)` in `build` and
+  /// passed in — looking it up here would throw, because the dialog below
+  /// pushes onto the root Navigator, above `SessionScope`.
+  Future<void> _resetSession(String name) async {
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Reset the academic session?'),
+        content: const SizedBox(
+          width: 460,
+          child: Text(
+            'Clears the current and next session and puts the semester back to '
+            'Odd — the state a new workspace starts in. Academic Records '
+            'returns to "No academic session set", and backfill and promotion '
+            'stay unavailable until a session is set again.\n\n'
+            'No student, enrollment, room or fee data is touched, and nothing '
+            'here is permanent — typing the session back in restores it.',
+            style: TextStyle(height: 1.45),
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context, false),
+            child: const Text('Cancel'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(context, true),
+            child: const Text('Reset session'),
+          ),
+        ],
+      ),
+    );
+    if (ok != true || !mounted) return;
+
+    await save(
+      () => SettingsService.instance.saveSession(
+        widget.collegeId,
+        const AcademicSession(),
+        byName: name,
+      ),
+      'Academic session reset',
+    );
+
+    // The controllers hold what was typed, not what was saved, so they have to
+    // be emptied too or the boxes go on showing a session that no longer
+    // exists until the page is rebuilt from scratch.
+    if (!mounted) return;
+    setState(() {
+      _current.clear();
+      _next.clear();
+      _odd = true;
+    });
+  }
+
   @override
   Widget build(BuildContext context) {
     final name = Session.of(context).user.name;
@@ -866,10 +928,27 @@ class _SessionSectionState extends State<_SessionSection> with _Saving {
               ),
             ],
           ),
-          Text(
-            'Leave "Next session" blank to use ${nextSessionAfter(_current.text) ?? "current + 1"} '
-            'automatically. Semesters currently running: $sems',
-            style: TextStyle(fontSize: 12.5, color: AppColors.textMuted),
+          Row(
+            crossAxisAlignment: CrossAxisAlignment.center,
+            children: [
+              Expanded(
+                child: Text(
+                  'Leave "Next session" blank to use ${nextSessionAfter(_current.text) ?? "current + 1"} '
+                  'automatically. Semesters currently running: $sems',
+                  style: TextStyle(fontSize: 12.5, color: AppColors.textMuted),
+                ),
+              ),
+              const SizedBox(width: 12),
+              TextButton.icon(
+                onPressed: busy ? null : () => _resetSession(name),
+                icon: const Icon(Icons.restart_alt_rounded, size: 17),
+                label: const Text('Reset session'),
+                style: TextButton.styleFrom(
+                  foregroundColor: AppColors.danger,
+                  visualDensity: VisualDensity.compact,
+                ),
+              ),
+            ],
           ),
         ],
       ),
