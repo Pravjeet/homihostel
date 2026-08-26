@@ -58,6 +58,21 @@ class EnrollmentService {
             ),
       );
 
+  /// The whole roster for one session, once — the one-shot counterpart to
+  /// [watchRoster], for callers that need the data and then finish.
+  ///
+  /// [promoteAll] uses this instead of a `get()` per student: one query for
+  /// 2,600 students costs the same billed reads as 2,600 individual reads, but
+  /// it is *one* network round-trip rather than 2,600 sequential ones, which
+  /// is the difference between a promotion run taking seconds and taking
+  /// minutes.
+  Future<List<Enrollment>> rosterOnce(String collegeId, String session) async {
+    final snap = await _enrollments(
+      collegeId,
+    ).where('session', isEqualTo: session).get();
+    return snap.docs.map((d) => Enrollment.fromMap(d.id, d.data())).toList();
+  }
+
   /// The capacity of `colleges/{collegeId}/hostels/{hostelId}/rooms/{roomId}`,
   /// or null if either id is missing or the room doesn't exist. [cache] lets
   /// a bulk caller (see [backfillAll]) avoid re-reading the same room for
@@ -283,11 +298,65 @@ class EnrollmentService {
     required String toSession,
     required CollegeSettings settings,
   }) async {
-    final previous = await get(collegeId, user.uid, fromSession);
+    final plan = _planFor(
+      user: user,
+      previous: await get(collegeId, user.uid, fromSession),
+      collegeId: collegeId,
+      fromSession: fromSession,
+      toSession: toSession,
+      settings: settings,
+    );
+
+    if (!plan.writes) return plan.result;
+    if (plan.vacates) await _vacateQuietly(collegeId, user);
+
+    if (plan.graduates) {
+      await _db.collection('users').doc(user.uid).update(_graduationFields);
+    } else {
+      await _enrollments(collegeId).doc(plan.next!.id).set({
+        ...plan.next!.toMap(),
+        'createdAt': FieldValue.serverTimestamp(),
+      });
+    }
+    return plan.result;
+  }
+
+  static Map<String, dynamic> get _graduationFields => {
+    'status': 'graduated',
+    'updatedAt': FieldValue.serverTimestamp(),
+  };
+
+  /// Best-effort by design: a stale room reference must never block a year
+  /// advancing, or block graduating someone whose degree is otherwise done.
+  Future<void> _vacateQuietly(String collegeId, AppUser user) async {
+    try {
+      await AllotmentService.instance.vacate(
+        collegeId: collegeId,
+        student: user,
+      );
+    } catch (_) {}
+  }
+
+  /// Everything promotion decides for one student, worked out with no I/O.
+  ///
+  /// Extracted so [promoteOne] and [promoteAll] cannot drift apart. The
+  /// batched path has to reach exactly the same verdict as the single-student
+  /// one — same graduation cut-off, same room reset, same off-track flag — and
+  /// the only way to guarantee that is for both to ask this one function.
+  _PromotionPlan _planFor({
+    required AppUser user,
+    required Enrollment? previous,
+    required String collegeId,
+    required String fromSession,
+    required String toSession,
+    required CollegeSettings settings,
+  }) {
     if (previous == null) {
-      return PromotionResult.skipped(
-        user,
-        'No $fromSession enrollment to promote from.',
+      return _PromotionPlan(
+        result: PromotionResult.skipped(
+          user,
+          'No $fromSession enrollment to promote from.',
+        ),
       );
     }
 
@@ -295,22 +364,11 @@ class EnrollmentService {
     final totalYears = settings.totalYearsFor(user.course);
 
     if (hasGraduated(newYear, totalYears)) {
-      if (user.isAllotted) {
-        try {
-          await AllotmentService.instance.vacate(
-            collegeId: collegeId,
-            student: user,
-          );
-        } catch (_) {
-          // Best-effort — a stale room reference must not block graduating
-          // someone whose degree is otherwise done.
-        }
-      }
-      await _db.collection('users').doc(user.uid).update({
-        'status': 'graduated',
-        'updatedAt': FieldValue.serverTimestamp(),
-      });
-      return PromotionResult.graduated(user, previous.year);
+      return _PromotionPlan(
+        result: PromotionResult.graduated(user, previous.year),
+        graduates: true,
+        vacates: user.isAllotted,
+      );
     }
 
     final requiredCapacity = requiredRoomCapacity(
@@ -324,79 +382,65 @@ class EnrollmentService {
     // ready for a fresh assignment against this year's policy.
     final keepsRoom = previous.roomCapacity == 1;
 
-    var hostelId = previous.hostelId;
-    var hostelName = previous.hostelName;
-    var roomId = previous.roomId;
-    var roomNumber = previous.roomNumber;
-    var roomCapacity = previous.roomCapacity;
-
-    if (!keepsRoom) {
-      if (user.isAllotted) {
-        try {
-          await AllotmentService.instance.vacate(
-            collegeId: collegeId,
-            student: user,
-          );
-        } catch (_) {
-          // Best-effort — a stale room must not block the year advancing;
-          // the enrollment is still cleared below regardless.
-        }
-      }
-      hostelId = null;
-      hostelName = null;
-      roomId = null;
-      roomNumber = null;
-      roomCapacity = null;
-    }
-
     // Off-track relative to a fresh batch calculation (e.g. a repeater) is
     // reported, never blocked — see the module doc for why promotion must
     // not consult batch math to decide whether to proceed.
     final batchYear = yearFromBatch(previous.batch, toSession);
     final offTrack = batchYear != null && batchYear != newYear;
 
-    final next = Enrollment(
-      id: Enrollment.idFor(user.uid, toSession),
-      uid: user.uid,
-      session: toSession,
-      collegeId: collegeId,
-      year: newYear,
-      sem: previous.sem,
-      hostelId: hostelId,
-      hostelName: hostelName,
-      roomId: roomId,
-      roomNumber: roomNumber,
-      roomCapacity: roomCapacity,
-      requiredCapacity: requiredCapacity,
-      name: user.name,
-      course: user.course,
-      trade: user.trade,
-      batch: previous.batch,
-      enrollmentNo: user.enrollmentNo,
-      gender: user.gender,
-    );
-
-    await _enrollments(collegeId).doc(next.id).set({
-      ...next.toMap(),
-      'createdAt': FieldValue.serverTimestamp(),
-    });
-
-    return PromotionResult.promoted(
-      user,
-      newYear,
-      offTrack: offTrack,
-      roomKept: keepsRoom,
-      requiredCapacity: requiredCapacity,
+    return _PromotionPlan(
+      result: PromotionResult.promoted(
+        user,
+        newYear,
+        offTrack: offTrack,
+        roomKept: keepsRoom,
+        requiredCapacity: requiredCapacity,
+      ),
+      vacates: !keepsRoom && user.isAllotted,
+      next: Enrollment(
+        id: Enrollment.idFor(user.uid, toSession),
+        uid: user.uid,
+        session: toSession,
+        collegeId: collegeId,
+        year: newYear,
+        sem: previous.sem,
+        hostelId: keepsRoom ? previous.hostelId : null,
+        hostelName: keepsRoom ? previous.hostelName : null,
+        roomId: keepsRoom ? previous.roomId : null,
+        roomNumber: keepsRoom ? previous.roomNumber : null,
+        roomCapacity: keepsRoom ? previous.roomCapacity : null,
+        requiredCapacity: requiredCapacity,
+        name: user.name,
+        course: user.course,
+        trade: user.trade,
+        batch: previous.batch,
+        enrollmentNo: user.enrollmentNo,
+        gender: user.gender,
+      ),
     );
   }
 
-  /// Promotes every student in [users], sequentially. Best-effort per
-  /// student: one profile with a missing or unparseable previous enrollment
-  /// must not stop the others from advancing.
+  /// Promotes every student in [users]. Best-effort per student: one profile
+  /// with a missing or unparseable previous enrollment must not stop the
+  /// others from advancing.
   ///
-  /// Not a batch: each promotion may run its own [AllotmentService.vacate]
-  /// transaction, so the writes here cannot be bundled the way
-  /// [backfillAll]'s can.
+  /// **Reads once, writes in batches.** This used to call [promoteOne] in a
+  /// loop, which meant two or three sequential network round-trips per
+  /// student — a `get()` for the previous enrollment, then the write. Across a
+  /// few thousand students that is thousands of round-trips one after another,
+  /// and a promotion run took minutes rather than seconds.
+  ///
+  /// The old comment here claimed the writes could not be bundled because each
+  /// promotion may run its own [AllotmentService.vacate] transaction. That is
+  /// true of the *vacate*, but not of the enrollment write beside it — and
+  /// only the handful of students actually holding a room need one at all, so
+  /// it was making every student pay for a constraint that applies to very
+  /// few. The vacates still run individually; everything else is batched.
+  ///
+  /// [previousRoster] lets a caller hand over the `fromSession` records it has
+  /// already loaded — Academic Records is streaming exactly that list to
+  /// render the page — which drops the read cost of a promotion run to zero.
+  /// Omitted, they are fetched in a single query rather than one per student.
   Future<List<PromotionResult>> promoteAll({
     required List<AppUser> users,
     required String collegeId,
@@ -404,21 +448,67 @@ class EnrollmentService {
     required String toSession,
     required CollegeSettings settings,
     required AppUser actor,
+    List<Enrollment>? previousRoster,
   }) async {
-    final results = <PromotionResult>[];
-    for (final user in users) {
+    final roster =
+        previousRoster ?? await rosterOnce(collegeId, fromSession);
+    final previousByUid = {for (final e in roster) e.uid: e};
+
+    // Decided up front, with no I/O, so the writes below are the only thing
+    // that touches the network.
+    final plans = [
+      for (final user in users)
+        _planFor(
+          user: user,
+          previous: previousByUid[user.uid],
+          collegeId: collegeId,
+          fromSession: fromSession,
+          toSession: toSession,
+          settings: settings,
+        ),
+    ];
+
+    final results = [for (final p in plans) p.result];
+
+    // Rooms first, and only for the few who hold one. Each is its own
+    // transaction and cannot join a batch.
+    for (final plan in plans) {
+      if (plan.vacates) await _vacateQuietly(collegeId, plan.result.user);
+    }
+
+    // Then everything else, 450 writes at a time. A failed batch marks just
+    // its own students skipped — the rest of the run still lands.
+    final pending = [
+      for (var i = 0; i < plans.length; i++)
+        if (plans[i].writes) i,
+    ];
+
+    for (var start = 0; start < pending.length; start += _batchLimit) {
+      final slice = pending.sublist(
+        start,
+        (start + _batchLimit).clamp(0, pending.length),
+      );
+      final batch = _db.batch();
+      for (final i in slice) {
+        final plan = plans[i];
+        if (plan.graduates) {
+          batch.update(
+            _db.collection('users').doc(plan.result.user.uid),
+            _graduationFields,
+          );
+        } else {
+          batch.set(_enrollments(collegeId).doc(plan.next!.id), {
+            ...plan.next!.toMap(),
+            'createdAt': FieldValue.serverTimestamp(),
+          });
+        }
+      }
       try {
-        results.add(
-          await promoteOne(
-            user: user,
-            collegeId: collegeId,
-            fromSession: fromSession,
-            toSession: toSession,
-            settings: settings,
-          ),
-        );
+        await batch.commit();
       } catch (e) {
-        results.add(PromotionResult.skipped(user, e.toString()));
+        for (final i in slice) {
+          results[i] = PromotionResult.skipped(plans[i].result.user, '$e');
+        }
       }
     }
 
@@ -441,6 +531,35 @@ class EnrollmentService {
 
     return results;
   }
+}
+
+/// One student's promotion, decided but not yet written.
+///
+/// Separating the decision from the writing is what lets [promoteAll] batch:
+/// every verdict is reached in memory first, so the network work left over is
+/// a handful of room transactions plus a few bulk commits.
+class _PromotionPlan {
+  final PromotionResult result;
+
+  /// The record to write, or null when this student graduates (graduation is
+  /// the *absence* of a next-session record) or is skipped.
+  final Enrollment? next;
+
+  final bool graduates;
+
+  /// Whether this student's room has to be handed back — true only when they
+  /// actually hold one, so the expensive path stays rare.
+  final bool vacates;
+
+  const _PromotionPlan({
+    required this.result,
+    this.next,
+    this.graduates = false,
+    this.vacates = false,
+  });
+
+  /// A skip writes nothing at all; everything else writes exactly one document.
+  bool get writes => result.outcome != PromotionOutcome.skipped;
 }
 
 class BackfillOutcome {

@@ -133,12 +133,22 @@ Removes every trace of a student, in both halves of Firebase:
 2. mess fee records — `colleges/{id}/feeRecords`
 3. fines — `colleges/{id}/fines`
 4. requests — `colleges/{id}/requests`
-5. Firestore profiles
-6. Firebase Auth sign-in accounts
+5. enrollment records — `colleges/{id}/enrollments`
+6. Firestore profiles
+7. Firebase Auth sign-in accounts
 
-Steps 1–5 are also available in the app, under **Settings → Danger zone →
-"Delete ALL student data"**. Step 6 is the one only this script can do — see
-[Orphaned sign-in accounts](#orphaned-sign-in-accounts).
+Steps 1–4 and 6 are also available in the app, under **Settings → Danger zone
+→ "Delete ALL student data"**. Steps 5 and 7 are the ones only this script can
+do.
+
+Enrollments are unreachable from the app by design — `firestore.rules` sets
+`allow delete: if false` on them, so a year record is never deletable from a
+browser. Left behind after a wipe they are not merely untidy: re-imported
+students get fresh uids, so the old `{uid}_{session}` documents can never be
+matched again, and Academic Records keeps counting them. The symptom is a
+session reporting thousands enrolled against an empty roster. See also
+[Orphaned sign-in accounts](#orphaned-sign-in-accounts), which is the same
+class of problem on the Auth side.
 
 Hostels, rooms, college settings, roles, notices, office orders and the audit
 log are never touched. Those are the institution, not its intake.

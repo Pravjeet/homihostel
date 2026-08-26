@@ -81,6 +81,11 @@ class _AcademicPageState extends State<AcademicPage> {
     List<AppUser> students,
     String fromSession,
     String toSession,
+
+    /// The `fromSession` records already on screen. Handed straight to
+    /// [EnrollmentService.promoteAll] so it doesn't re-read one per student —
+    /// this page is streaming exactly the list promotion needs.
+    List<Enrollment> roster,
   ) async {
     final ok = await _confirm(
       title: 'Promote everyone to $toSession?',
@@ -110,6 +115,7 @@ class _AcademicPageState extends State<AcademicPage> {
         toSession: toSession,
         settings: session.settings,
         actor: session.user,
+        previousRoster: roster,
       );
       if (!mounted) return;
 
@@ -267,6 +273,10 @@ class _AcademicPageState extends State<AcademicPage> {
                     nextSession: nextSession,
                     studentCount: students.length,
                     rosterCount: roster.length,
+                    missingCount: countMissing(
+                      students.map((u) => u.uid),
+                      roster.map((e) => e.uid),
+                    ),
                     busy: _busy,
                     canManage: session.can(Perm.academicManage),
                     onBackfill: () =>
@@ -278,6 +288,7 @@ class _AcademicPageState extends State<AcademicPage> {
                             students,
                             currentSession,
                             nextSession,
+                            roster,
                           ),
                   ),
                   if (_message != null) ...[
@@ -320,6 +331,16 @@ class _Header extends StatelessWidget {
   final String? nextSession;
   final int studentCount;
   final int rosterCount;
+  /// How many current students have no record for this session.
+  ///
+  /// Counted per student rather than inferred from the two tallies. Comparing
+  /// the totals looked equivalent and was not: the moment anyone graduates the
+  /// counts diverge for a perfectly correct reason — graduates leave the live
+  /// roster but stay in the session they really were enrolled in — and the
+  /// page cried "roster incomplete" at exactly the moment promotion had just
+  /// succeeded. Asking who is actually missing cannot make that mistake.
+  final int missingCount;
+
   final bool busy;
   final bool canManage;
   final VoidCallback onBackfill;
@@ -330,6 +351,7 @@ class _Header extends StatelessWidget {
     required this.nextSession,
     required this.studentCount,
     required this.rosterCount,
+    required this.missingCount,
     required this.busy,
     required this.canManage,
     required this.onBackfill,
@@ -338,7 +360,7 @@ class _Header extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final matches = studentCount == rosterCount;
+    final matches = missingCount == 0;
 
     return AppCard(
       child: Column(
@@ -383,10 +405,11 @@ class _Header extends StatelessWidget {
                 rosterCount == 0
                     ? 'No enrollment records for $currentSession yet. Run the '
                           'backfill to create one per student from their batch.'
-                    : '${(studentCount - rosterCount).abs()} student(s) differ '
-                          'between the two counts. Until these agree, treat the '
-                          'roster as incomplete and keep reading year off the '
-                          'student profile.',
+                    : '$missingCount current student(s) have no $currentSession '
+                          'record — usually a batch that doesn\'t parse against '
+                          'the session. Re-run the backfill to pick them up; '
+                          'until then treat the roster as incomplete and keep '
+                          'reading year off the student profile.',
                 style: TextStyle(
                   fontSize: 12.5,
                   height: 1.45,

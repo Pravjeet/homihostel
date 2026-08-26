@@ -192,6 +192,16 @@ const attached = [
   ['mess fee record(s)', collegeRef.collection('feeRecords'), 'studentUid'],
   ['fine(s)', collegeRef.collection('fines'), 'studentUid'],
   ['request(s)', collegeRef.collection('requests'), 'raisedByUid'],
+  // Enrollments arrived after this script did, and were missed for a while.
+  // The app cannot clean them up itself even in principle: `firestore.rules`
+  // sets `allow delete: if false` on enrollments, so history is never
+  // deletable from a browser and the Admin SDK is the only way through.
+  //
+  // Left behind they are worse than untidy. Re-imported students get fresh
+  // uids, so the old `{uid}_{session}` documents become permanently
+  // unreachable, and Academic Records goes on counting them — a roster of
+  // thousands enrolled against a college with no students in it.
+  ['enrollment record(s)', collegeRef.collection('enrollments'), 'uid'],
 ];
 
 // Resolved before the commit check so a dry run reports the real numbers

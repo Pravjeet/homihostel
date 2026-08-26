@@ -21,6 +21,47 @@ void main() {
     });
   });
 
+  group('countMissing', () {
+    test('nothing missing when every student has a record', () {
+      expect(countMissing(['a', 'b', 'c'], ['a', 'b', 'c']), 0);
+    });
+
+    test('counts only the students with no record', () {
+      expect(countMissing(['a', 'b', 'c'], ['a']), 2);
+    });
+
+    test('an empty roster means everyone is missing', () {
+      expect(countMissing(['a', 'b'], const <String>[]), 2);
+    });
+
+    test('the promotion false alarm: extra roster entries are not a gap', () {
+      // The real incident. Promoting 2025-26 → 2026-27 graduated 765 of 2,649
+      // students. Viewing 2025-26 afterwards, the live student list is 1,884
+      // while the 2025-26 roster still — correctly — holds all 2,649, because
+      // graduation deletes no history. Comparing totals called that a roster
+      // 765 short of complete, at the moment promotion had just succeeded.
+      final students = [for (var i = 0; i < 1884; i++) 'u$i'];
+      final roster = [for (var i = 0; i < 2649; i++) 'u$i'];
+
+      expect(students.length, isNot(roster.length));
+      expect(
+        countMissing(students, roster),
+        0,
+        reason: 'every current student has a record; the extras are graduates',
+      );
+    });
+
+    test('a genuine gap still reports, even against a larger roster', () {
+      // Same shape as above, but three current students really are missing —
+      // a batch that would not parse, say. Those must not be masked by the
+      // graduates sitting in the roster alongside them.
+      final students = ['new1', 'new2', 'new3', ...[for (var i = 0; i < 10; i++) 'u$i']];
+      final roster = [for (var i = 0; i < 40; i++) 'u$i'];
+
+      expect(countMissing(students, roster), 3);
+    });
+  });
+
   group('yearFromBatch', () {
     test('the four live batches against the 2026-27 session', () {
       expect(yearFromBatch('2025-26', '2026-27'), 2);

@@ -83,8 +83,15 @@ class _AllotmentPageState extends State<AllotmentPage> {
 
             // The Super Admin is staff, not a resident — exclude from the
             // allotment worklist so it isn't cluttered.
+            //
+            // Graduates go too, and for a sharper reason: promotion vacates
+            // their room, so `isAllotted` turns false and they would fall
+            // straight into the "pending" queue as students awaiting a bed.
+            // After a few years of promotions that queue is mostly people who
+            // left, which is worse than useless — it hides the ones who are
+            // actually waiting.
             final people = userSnap.data!
-                .where((u) => !u.isSuperAdmin)
+                .where((u) => !u.isSuperAdmin && !u.isGraduated)
                 .toList();
             final allotted = people.where((u) => u.isAllotted).toList();
             final pending = people.where((u) => !u.isAllotted).toList();

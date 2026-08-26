@@ -399,7 +399,13 @@ class _KpiStrip extends StatelessWidget {
         icon: Icons.school_rounded,
         label: 'Residents',
         value: '${data.residents}',
-        sub: '${data.totalPeople} people in total',
+        // Alumni are named rather than quietly dropped. Without this line a
+        // campus that has just graduated everyone reads "0 residents, 1 person
+        // in total" and looks like the roster was deleted.
+        sub: data.counts.graduated == 0
+            ? '${data.totalPeople} people in total'
+            : '${data.totalPeople} current · '
+                  '${data.counts.graduated} graduated',
         navId: 'users',
       ),
       _Kpi(

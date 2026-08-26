@@ -138,16 +138,26 @@ class DataService {
   /// Always scoped by college, never an unscoped count: the security rules
   /// reject a query that drops the `collegeId` filter (proved in
   /// rules-tests), and an unscoped total would be meaningless anyway.
+  /// [graduated] only ever narrows *to* graduates — there is deliberately no
+  /// "not graduated" option. Firestore's `!=` excludes documents where the
+  /// field is **absent**, and `profileFor` in `tools/lib.js` never writes
+  /// `status`, so every bulk-imported student has no such field. A
+  /// `status != 'graduated'` filter would therefore exclude the entire
+  /// imported roster and report zero residents while everyone is still here —
+  /// the opposite failure, and far harder to notice. Count the graduates and
+  /// subtract instead; equality matches only real graduates.
   Future<int> countUsers(
     String collegeId, {
     String? roleId,
     bool? isActive,
     bool? hasNoRole,
+    bool graduated = false,
   }) async {
     var q = _usersIn(collegeId);
     if (roleId != null) q = q.where('roleId', isEqualTo: roleId);
     if (hasNoRole == true) q = q.where('roleId', isNull: true);
     if (isActive != null) q = q.where('isActive', isEqualTo: isActive);
+    if (graduated) q = q.where('status', isEqualTo: 'graduated');
 
     final snap = await q.count().get();
     return snap.count ?? 0;
@@ -165,8 +175,17 @@ class DataService {
     List<AppRole> roles,
   ) async {
     // Issued together; each is a separate round trip but they do not contend.
+    //
+    // Two passes per role — everyone, then the graduates — because the
+    // dashboard is asking about people who are *here now*. Counting graduates
+    // as residents is how a fully graduated campus went on reporting 2,649
+    // residents against a hostel with every bed free. See [countUsers] for why
+    // this subtracts rather than filtering them out in the query.
     final perRole = await Future.wait([
       for (final r in roles) countUsers(collegeId, roleId: r.id),
+    ]);
+    final perRoleGraduated = await Future.wait([
+      for (final r in roles) countUsers(collegeId, roleId: r.id, graduated: true),
     ]);
 
     final byRoleName = <String, int>{};
@@ -175,8 +194,8 @@ class DataService {
 
     for (var i = 0; i < roles.length; i++) {
       final role = roles[i];
-      final n = perRole[i];
-      if (n == 0) continue;
+      final n = perRole[i] - perRoleGraduated[i];
+      if (n <= 0) continue;
       byRoleName[role.name] = n;
       if (Perm.isResident(role.permissions)) {
         residents += n;
@@ -189,14 +208,21 @@ class DataService {
       countUsers(collegeId),
       countUsers(collegeId, hasNoRole: true),
       countUsers(collegeId, isActive: false),
+      countUsers(collegeId, graduated: true),
     ]);
 
+    final graduated = results[3];
+
     return UserCounts(
-      total: results[0],
+      // Current people, so the headline figure agrees with the tiles beneath
+      // it. Alumni are still in the database and still reachable from User
+      // Management — they are reported separately rather than folded in.
+      total: results[0] - graduated,
       unassigned: results[1],
       inactive: results[2],
       residents: residents,
       staff: staff,
+      graduated: graduated,
       byRoleName: byRoleName,
     );
   }
@@ -610,6 +636,12 @@ class UserCounts {
   final int residents;
   final int staff;
 
+  /// Alumni — students whose promotion carried them past the end of their
+  /// course. Excluded from every other figure here, and reported on its own
+  /// so a fully graduated campus reads as "0 residents, 2,649 alumni" rather
+  /// than silently dropping two and a half thousand people out of the totals.
+  final int graduated;
+
   /// Headcount per role name, for the breakdown chart. Roles with nobody in
   /// them are omitted rather than charted as a zero-width slice.
   final Map<String, int> byRoleName;
@@ -620,6 +652,7 @@ class UserCounts {
     this.inactive = 0,
     this.residents = 0,
     this.staff = 0,
+    this.graduated = 0,
     this.byRoleName = const {},
   });
 }

@@ -5,10 +5,13 @@ import '../../core/session.dart';
 import '../../core/theme.dart';
 import '../../models/app_role.dart';
 import '../../models/app_user.dart';
+import '../../models/enrollment.dart';
 import '../../models/hostel.dart';
 import '../../services/auth_service.dart';
 import '../../services/data_service.dart';
+import '../../services/enrollment_service.dart';
 import '../../services/hostel_service.dart';
+import '../../utils/enrollment_helpers.dart';
 
 /// A filterable directory of residents — trade, year, semester, hostel,
 /// home state, batch.
@@ -66,11 +69,45 @@ class _StudentOverviewPageState extends State<StudentOverviewPage> {
   static String _stateLabel(String? s) =>
       (s == null || s.trim().isEmpty) ? _noState : s;
 
+  /// This session's enrollment per student. Empty when no session is set.
+  Map<String, Enrollment> _byUid = const {};
+
+  /// True when the page is showing one academic session rather than the
+  /// standing roster.
+  bool _sessionScoped = false;
+
+  // ------------------------------------------------------------------
+  // Where each displayed value comes from.
+  //
+  // In session mode the enrollment is authoritative, because it is the only
+  // record promotion actually maintains. `AppUser.year` is free text copied
+  // from the import sheet and never updated again — a student imported as
+  // "1" still reads "1" four promotions later, which is what made this page
+  // disagree with Academic Records. `Enrollment.year` is a real ordinal,
+  // recomputed every July.
+  //
+  // Hostel and semester come from the enrollment too, and deliberately: for a
+  // past session the room someone held *then* is the honest answer, and it is
+  // exactly why the enrollment denormalises it.
+  // ------------------------------------------------------------------
+
+  String? _yearLabel(AppUser u) {
+    final e = _byUid[u.uid];
+    if (e != null) return ordinal(e.year);
+    return _sessionScoped ? null : u.year;
+  }
+
+  int? _semOf(AppUser u) =>
+      _byUid[u.uid]?.sem ?? (_sessionScoped ? null : u.sem);
+
+  String? _hostelOf(AppUser u) =>
+      _sessionScoped ? _byUid[u.uid]?.hostelName : u.hostelName;
+
   bool _keep(AppUser u) =>
       (_trade == null || u.trade == _trade) &&
-      (_year == null || u.year == _year) &&
-      (_sem == null || u.sem == _sem) &&
-      (_hostel == null || _hostelLabel(u.hostelName) == _hostel) &&
+      (_year == null || _yearLabel(u) == _year) &&
+      (_sem == null || _semOf(u) == _sem) &&
+      (_hostel == null || _hostelLabel(_hostelOf(u)) == _hostel) &&
       (_state == null || _stateLabel(u.state) == _state) &&
       (_batch == null || u.batch == _batch);
 
@@ -129,7 +166,26 @@ class _StudentOverviewPageState extends State<StudentOverviewPage> {
                 .map((r) => r.id)
                 .toSet();
 
-            return StreamBuilder<List<AppUser>>(
+            // The session drives who is listed at all. Both streams are
+            // pooled and both are already open from Academic Records, so this
+            // attaches listeners rather than paying for either query again.
+            final currentSession = session.settings.session.current;
+
+            return StreamBuilder<List<Enrollment>>(
+              stream: currentSession == null
+                  ? const Stream<List<Enrollment>>.empty()
+                  : EnrollmentService.instance.watchRoster(
+                      collegeId,
+                      currentSession,
+                    ),
+              builder: (context, enrollSnap) {
+                _sessionScoped = currentSession != null;
+                _byUid = {
+                  for (final e in enrollSnap.data ?? const <Enrollment>[])
+                    e.uid: e,
+                };
+
+                return StreamBuilder<List<AppUser>>(
               stream: DataService.instance.watchUsers(collegeId),
               builder: (context, userSnap) {
                 if (userSnap.hasError) {
@@ -137,7 +193,8 @@ class _StudentOverviewPageState extends State<StudentOverviewPage> {
                     child: Text(AuthService.describeError(userSnap.error!)),
                   );
                 }
-                if (!userSnap.hasData) {
+                if (!userSnap.hasData ||
+                    (_sessionScoped && !enrollSnap.hasData)) {
                   return const Padding(
                     padding: EdgeInsets.all(60),
                     child: Center(child: CircularProgressIndicator()),
@@ -147,6 +204,12 @@ class _StudentOverviewPageState extends State<StudentOverviewPage> {
                 final roster = userSnap.data!
                     .where((u) => !u.isSuperAdmin)
                     .where((u) => !staffRoleIds.contains(u.roleId))
+                    // In session mode the directory *is* that session's
+                    // roster: someone with no enrollment for it either
+                    // graduated, has not been backfilled, or was admitted
+                    // later. Listing them anyway is what made a fully
+                    // graduated campus still show 2,649 students.
+                    .where((u) => !_sessionScoped || _byUid.containsKey(u.uid))
                     .toList();
 
                 final shown = roster.where(_keep).toList()
@@ -162,16 +225,23 @@ class _StudentOverviewPageState extends State<StudentOverviewPage> {
                   for (final u in roster)
                     if (u.trade != null) u.trade!,
                 }.toList()..sort());
-                final yearOptions = ({
-                  for (final u in roster)
-                    if (u.year != null) u.year!,
-                }.toList()..sort());
+                // Built through the same accessors the filter compares
+                // against, so an option can never be offered that matches
+                // nobody. In session mode these are real ordinals — 1st, 2nd
+                // — rather than whatever free text the sheet happened to
+                // carry, so they also sort correctly.
+                final yearOptions =
+                    ({
+                          for (final u in roster)
+                            if (_yearLabel(u) != null) _yearLabel(u)!,
+                        }.toList()
+                        ..sort());
                 final semOptions = ({
                   for (final u in roster)
-                    if (u.sem != null) u.sem!,
+                    if (_semOf(u) != null) _semOf(u)!,
                 }.toList()..sort());
                 final hostelOptions = ({
-                  for (final u in roster) _hostelLabel(u.hostelName),
+                  for (final u in roster) _hostelLabel(_hostelOf(u)),
                   // BH-10 belongs after BH-9, not between BH-1 and BH-2.
                 }.toList()..sort(Hostel.compareLabels));
                 // 'Not set' is not a place, so it sorts to the end instead of
@@ -208,8 +278,56 @@ class _StudentOverviewPageState extends State<StudentOverviewPage> {
                       shown: shown.length,
                       anyFilter: _anyFilter,
                       onClear: _clearAll,
+                      session: currentSession,
                     ),
                     const SizedBox(height: 14),
+
+                    // An empty session is a real answer, not a broken page.
+                    // Everyone graduating is the expected end state, and
+                    // saying so beats rendering filter chips over nothing.
+                    if (_sessionScoped && roster.isEmpty) ...[
+                      AppCard(
+                        padding: const EdgeInsets.symmetric(vertical: 46),
+                        child: Center(
+                          child: Column(
+                            children: [
+                              Icon(
+                                Icons.school_outlined,
+                                size: 34,
+                                color: AppColors.textMuted,
+                              ),
+                              const SizedBox(height: 12),
+                              Text(
+                                'Nobody is enrolled in $currentSession.',
+                                style: const TextStyle(
+                                  fontSize: 15,
+                                  fontWeight: FontWeight.w700,
+                                ),
+                              ),
+                              const SizedBox(height: 6),
+                              ConstrainedBox(
+                                constraints: const BoxConstraints(
+                                  maxWidth: 430,
+                                ),
+                                child: Text(
+                                  'This directory follows the current '
+                                  'academic session. Either everyone has '
+                                  'graduated, or this session has not been '
+                                  'backfilled yet — Academic Records is where '
+                                  'that is done.',
+                                  textAlign: TextAlign.center,
+                                  style: TextStyle(
+                                    color: AppColors.textMuted,
+                                    fontSize: 13,
+                                    height: 1.5,
+                                  ),
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                      ),
+                    ] else ...[
                     _Filters(
                       tradeOptions: tradeOptions,
                       yearOptions: yearOptions,
@@ -250,7 +368,7 @@ class _StudentOverviewPageState extends State<StudentOverviewPage> {
                       }),
                     ),
                     const SizedBox(height: 14),
-                    _StudentList(students: pageItems),
+                    _StudentList(students: pageItems, byUid: _byUid),
                     if (pageCount > 1) ...[
                       const SizedBox(height: 14),
                       Row(
@@ -285,7 +403,10 @@ class _StudentOverviewPageState extends State<StudentOverviewPage> {
                         ],
                       ),
                     ],
+                    ],
                   ],
+                );
+              },
                 );
               },
             );
@@ -304,11 +425,16 @@ class _Header extends StatelessWidget {
   final bool anyFilter;
   final VoidCallback onClear;
 
+  /// Null when no academic session is set, in which case this falls back to
+  /// the standing roster and says so.
+  final String? session;
+
   const _Header({
     required this.total,
     required this.shown,
     required this.anyFilter,
     required this.onClear,
+    required this.session,
   });
 
   @override
@@ -316,11 +442,21 @@ class _Header extends StatelessWidget {
     child: Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        const SectionHeader('Student Overview'),
+        SectionHeader(
+          'Student Overview',
+          trailing: session == null
+              ? null
+              : StatusPill(session!, AppColors.primary, AppColors.primarySoft),
+        ),
         const SizedBox(height: 4),
         Text(
-          'Filter the resident roster by trade, year, semester, hostel '
-          'and home state.',
+          session == null
+              ? 'No academic session is set, so this shows the standing '
+                    'roster. Year comes from the import sheet and does not '
+                    'move with promotion — set a session for live years.'
+              : 'Everyone enrolled in $session, by trade, year, semester, '
+                    'hostel and home state. Year and room come from that '
+                    'session\'s record, so they follow promotion.',
           style: TextStyle(fontSize: 13, color: AppColors.textMuted),
         ),
         const SizedBox(height: 16),
@@ -492,7 +628,13 @@ class _Drop<T> extends StatelessWidget {
 
 class _StudentList extends StatelessWidget {
   final List<AppUser> students;
-  const _StudentList({required this.students});
+  /// This session's enrollment per student, so a row can show the year
+  /// promotion actually maintains rather than the import sheet's stale
+  /// free text. Empty when no session is set, in which case the row
+  /// falls back to the profile fields.
+  final Map<String, Enrollment> byUid;
+
+  const _StudentList({required this.students, required this.byUid});
 
   @override
   Widget build(BuildContext context) {
@@ -514,7 +656,10 @@ class _StudentList extends StatelessWidget {
         children: [
           for (var i = 0; i < students.length; i++) ...[
             if (i > 0) Divider(height: 1, color: AppColors.border),
-            _StudentRow(student: students[i]),
+            _StudentRow(
+              student: students[i],
+              enrollment: byUid[students[i].uid],
+            ),
           ],
         ],
       ),
@@ -524,16 +669,23 @@ class _StudentList extends StatelessWidget {
 
 class _StudentRow extends StatelessWidget {
   final AppUser student;
-  const _StudentRow({required this.student});
+  final Enrollment? enrollment;
+
+  const _StudentRow({required this.student, this.enrollment});
 
   @override
   Widget build(BuildContext context) {
     final u = student;
-    final hostelLabel = u.hostelName == null
+    final e = enrollment;
+
+    // The enrollment wins wherever it exists: it is the record promotion
+    // maintains, and for a past session it is also the honest answer about
+    // which room this student actually held at the time.
+    final hostelName = e?.hostelName ?? u.hostelName;
+    final roomNumber = e?.roomNumber ?? u.roomNumber;
+    final hostelLabel = hostelName == null
         ? null
-        : (u.roomNumber == null
-              ? u.hostelName
-              : '${u.hostelName} · ${u.roomNumber}');
+        : (roomNumber == null ? hostelName : '$hostelName · $roomNumber');
 
     return Padding(
       padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
@@ -589,9 +741,11 @@ class _StudentRow extends StatelessWidget {
             flex: 2,
             child: Builder(
               builder: (context) {
+                final year = e != null ? ordinal(e.year) : u.year;
+                final sem = e?.sem ?? u.sem;
                 final parts = [
-                  if (u.year != null) u.year!,
-                  if (u.sem != null) 'Sem ${u.sem}',
+                  if (year != null) year,
+                  if (sem != null) 'Sem $sem',
                 ];
                 return Text(
                   parts.isEmpty ? '—' : parts.join(' · '),

@@ -48,6 +48,21 @@ String? nextSessionAfter(String? session) {
 
 String _shortYear(int fullYear) => (fullYear % 100).toString().padLeft(2, '0');
 
+/// How many of [studentUids] have no entry in [enrolledUids].
+///
+/// The honest version of "is this session's roster complete?". The obvious
+/// alternative — comparing the two totals — reads as equivalent and isn't:
+/// graduates drop out of the live student list while correctly remaining in
+/// the session they were actually enrolled in, so the totals diverge for a
+/// perfectly good reason and a total-based check reports a broken roster at
+/// the exact moment promotion has just succeeded. Naming who is missing cannot
+/// make that mistake, and it counts the students a re-run of backfill would
+/// actually pick up.
+int countMissing(Iterable<String> studentUids, Iterable<String> enrolledUids) {
+  final enrolled = enrolledUids.toSet();
+  return studentUids.where((uid) => !enrolled.contains(uid)).length;
+}
+
 /// True once a student's year has run past how long their course lasts — the
 /// graduation check. Compares the *year*, not the batch's end date, because a
 /// repeater's year can lag behind what their batch alone would predict;
