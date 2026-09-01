@@ -255,26 +255,27 @@ class _RoomDetailDialogState extends State<RoomDetailDialog> {
       title: Text('Room ${room.number}'),
       content: SizedBox(
         width: 470,
+        // Asks for this room's occupants rather than the whole roster.
+        //
+        // It used to stream every user in the college — 2,649 documents — and
+        // filter down to the three people in this room. Still a live stream,
+        // so allotting someone from inside this dialog updates it the same way
+        // it always did; it is simply the right query now.
         child: StreamBuilder<List<AppUser>>(
           stream: canSeeRoster
-              ? DataService.instance.watchUsers(widget.collegeId)
+              ? DataService.instance.watchRoomOccupants(
+                  widget.collegeId,
+                  widget.hostel.id,
+                  room.id,
+                )
               : const Stream<List<AppUser>>.empty(),
           builder: (context, snap) {
-            final roster = snap.data ?? const <AppUser>[];
-
-            final occupants =
-                roster
-                    .where(
-                      (u) =>
-                          u.hostelId == widget.hostel.id &&
-                          u.roomId == room.id &&
-                          u.isActive,
-                    )
-                    .toList()
-                  ..sort(
-                    (a, b) =>
-                        a.name.toLowerCase().compareTo(b.name.toLowerCase()),
-                  );
+            // Sorted by the query; only the active filter is left, and it stays
+            // client-side because it is a handful of documents and folding it
+            // into the query would cost another composite index.
+            final occupants = (snap.data ?? const <AppUser>[])
+                .where((u) => u.isActive)
+                .toList();
 
             // Beds free according to the roster. `room.capacity` is a snapshot
             // from when the dialog opened, which is fine — capacity only
@@ -358,20 +359,36 @@ class _RoomDetailDialogState extends State<RoomDetailDialog> {
                         ),
                       )
                     else
-                      _Picker(
-                        hostel: widget.hostel,
-                        roster: roster,
-                        controller: _search,
-                        query: _query,
-                        busy: _busy,
-                        maxShown: _maxCandidates,
-                        onQuery: (v) => setState(() => _query = v),
-                        onCancel: () => setState(() {
-                          _picking = false;
-                          _query = '';
-                          _search.clear();
-                        }),
-                        onPick: _allot,
+                      // The roster is loaded here and nowhere else in this
+                      // dialog, because choosing who to allot is the only
+                      // thing that genuinely needs every student — you have to
+                      // be able to search for someone who is not in this room
+                      // yet. Merely opening a room to see who is in it does
+                      // not, and that is by far the commoner action, so it no
+                      // longer pays for 2,649 documents.
+                      //
+                      // `_picking` gates this branch, so the subscription is
+                      // only opened once someone actually taps "Allot a
+                      // student".
+                      StreamBuilder<List<AppUser>>(
+                        stream: DataService.instance.watchUsers(
+                          widget.collegeId,
+                        ),
+                        builder: (context, rosterSnap) => _Picker(
+                          hostel: widget.hostel,
+                          roster: rosterSnap.data ?? const <AppUser>[],
+                          controller: _search,
+                          query: _query,
+                          busy: _busy,
+                          maxShown: _maxCandidates,
+                          onQuery: (v) => setState(() => _query = v),
+                          onCancel: () => setState(() {
+                            _picking = false;
+                            _query = '';
+                            _search.clear();
+                          }),
+                          onPick: _allot,
+                        ),
                       ),
                   ],
                 ],

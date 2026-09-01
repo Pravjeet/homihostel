@@ -114,6 +114,38 @@ class DataService {
         ),
   );
 
+  final CachedStreamPool<List<AppUser>> _roomPool = CachedStreamPool();
+
+  /// The people in one room, live.
+  ///
+  /// The hostels pages used to answer this by streaming the entire roster and
+  /// filtering in Dart — 2,649 documents to name three roommates. This asks
+  /// Firestore the question directly, so it costs about one read and still
+  /// updates the moment someone is allotted.
+  ///
+  /// [hostelId] is part of the query and not an afterthought: a room id is the
+  /// room *number*, so "204" exists in most blocks. Matching on `roomId` alone
+  /// would show BH-1's occupants inside BH-2's room.
+  Stream<List<AppUser>> watchRoomOccupants(
+    String collegeId,
+    String hostelId,
+    String roomId,
+  ) => _roomPool.stream(
+    '$collegeId/$hostelId/$roomId',
+    () => _db
+        .collection('users')
+        .where('collegeId', isEqualTo: collegeId)
+        .where('hostelId', isEqualTo: hostelId)
+        .where('roomId', isEqualTo: roomId)
+        .snapshots()
+        .map(
+          (s) => s.docs.map((d) => AppUser.fromMap(d.id, d.data())).toList()
+            ..sort(
+              (a, b) => a.name.toLowerCase().compareTo(b.name.toLowerCase()),
+            ),
+        ),
+  );
+
   // ------------------------ counts, not documents ----------------------
   //
   // The dashboard wants seven integers. Reading the roster to derive them
@@ -161,6 +193,35 @@ class DataService {
 
     final snap = await q.count().get();
     return snap.count ?? 0;
+  }
+
+  /// How many active students each of [hostelIds] holds.
+  ///
+  /// The same figure `studentsByHostel` derives from the roster, obtained
+  /// without downloading it: one aggregation per block, so fourteen blocks
+  /// cost about fourteen reads instead of 2,649.
+  ///
+  /// Counts `isActive` students, matching `studentsByHostel` exactly rather
+  /// than reusing the hostel document's `occupiedBeds`. Those two are not the
+  /// same number — a deactivated student still occupies their bed — and
+  /// quietly swapping one for the other would change what the page reports.
+  Future<Map<String, int>> countStudentsByHostel(
+    String collegeId,
+    List<String> hostelIds,
+  ) async {
+    final counts = await Future.wait([
+      for (final id in hostelIds)
+        _usersIn(collegeId)
+            .where('hostelId', isEqualTo: id)
+            .where('isActive', isEqualTo: true)
+            .count()
+            .get()
+            .then((s) => s.count ?? 0),
+    ]);
+    return {
+      for (var i = 0; i < hostelIds.length; i++)
+        if (counts[i] > 0) hostelIds[i]: counts[i],
+    };
   }
 
   /// Every headline figure the dashboard needs, in one pass.

@@ -3,7 +3,6 @@ import 'package:flutter/material.dart';
 import '../../core/permissions.dart';
 import '../../core/session.dart';
 import '../../core/theme.dart';
-import '../../models/app_user.dart';
 import '../../models/hostel.dart';
 import '../../services/auth_service.dart';
 import '../../services/data_service.dart';
@@ -26,6 +25,28 @@ class HostelsPage extends StatefulWidget {
 class _HostelsPageState extends State<HostelsPage> {
   String? _openHostelId;
 
+  /// Memoised per set of hostels — the same reason `_FeedState._countsFor`
+  /// exists on the dashboard. These are aggregation queries, which always go
+  /// to the server, so an un-memoised future would re-fire all fourteen on
+  /// every rebuild and undo the saving it exists to make.
+  ///
+  /// Keyed on the hostel ids, so adding or removing a block refetches while
+  /// an ordinary rebuild does not. Occupancy changes are made on Room
+  /// Allotment, not here, so a snapshot taken when the page opened is the
+  /// right currency for it.
+  Future<Map<String, int>>? _heads;
+  String? _headsKey;
+
+  Future<Map<String, int>> _headsFor(String collegeId, List<Hostel> hostels) {
+    final ids = hostels.map((h) => h.id).toList();
+    final key = '$collegeId/${ids.join(',')}';
+    if (_headsKey != key || _heads == null) {
+      _headsKey = key;
+      _heads = DataService.instance.countStudentsByHostel(collegeId, ids);
+    }
+    return _heads!;
+  }
+
   @override
   Widget build(BuildContext context) {
     final session = Session.of(context);
@@ -45,6 +66,7 @@ class _HostelsPageState extends State<HostelsPage> {
         if (snap.hasError) {
           return AppCard(child: Text(AuthService.describeError(snap.error!)));
         }
+
         if (!snap.hasData) {
           return const Padding(
             padding: EdgeInsets.all(60),
@@ -70,23 +92,26 @@ class _HostelsPageState extends State<HostelsPage> {
           );
         }
 
-        // `watchUsers` is pooled, and the dashboard opens it before anyone
-        // reaches this page, so this attaches a listener rather than paying
-        // for another read of every user.
-        return StreamBuilder<List<AppUser>>(
-          stream: DataService.instance.watchUsers(collegeId),
-          builder: (context, userSnap) {
-            final heads = studentsByHostel(userSnap.data ?? const <AppUser>[]);
+        // Counted, not downloaded.
+        //
+        // This used to stream the whole roster and tally it in Dart, which
+        // meant 2,649 documents to render fourteen numbers — and an older
+        // comment here claimed the dashboard had already opened that query so
+        // it was free. That stopped being true when the dashboard moved to
+        // aggregations, and this page went on paying for it silently.
+        return FutureBuilder<Map<String, int>>(
+          future: _headsFor(collegeId, hostels),
+          builder: (context, headSnap) {
             return _body(
               context,
               session: session,
               collegeId: collegeId,
               hostels: hostels,
-              heads: heads,
+              heads: headSnap.data ?? const {},
               showCounts: true,
               // Still loading, so the tiles show a dash rather than a
               // confident zero.
-              countsReady: userSnap.hasData,
+              countsReady: headSnap.hasData,
             );
           },
         );

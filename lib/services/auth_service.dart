@@ -1,6 +1,7 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:firebase_core/firebase_core.dart';
+import 'package:flutter/foundation.dart' show kIsWeb;
 
 import '../core/identity.dart';
 import '../core/permissions.dart';
@@ -29,6 +30,15 @@ class AuthService {
     required String email,
     required String password,
   }) async {
+    // Registration signs the new owner in, so it needs the same safe default
+    // as [signIn] — without this it would inherit Firebase's web default of
+    // LOCAL and quietly outlive the browser on a machine nobody chose that
+    // for. There is no tick box on the registration form; a workspace owner
+    // can opt in next time they sign in.
+    if (kIsWeb) {
+      await _auth.setPersistence(Persistence.SESSION);
+    }
+
     final cred = await _auth.createUserWithEmailAndPassword(
       email: email.trim(),
       password: password,
@@ -100,10 +110,32 @@ class AuthService {
   /// [identifier] may be a real email address or a registration number —
   /// see [Identity]. The number is mapped to a synthetic address before it
   /// reaches Firebase.
+  /// [staySignedIn] chooses how long the credential outlives this tab, and is
+  /// the whole of the "keep me signed in" decision.
+  ///
+  /// The default is deliberately the *safe* one. Firebase's web default is
+  /// LOCAL — the session survives closing the browser entirely — which on the
+  /// shared office machines this runs on hands the next person a live warden
+  /// session. SESSION scopes the credential to the tab: close it and the next
+  /// visit starts at the login screen, while an accidental F5 mid-task still
+  /// keeps you signed in.
+  ///
+  /// Opting in is therefore per-person and per-machine, which is the only way
+  /// it can be correct — the office desk and someone's own laptop want
+  /// opposite answers, and the app cannot tell which it is running on.
+  ///
+  /// Web-only in FlutterFire; it throws on Windows and Android, where the OS
+  /// account model already isolates users.
   Future<void> signIn({
     required String identifier,
     required String password,
+    bool staySignedIn = false,
   }) async {
+    if (kIsWeb) {
+      await _auth.setPersistence(
+        staySignedIn ? Persistence.LOCAL : Persistence.SESSION,
+      );
+    }
     await _auth.signInWithEmailAndPassword(
       email: Identity.toAuthEmail(identifier),
       password: password,

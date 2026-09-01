@@ -1,7 +1,5 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
-import 'package:firebase_auth/firebase_auth.dart';
 import 'package:firebase_core/firebase_core.dart';
-import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart';
 
 import 'core/theme.dart';
@@ -35,20 +33,19 @@ Future<void> main() async {
       cacheSizeBytes: Settings.CACHE_SIZE_UNLIMITED,
     );
 
-    // Sign-in lasts as long as the tab, not the browser profile.
+    // Persistence is deliberately NOT set here.
     //
-    // Firebase's web default is LOCAL — the session survives closing the
-    // browser entirely, so opening the app link lands you back in whoever
-    // signed in last. On the shared office machines this runs on, that hands
-    // the next person a live warden session. SESSION scopes the credential to
-    // the tab: close it and the next visit starts at the login screen, while
-    // an accidental F5 mid-task still keeps you signed in.
+    // It used to be pinned to SESSION on every startup, which was the right
+    // default for shared office machines but silently broke "keep me signed
+    // in": setPersistence migrates the *currently saved* session as well as
+    // future ones, so a person who had chosen LOCAL was downgraded back to
+    // tab-scoped on their very next visit, and the tick box appeared to do
+    // nothing.
     //
-    // Web-only in FlutterFire — it throws on Windows and Android, where the
-    // OS account model already isolates users.
-    if (kIsWeb) {
-      await FirebaseAuth.instance.setPersistence(Persistence.SESSION);
-    }
+    // The choice now belongs to whoever is signing in, and is applied once at
+    // that moment — see [AuthService.signIn] and [AuthService.registerCollege],
+    // both of which default to SESSION so the safe behaviour is what you get
+    // without asking for anything.
   } catch (e) {
     startupError = e;
   }

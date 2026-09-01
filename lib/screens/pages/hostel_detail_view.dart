@@ -3,7 +3,6 @@ import 'package:flutter/material.dart';
 import '../../core/permissions.dart';
 import '../../core/session.dart';
 import '../../core/theme.dart';
-import '../../models/app_user.dart';
 import '../../models/hostel.dart';
 import '../../services/auth_service.dart';
 import '../../services/data_service.dart';
@@ -13,7 +12,7 @@ import 'hostel_editor_dialog.dart';
 import 'room_detail_dialog.dart';
 
 /// Rooms inside one hostel, grouped by floor.
-class HostelDetailView extends StatelessWidget {
+class HostelDetailView extends StatefulWidget {
   final String collegeId;
   final String hostelId;
   final VoidCallback onBack;
@@ -24,6 +23,35 @@ class HostelDetailView extends StatelessWidget {
     required this.hostelId,
     required this.onBack,
   });
+
+  @override
+  State<HostelDetailView> createState() => _HostelDetailViewState();
+}
+
+class _HostelDetailViewState extends State<HostelDetailView> {
+  // Named so the rest of the class reads exactly as it did before the split
+  // into StatefulWidget, rather than sprinkling `widget.` through methods
+  // that have nothing to do with this change.
+  String get collegeId => widget.collegeId;
+  String get hostelId => widget.hostelId;
+  VoidCallback get onBack => widget.onBack;
+
+  /// Memoised: an aggregation always goes to the server, so building it in
+  /// `build()` would re-count on every rebuild — and this page rebuilds
+  /// whenever the room stream ticks.
+  Future<int>? _students;
+  String? _studentsKey;
+
+  Future<int> _studentsIn(String collegeId, String hostelId) {
+    final key = '$collegeId/$hostelId';
+    if (_studentsKey != key || _students == null) {
+      _studentsKey = key;
+      _students = DataService.instance
+          .countStudentsByHostel(collegeId, [hostelId])
+          .then((m) => m[hostelId] ?? 0);
+    }
+    return _students!;
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -58,16 +86,17 @@ class HostelDetailView extends StatelessWidget {
           );
         }
 
-        return StreamBuilder<List<AppUser>>(
-          // Pooled, and already open from the dashboard — this attaches a
-          // listener rather than re-reading the roster.
-          stream: canCount
-              ? DataService.instance.watchUsers(collegeId)
-              : const Stream<List<AppUser>>.empty(),
+        // One aggregation instead of the whole roster. The old version
+        // streamed 2,649 user documents and filtered them in Dart to produce
+        // a single integer, on the strength of a comment claiming the
+        // dashboard had already paid for that query — which stopped being
+        // true when the dashboard moved to counts.
+        return FutureBuilder<int>(
+          future: canCount
+              ? _studentsIn(collegeId, hostelId)
+              : Future.value(0),
           builder: (context, userSnap) {
-            final students = (userSnap.data ?? const <AppUser>[])
-                .where((u) => u.hostelId == hostelId && u.isActive)
-                .length;
+            final students = userSnap.data ?? 0;
 
             return StreamBuilder<List<Room>>(
               stream: HostelService.instance.watchRooms(collegeId, hostelId),

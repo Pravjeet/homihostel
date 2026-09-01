@@ -78,6 +78,11 @@ class _LoginScreenState extends State<LoginScreen> {
       await AuthService.instance.signIn(
         identifier: identifier,
         password: password,
+        // The same tick that remembers the password keeps the session alive
+        // past closing the browser. Both are the one question a person is
+        // actually answering — "is this machine mine?" — and splitting them
+        // into two checkboxes would only invite ticking one and not the other.
+        staySignedIn: _remember,
       );
 
       // Fire-and-forget: the profile name makes the card readable, but a
@@ -316,6 +321,14 @@ class _LoginScreenState extends State<LoginScreen> {
                                     title: const Text(
                                       'Keep me signed in on this PC',
                                       style: TextStyle(fontSize: 13),
+                                    ),
+                                    subtitle: Text(
+                                      'Stays signed in after you close the '
+                                      'browser. Leave off on shared machines.',
+                                      style: TextStyle(
+                                        fontSize: 11.5,
+                                        color: AppColors.textMuted,
+                                      ),
                                     ),
                                     controlAffinity:
                                         ListTileControlAffinity.leading,
