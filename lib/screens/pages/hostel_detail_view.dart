@@ -6,8 +6,10 @@ import '../../core/theme.dart';
 import '../../models/hostel.dart';
 import '../../services/auth_service.dart';
 import '../../services/data_service.dart';
+import '../../services/enrollment_service.dart';
 import '../../services/hostel_service.dart';
 import '../../widgets/selectable_chips.dart';
+import '../dashboard_shell.dart' show HistoryBanner;
 import 'hostel_editor_dialog.dart';
 import 'room_detail_dialog.dart';
 
@@ -53,6 +55,40 @@ class _HostelDetailViewState extends State<HostelDetailView> {
     return _students!;
   }
 
+  /// The past-session equivalent of [_studentsIn]: this hostel's headcount,
+  /// and who occupied each room, both read off one session's enrollment
+  /// records in the single query that fetches them.
+  ///
+  /// Deliberately one future rather than two — both numbers come from the
+  /// same roster, so fetching it once and deriving both is free the second
+  /// time and cannot let the headcount and the room grid disagree about
+  /// which session they describe.
+  Future<({int students, Map<String, int> byRoom})>? _historical;
+  String? _historicalKey;
+
+  Future<({int students, Map<String, int> byRoom})> _historicalFor(
+    String collegeId,
+    String hostelId,
+    String session,
+  ) {
+    final key = '$collegeId/$hostelId/$session';
+    if (_historicalKey != key || _historical == null) {
+      _historicalKey = key;
+      _historical = EnrollmentService.instance
+          .rosterOnce(collegeId, session)
+          .then((roster) {
+            final here = roster.where((e) => e.hostelId == hostelId);
+            final byRoom = <String, int>{};
+            for (final e in here) {
+              final r = e.roomId;
+              if (r != null) byRoom[r] = (byRoom[r] ?? 0) + 1;
+            }
+            return (students: here.length, byRoom: byRoom);
+          });
+    }
+    return _historical!;
+  }
+
   @override
   Widget build(BuildContext context) {
     final session = Session.of(context);
@@ -91,83 +127,122 @@ class _HostelDetailViewState extends State<HostelDetailView> {
         // a single integer, on the strength of a comment claiming the
         // dashboard had already paid for that query — which stopped being
         // true when the dashboard moved to counts.
-        return FutureBuilder<int>(
-          future: canCount
-              ? _studentsIn(collegeId, hostelId)
-              : Future.value(0),
-          builder: (context, userSnap) {
-            final students = userSnap.data ?? 0;
+        //
+        // While viewing history there is no live count to ask for — the
+        // question is "who was here in 2025-26", which only that session's
+        // enrollment records can answer — so the historical future replaces
+        // the live one entirely rather than running alongside it.
+        return FutureBuilder<({int students, Map<String, int> byRoom})?>(
+          future: session.isViewingHistory
+              ? _historicalFor(collegeId, hostelId, session.viewingSession!)
+              : Future.value(null),
+          builder: (context, histSnap) {
+            final isHistory = session.isViewingHistory;
 
-            return StreamBuilder<List<Room>>(
-              stream: HostelService.instance.watchRooms(collegeId, hostelId),
-              builder: (context, roomSnap) {
-                if (roomSnap.hasError) {
-                  return AppCard(
-                    child: Text(AuthService.describeError(roomSnap.error!)),
-                  );
-                }
-                final rooms = roomSnap.data ?? const <Room>[];
+            return FutureBuilder<int>(
+              future: isHistory || !canCount
+                  ? Future.value(0)
+                  : _studentsIn(collegeId, hostelId),
+              builder: (context, userSnap) {
+                final students = isHistory
+                    ? (histSnap.data?.students ?? 0)
+                    : (userSnap.data ?? 0);
+                final byRoom = histSnap.data?.byRoom;
+                final countsReady = isHistory
+                    ? histSnap.hasData
+                    : (canCount && userSnap.hasData);
 
-                // Group by floor, preserving the service's floor→number ordering.
-                final byFloor = <int, List<Room>>{};
-                for (final r in rooms) {
-                  byFloor.putIfAbsent(r.floor, () => []).add(r);
-                }
-                final floors = byFloor.keys.toList()..sort();
+                final canMutate = canManage && !isHistory;
 
-                return Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    _Header(
-                      hostel: hostel,
-                      students: students,
-                      countsReady: canCount && userSnap.hasData,
-                      canManage: canManage,
-                      onBack: onBack,
-                      onAddRoom: () => _addRoom(context, hostel),
-                      onAddFloor: () => _addFloor(context, hostel, floors),
-                      onEditDetails: () => _editHostel(context, hostel),
-                      onRecalculate: () => _recalculate(context),
-                    ),
-                    const SizedBox(height: 18),
-                    if (!roomSnap.hasData)
-                      const Padding(
-                        padding: EdgeInsets.all(60),
-                        child: Center(child: CircularProgressIndicator()),
-                      )
-                    else if (rooms.isEmpty)
-                      AppCard(
-                        padding: EdgeInsets.symmetric(vertical: 50),
-                        child: Center(
-                          child: Text(
-                            'This hostel has no rooms yet.',
-                            style: TextStyle(color: AppColors.textMuted),
-                          ),
+                return StreamBuilder<List<Room>>(
+                  stream: HostelService.instance.watchRooms(
+                    collegeId,
+                    hostelId,
+                  ),
+                  builder: (context, roomSnap) {
+                    if (roomSnap.hasError) {
+                      return AppCard(
+                        child: Text(
+                          AuthService.describeError(roomSnap.error!),
                         ),
-                      )
-                    else
-                      ...floors.map(
-                        (floor) => Padding(
-                          padding: const EdgeInsets.only(bottom: 18),
-                          child: _FloorSection(
-                            floor: floor,
-                            rooms: byFloor[floor]!,
-                            onTapRoom: (room) =>
-                                _openRoom(context, hostel, room),
-                            onRetype: canManage
-                                ? () => _retypeFloor(
-                                    context,
-                                    hostel,
-                                    floor,
-                                    byFloor[floor]!,
-                                  )
-                                : null,
-                          ),
+                      );
+                    }
+                    final rooms = roomSnap.data ?? const <Room>[];
+
+                    // Group by floor, preserving the service's floor→number
+                    // ordering.
+                    final byFloor = <int, List<Room>>{};
+                    for (final r in rooms) {
+                      byFloor.putIfAbsent(r.floor, () => []).add(r);
+                    }
+                    final floors = byFloor.keys.toList()..sort();
+
+                    return Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        const HistoryBanner(),
+                        _Header(
+                          hostel: hostel,
+                          students: students,
+                          countsReady: countsReady,
+                          // Editing/adding rooms and floors are institution
+                          // edits, same reasoning as the hostels grid: a room
+                          // added while looking at 2025-26 would still be
+                          // added to the live building, not to history.
+                          canManage: canMutate,
+                          onBack: onBack,
+                          onAddRoom: () => _addRoom(context, hostel),
+                          onAddFloor: () =>
+                              _addFloor(context, hostel, floors),
+                          onEditDetails: () => _editHostel(context, hostel),
+                          onRecalculate: () => _recalculate(context),
                         ),
-                      ),
-                    const SizedBox(height: 8),
-                    const _Legend(),
-                  ],
+                        const SizedBox(height: 18),
+                        if (!roomSnap.hasData)
+                          const Padding(
+                            padding: EdgeInsets.all(60),
+                            child: Center(child: CircularProgressIndicator()),
+                          )
+                        else if (rooms.isEmpty)
+                          AppCard(
+                            padding: EdgeInsets.symmetric(vertical: 50),
+                            child: Center(
+                              child: Text(
+                                'This hostel has no rooms yet.',
+                                style: TextStyle(color: AppColors.textMuted),
+                              ),
+                            ),
+                          )
+                        else
+                          ...floors.map(
+                            (floor) => Padding(
+                              padding: const EdgeInsets.only(bottom: 18),
+                              child: _FloorSection(
+                                floor: floor,
+                                rooms: byFloor[floor]!,
+                                // Null in the live case, so every tile falls
+                                // back to `room.occupied` exactly as before —
+                                // this only replaces the source of truth
+                                // while a past session is on screen.
+                                historicalOccupiedByRoom: byRoom,
+                                onTapRoom: (room) =>
+                                    _openRoom(context, hostel, room),
+                                onRetype: canMutate
+                                    ? () => _retypeFloor(
+                                        context,
+                                        hostel,
+                                        floor,
+                                        byFloor[floor]!,
+                                      )
+                                    : null,
+                              ),
+                            ),
+                          ),
+                        const SizedBox(height: 8),
+                        const _Legend(),
+                      ],
+                    );
+                  },
                 );
               },
             );
@@ -186,8 +261,9 @@ class _HostelDetailViewState extends State<HostelDetailView> {
     // Read here, in the page, where SessionScope is above us. The dialog is a
     // separate route and cannot reach it.
     final session = Session.of(context);
-    final canManage = session.can(Perm.hostelsManage);
-    final canAllot = session.can(Perm.allotmentManage);
+    final isHistory = session.isViewingHistory;
+    final canManage = session.can(Perm.hostelsManage) && !isHistory;
+    final canAllot = session.can(Perm.allotmentManage) && !isHistory;
     final canSeeRoster = session.can(Perm.usersView);
 
     await showDialog(
@@ -198,6 +274,9 @@ class _HostelDetailViewState extends State<HostelDetailView> {
         room: room,
         canAllot: canAllot,
         canSeeRoster: canSeeRoster,
+        // Null in the live case — the dialog then behaves exactly as it
+        // always has, reading `watchRoomOccupants` live.
+        viewingSession: isHistory ? session.viewingSession : null,
         onEditRoom: canManage ? () => _editRoom(context, hostel, room) : null,
       ),
     );
@@ -488,17 +567,22 @@ class _FloorSection extends StatelessWidget {
   /// Null when the viewer can't manage hostels.
   final VoidCallback? onRetype;
 
+  /// Set only while viewing history — see [_RoomTile.historicalOccupied].
+  final Map<String, int>? historicalOccupiedByRoom;
+
   const _FloorSection({
     required this.floor,
     required this.rooms,
     required this.onTapRoom,
     this.onRetype,
+    this.historicalOccupiedByRoom,
   });
 
   @override
   Widget build(BuildContext context) {
+    int occupiedOf(Room r) => historicalOccupiedByRoom?[r.id] ?? r.occupied;
     final beds = rooms.fold<int>(0, (s, r) => s + r.capacity);
-    final occupied = rooms.fold<int>(0, (s, r) => s + r.occupied);
+    final occupied = rooms.fold<int>(0, (s, r) => s + occupiedOf(r));
 
     return AppCard(
       child: Column(
@@ -558,7 +642,19 @@ class _FloorSection extends StatelessWidget {
             spacing: 10,
             runSpacing: 10,
             children: rooms
-                .map((r) => _RoomTile(room: r, onTap: () => onTapRoom(r)))
+                .map(
+                  (r) => _RoomTile(
+                    room: r,
+                    // A room absent from the map genuinely had nobody in it
+                    // that session — this must stay a definite 0, not null,
+                    // or it would fall back to the room's *live* occupant
+                    // count and misreport an empty-that-year room as full.
+                    historicalOccupied: historicalOccupiedByRoom == null
+                        ? null
+                        : (historicalOccupiedByRoom![r.id] ?? 0),
+                    onTap: () => onTapRoom(r),
+                  ),
+                )
                 .toList(),
           ),
         ],
@@ -569,12 +665,22 @@ class _FloorSection extends StatelessWidget {
 
 class _RoomTile extends StatelessWidget {
   final Room room;
+
+  /// Occupant count for whichever session is on screen. Null in the live
+  /// case — the tile then reads `room.occupied` exactly as it always has.
+  /// Status (maintenance/reserved) always stays live: it is an
+  /// administrative flag on the physical room, not a fact about a session.
+  final int? historicalOccupied;
+
   final VoidCallback? onTap;
 
-  const _RoomTile({required this.room, this.onTap});
+  const _RoomTile({required this.room, this.historicalOccupied, this.onTap});
 
   @override
   Widget build(BuildContext context) {
+    final occupied = historicalOccupied ?? room.occupied;
+    final isFull = occupied >= room.capacity;
+
     late final Color fg;
     late final Color bg;
 
@@ -584,10 +690,10 @@ class _RoomTile extends StatelessWidget {
     } else if (room.status == RoomStatus.reserved) {
       fg = AppColors.info;
       bg = AppColors.infoSoft;
-    } else if (room.isFull) {
+    } else if (isFull) {
       fg = AppColors.warning;
       bg = AppColors.warningSoft;
-    } else if (room.occupied > 0) {
+    } else if (occupied > 0) {
       fg = AppColors.primary;
       bg = AppColors.primarySoft;
     } else {
@@ -599,7 +705,7 @@ class _RoomTile extends StatelessWidget {
       message:
           '${room.capacityLabel}'
           '${room.features.isEmpty ? '' : ' · ${room.features.join(', ')}'}'
-          '\n${room.occupied}/${room.capacity} occupied · ${room.status.label}',
+          '\n$occupied/${room.capacity} occupied · ${room.status.label}',
       child: InkWell(
         onTap: onTap,
         borderRadius: BorderRadius.circular(10),
@@ -623,7 +729,7 @@ class _RoomTile extends StatelessWidget {
               ),
               const SizedBox(height: 2),
               Text(
-                '${room.occupied}/${room.capacity}',
+                '$occupied/${room.capacity}',
                 style: TextStyle(
                   fontSize: 11,
                   fontWeight: FontWeight.w600,

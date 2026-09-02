@@ -2,10 +2,37 @@ import 'package:flutter/material.dart';
 
 import '../../core/theme.dart';
 import '../../models/app_user.dart';
+import '../../models/enrollment.dart';
 import '../../models/hostel.dart';
 import '../../services/allotment_service.dart';
 import '../../services/auth_service.dart';
 import '../../services/data_service.dart';
+import '../../services/enrollment_service.dart';
+
+/// Renders one past-session enrollment through the same `_OccupantTile` a
+/// live [AppUser] uses, rather than forking the display code in two.
+///
+/// [AppUser.fromMap] is fully defensive — every field falls back to a sane
+/// default — so a map built from only what [Enrollment] actually carries
+/// produces a legitimate display object. `isActive: true` is forced
+/// unconditionally: deactivation is a live-account concept with nothing to
+/// say about who was housed in a past year, so it must never hide a row here
+/// the way it correctly does for the live roster.
+AppUser _asDisplayUser(Enrollment e) => AppUser.fromMap(e.uid, {
+  'name': e.name,
+  'email': '',
+  'collegeId': e.collegeId,
+  'enrollmentNo': e.enrollmentNo,
+  'course': e.course,
+  'trade': e.trade,
+  'batch': e.batch,
+  'gender': e.gender,
+  'hostelId': e.hostelId,
+  'hostelName': e.hostelName,
+  'roomId': e.roomId,
+  'roomNumber': e.roomNumber,
+  'isActive': true,
+});
 
 /// Who is in one room, and a way to fill its free beds.
 ///
@@ -41,6 +68,12 @@ class RoomDetailDialog extends StatefulWidget {
   /// hides the button rather than showing one that fails.
   final VoidCallback? onEditRoom;
 
+  /// Set only while viewing history: who is shown is that session's
+  /// enrollment records for this room instead of the live roster, and the
+  /// allot button — already excluded from [canAllot] by the caller — is
+  /// additionally explained rather than merely absent.
+  final String? viewingSession;
+
   const RoomDetailDialog({
     super.key,
     required this.collegeId,
@@ -49,6 +82,7 @@ class RoomDetailDialog extends StatefulWidget {
     required this.canAllot,
     required this.canSeeRoster,
     this.onEditRoom,
+    this.viewingSession,
   });
 
   @override
@@ -247,7 +281,12 @@ class _RoomDetailDialogState extends State<RoomDetailDialog> {
 
   @override
   Widget build(BuildContext context) {
-    final canAllot = widget.canAllot;
+    final viewingSession = widget.viewingSession;
+    // Defensive, not decorative: the caller already zeroes `canAllot` while
+    // viewing history, but the invariant "no mutation on a historical
+    // snapshot" should be true reading this file alone, not only by trusting
+    // every call site to have remembered it.
+    final canAllot = widget.canAllot && viewingSession == null;
     final canSeeRoster = widget.canSeeRoster;
     final room = widget.room;
 
@@ -261,18 +300,42 @@ class _RoomDetailDialogState extends State<RoomDetailDialog> {
         // filter down to the three people in this room. Still a live stream,
         // so allotting someone from inside this dialog updates it the same way
         // it always did; it is simply the right query now.
+        //
+        // While viewing history there is no live occupant list to stream —
+        // the question is "who was here in 2025-26", answerable only from
+        // that session's enrollment records. `Stream.fromFuture` wraps that
+        // one-shot answer as a single-emission stream so this stays a
+        // `StreamBuilder` either way and the live path — which genuinely must
+        // keep updating as allotments happen — is untouched.
         child: StreamBuilder<List<AppUser>>(
-          stream: canSeeRoster
-              ? DataService.instance.watchRoomOccupants(
+          stream: !canSeeRoster
+              ? const Stream<List<AppUser>>.empty()
+              : viewingSession != null
+              ? Stream.fromFuture(
+                  EnrollmentService.instance
+                      .rosterOnce(widget.collegeId, viewingSession)
+                      .then(
+                        (roster) => roster
+                            .where(
+                              (e) =>
+                                  e.hostelId == widget.hostel.id &&
+                                  e.roomId == room.id,
+                            )
+                            .map(_asDisplayUser)
+                            .toList(),
+                      ),
+                )
+              : DataService.instance.watchRoomOccupants(
                   widget.collegeId,
                   widget.hostel.id,
                   room.id,
-                )
-              : const Stream<List<AppUser>>.empty(),
+                ),
           builder: (context, snap) {
-            // Sorted by the query; only the active filter is left, and it stays
-            // client-side because it is a handful of documents and folding it
-            // into the query would cost another composite index.
+            // Sorted by the query; only the active filter is left, and it
+            // stays client-side because it is a handful of documents and
+            // folding it into the query would cost another composite index.
+            // Historical rows have no `isActive` to speak of, so they are
+            // never filtered — see [_asDisplayUser].
             final occupants = (snap.data ?? const <AppUser>[])
                 .where((u) => u.isActive)
                 .toList();
@@ -316,13 +379,30 @@ class _RoomDetailDialogState extends State<RoomDetailDialog> {
                       occupants: occupants,
                       busy: _busy,
                       // Emptying a bed is the same authority as filling one.
+                      // `canAllot` is already false while viewing history, so
+                      // these two are just as inert then — there is no
+                      // separate check to remember here.
                       onRemove: canAllot ? _removeOccupant : null,
                       onEmptyRoom: canAllot
                           ? () => _emptyRoom(occupants)
                           : null,
                     ),
                     const SizedBox(height: 16),
-                    if (room.status != RoomStatus.active)
+                    if (viewingSession != null)
+                      // "Free beds" and room status are both live, current-
+                      // moment facts — neither means anything about a past
+                      // session, so the whole allot/status block is replaced
+                      // rather than shown with numbers that don't apply.
+                      Text(
+                        'This is how Room ${room.number} stood in '
+                        '$viewingSession. Allotment works on the live room, '
+                        'not this snapshot.',
+                        style: TextStyle(
+                          fontSize: 13,
+                          color: AppColors.textMuted,
+                        ),
+                      )
+                    else if (room.status != RoomStatus.active)
                       _Banner(
                         'This room is marked ${room.status.label}, so it '
                         'can\'t take students until that changes.',

@@ -6,7 +6,9 @@ import '../../core/theme.dart';
 import '../../models/hostel.dart';
 import '../../services/auth_service.dart';
 import '../../services/data_service.dart';
+import '../../services/enrollment_service.dart';
 import '../../services/hostel_service.dart';
+import '../dashboard_shell.dart' show HistoryBanner;
 import '../../widgets/selectable_chips.dart';
 import 'hostel_detail_view.dart';
 import 'hostel_editor_dialog.dart';
@@ -34,15 +36,50 @@ class _HostelsPageState extends State<HostelsPage> {
   /// an ordinary rebuild does not. Occupancy changes are made on Room
   /// Allotment, not here, so a snapshot taken when the page opened is the
   /// right currency for it.
-  Future<Map<String, int>>? _heads;
+  Future<({Map<String, int> heads, int occupiedBeds})>? _heads;
   String? _headsKey;
 
-  Future<Map<String, int>> _headsFor(String collegeId, List<Hostel> hostels) {
+  /// [viewingSession] is null for the live count and a session string while
+  /// browsing history — see [Session.viewingSession]. Folded into the key so
+  /// switching the lens invalidates the cache the same way changing which
+  /// hostels exist does.
+  ///
+  /// `occupiedBeds` travels alongside `heads` rather than being derived from
+  /// the live [Hostel] documents, so the "Students" and "Occupied %" tiles
+  /// can never disagree about which session they're describing.
+  Future<({Map<String, int> heads, int occupiedBeds})> _headsFor(
+    String collegeId,
+    List<Hostel> hostels,
+    String? viewingSession,
+  ) {
     final ids = hostels.map((h) => h.id).toList();
-    final key = '$collegeId/${ids.join(',')}';
+    final key = '$collegeId/${ids.join(',')}/${viewingSession ?? 'live'}';
     if (_headsKey != key || _heads == null) {
       _headsKey = key;
-      _heads = DataService.instance.countStudentsByHostel(collegeId, ids);
+      _heads = viewingSession == null
+          ? DataService.instance
+                .countStudentsByHostel(collegeId, ids)
+                .then(
+                  (heads) => (
+                    heads: heads,
+                    occupiedBeds: hostels.fold<int>(
+                      0,
+                      (s, h) => s + h.occupiedBeds,
+                    ),
+                  ),
+                )
+          // A past session's occupancy has to come from that session's
+          // Enrollment records — the live count() above answers "who is here
+          // now", which is a different question the moment history is on
+          // screen.
+          : EnrollmentService.instance
+                .rosterOnce(collegeId, viewingSession)
+                .then(
+                  (roster) => (
+                    heads: studentsByHostelFor(roster),
+                    occupiedBeds: roster.where((e) => e.isAllotted).length,
+                  ),
+                );
     }
     return _heads!;
   }
@@ -87,6 +124,7 @@ class _HostelsPageState extends State<HostelsPage> {
             collegeId: collegeId,
             hostels: hostels,
             heads: const {},
+            occupiedBeds: hostels.fold<int>(0, (s, h) => s + h.occupiedBeds),
             showCounts: false,
             countsReady: false,
           );
@@ -99,15 +137,18 @@ class _HostelsPageState extends State<HostelsPage> {
         // comment here claimed the dashboard had already opened that query so
         // it was free. That stopped being true when the dashboard moved to
         // aggregations, and this page went on paying for it silently.
-        return FutureBuilder<Map<String, int>>(
-          future: _headsFor(collegeId, hostels),
+        return FutureBuilder<({Map<String, int> heads, int occupiedBeds})>(
+          future: _headsFor(collegeId, hostels, session.viewingSession),
           builder: (context, headSnap) {
             return _body(
               context,
               session: session,
               collegeId: collegeId,
               hostels: hostels,
-              heads: headSnap.data ?? const {},
+              heads: headSnap.data?.heads ?? const {},
+              occupiedBeds:
+                  headSnap.data?.occupiedBeds ??
+                  hostels.fold<int>(0, (s, h) => s + h.occupiedBeds),
               showCounts: true,
               // Still loading, so the tiles show a dash rather than a
               // confident zero.
@@ -125,17 +166,27 @@ class _HostelsPageState extends State<HostelsPage> {
     required String collegeId,
     required List<Hostel> hostels,
     required Map<String, int> heads,
+    required int occupiedBeds,
     required bool showCounts,
     required bool countsReady,
   }) {
     final totalRooms = hostels.fold<int>(0, (s, h) => s + h.roomCount);
     final totalBeds = hostels.fold<int>(0, (s, h) => s + h.bedCount);
-    final totalOccupied = hostels.fold<int>(0, (s, h) => s + h.occupiedBeds);
+    final totalOccupied = occupiedBeds;
     final totalStudents = heads.values.fold<int>(0, (s, n) => s + n);
+
+    // Hostels and rooms are the institution's buildings, not history — they
+    // don't change per session, so adding/removing/editing/emptying them
+    // while browsing a past year would mean *today's* buildings inheriting an
+    // edit made while the screen happened to be dressed in 2025-26's numbers.
+    // Every mutating control on this page is disabled for exactly that
+    // reason whenever the lens is pointed at the past.
+    final canMutate = session.can(Perm.hostelsManage) && !session.isViewingHistory;
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
+        const HistoryBanner(),
         AppCard(
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
@@ -149,18 +200,30 @@ class _HostelsPageState extends State<HostelsPage> {
                         children: [
                           if (hostels.isNotEmpty) ...[
                             OutlinedButton.icon(
-                              onPressed: () => _emptyAllRooms(collegeId),
+                              onPressed: canMutate
+                                  ? () => _emptyAllRooms(collegeId)
+                                  : null,
                               icon: Icon(
                                 Icons.meeting_room_outlined,
                                 size: 18,
-                                color: AppColors.danger,
+                                color: canMutate
+                                    ? AppColors.danger
+                                    : AppColors.textMuted,
                               ),
                               label: Text(
                                 'Empty all rooms',
-                                style: TextStyle(color: AppColors.danger),
+                                style: TextStyle(
+                                  color: canMutate
+                                      ? AppColors.danger
+                                      : AppColors.textMuted,
+                                ),
                               ),
                               style: OutlinedButton.styleFrom(
-                                side: BorderSide(color: AppColors.dangerSoft),
+                                side: BorderSide(
+                                  color: canMutate
+                                      ? AppColors.dangerSoft
+                                      : AppColors.border,
+                                ),
                                 padding: const EdgeInsets.symmetric(
                                   horizontal: 16,
                                   vertical: 14,
@@ -170,7 +233,9 @@ class _HostelsPageState extends State<HostelsPage> {
                             const SizedBox(width: 10),
                           ],
                           ElevatedButton.icon(
-                            onPressed: () => _openEditor(collegeId, null),
+                            onPressed: canMutate
+                                ? () => _openEditor(collegeId, null)
+                                : null,
                             icon: const Icon(Icons.add_rounded, size: 18),
                             label: const Text('Add hostel'),
                             style: ElevatedButton.styleFrom(
@@ -238,9 +303,16 @@ class _HostelsPageState extends State<HostelsPage> {
                         child: _HostelCard(
                           hostel: h,
                           students: heads[h.id] ?? 0,
+                          // Only overridden while viewing history — live mode
+                          // keeps reading straight off the hostel document, as
+                          // it always has, so this never changes what today's
+                          // occupancy bar means.
+                          historicalOccupied: session.isViewingHistory
+                              ? (heads[h.id] ?? 0)
+                              : null,
                           showCounts: showCounts,
                           countsReady: countsReady,
-                          canManage: session.can(Perm.hostelsManage),
+                          canManage: canMutate,
                           onOpen: () => setState(() => _openHostelId = h.id),
                           onEdit: () => _openEditor(collegeId, h),
                           onDelete: () => _confirmDelete(collegeId, h),
@@ -474,6 +546,13 @@ class _HostelCard extends StatelessWidget {
   final Hostel hostel;
   final int students;
 
+  /// Set only while viewing history, in which case it replaces
+  /// `hostel.occupiedBeds` as the source for the percentage and the bar
+  /// below — a past session has no "beds occupied right now" figure, only a
+  /// count of whose enrollment named this hostel that year. Null in the live
+  /// case, where this card renders exactly as it always has.
+  final int? historicalOccupied;
+
   /// False when the viewer lacks `users.view`, so the roster was never read
   /// and the student figures are hidden rather than shown as a stuck dash.
   final bool showCounts;
@@ -486,6 +565,7 @@ class _HostelCard extends StatelessWidget {
   const _HostelCard({
     required this.hostel,
     required this.students,
+    this.historicalOccupied,
     required this.showCounts,
     required this.countsReady,
     required this.canManage,
@@ -496,7 +576,11 @@ class _HostelCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final pct = (hostel.occupancy * 100).round();
+    final occupiedForBar = historicalOccupied ?? hostel.occupiedBeds;
+    final occupancyForBar = hostel.bedCount == 0
+        ? 0.0
+        : occupiedForBar / hostel.bedCount;
+    final pct = (occupancyForBar * 100).round();
 
     return InkWell(
       onTap: onOpen,
@@ -617,7 +701,7 @@ class _HostelCard extends StatelessWidget {
             ClipRRect(
               borderRadius: BorderRadius.circular(6),
               child: LinearProgressIndicator(
-                value: hostel.occupancy,
+                value: occupancyForBar,
                 minHeight: 7,
                 backgroundColor: AppColors.border,
                 valueColor: AlwaysStoppedAnimation(

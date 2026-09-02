@@ -14,6 +14,7 @@ import '../../models/hostel_request.dart';
 import '../../models/mess.dart';
 import '../../models/notice.dart';
 import '../../services/data_service.dart';
+import '../../services/enrollment_service.dart';
 import '../../services/fee_service.dart';
 import '../../services/fine_service.dart';
 import '../../services/hostel_service.dart';
@@ -47,6 +48,7 @@ class AdminHome extends StatelessWidget {
       builder: (context, data) => Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
+          const HistoryBanner(),
           _KpiStrip(data: data),
           const SizedBox(height: 16),
           _Row3(
@@ -145,6 +147,26 @@ class _Row3 extends StatelessWidget {
 // Data
 // =====================================================================
 
+/// The dashboard's numbers for one past session, derived from that session's
+/// enrollment records rather than from today's live documents.
+///
+/// [heads] and [occupiedBeds] deliberately count every enrollment with a room
+/// rather than filtering by whether the account is active today —
+/// deactivation is a live-account concept, and a past session's occupancy is
+/// a record of who was actually housed that year regardless of what happened
+/// to their account since.
+class _HistoricalSnapshot {
+  final int residents;
+  final Map<String, int> heads;
+  final int occupiedBeds;
+
+  const _HistoricalSnapshot({
+    required this.residents,
+    required this.heads,
+    required this.occupiedBeds,
+  });
+}
+
 /// Everything the dashboard renders, resolved together.
 class _Data {
   /// Counted, not downloaded. See [DataService.countUsersByRole] — the roster
@@ -176,6 +198,9 @@ class _Data {
   final List<Notice> notices;
   final MessConfig mess;
 
+  /// Set only while viewing a past session. See [_FeedState._historicalFor].
+  final _HistoricalSnapshot? historical;
+
   const _Data({
     required this.counts,
     required this.hostels,
@@ -186,9 +211,18 @@ class _Data {
     required this.recentFees,
     required this.notices,
     required this.mess,
+    this.historical,
   });
 
-  int get residents => counts.residents;
+  // Residents and occupancy are the only figures this workspace can honestly
+  // reconstruct for a past year — they come straight off that session's
+  // Enrollment records. Staff, fees, requests, fines and notices are never
+  // session-stamped (a role held today says nothing about who held it in
+  // 2025-26, and nobody asked for that history to be fabricated), so those
+  // stay live even while [historical] is set. `historical == null` is
+  // exactly "viewing the live session", so every getter below falls back to
+  // today's numbers with no special-casing at the call site.
+  int get residents => historical?.residents ?? counts.residents;
   int get staff => counts.staff;
   int get totalPeople => counts.total;
   int get unassigned => counts.unassigned;
@@ -196,9 +230,15 @@ class _Data {
 
   int get totalRooms => hostels.fold(0, (a, h) => a + h.roomCount);
   int get totalBeds => hostels.fold(0, (a, h) => a + h.bedCount);
-  int get occupiedBeds => hostels.fold(0, (a, h) => a + h.occupiedBeds);
+  int get occupiedBeds =>
+      historical?.occupiedBeds ??
+      hostels.fold(0, (a, h) => a + h.occupiedBeds);
   int get freeBeds => (totalBeds - occupiedBeds).clamp(0, totalBeds);
   double get occupancy => totalBeds == 0 ? 0 : occupiedBeds / totalBeds;
+
+  /// Per-hostel occupied-bed count for whichever session is on screen. Reads
+  /// off the hostel documents live, or off [historical] when set.
+  int occupiedIn(Hostel h) => historical?.heads[h.id] ?? h.occupiedBeds;
 
   List<HostelRequest> get openRequests =>
       requests.where((r) => r.status.isOpen).toList();
@@ -304,8 +344,41 @@ class _FeedState extends State<_Feed> {
   late final Future<List<FeeRecord>> _recent = FeeService.instance
       .recentPayments(widget.collegeId);
 
+  /// Null while viewing the live session. Set only when
+  /// [Session.isViewingHistory] is true, and it is what lets the KPI strip
+  /// and the occupancy card render that session's numbers instead of today's
+  /// — see the long comment on [Session.viewingSession] for why this is a
+  /// per-viewer lens rather than a change to the workspace's real session.
+  ///
+  /// Costs one query, sized to that session's roster rather than the whole
+  /// college — the same [EnrollmentService.rosterOnce] promotion already
+  /// uses — and it is memoised per session, so flipping back and forth
+  /// between two past years does not re-pay for either.
+  Future<_HistoricalSnapshot?>? _historical;
+  String? _historicalKey;
+
+  Future<_HistoricalSnapshot?> _historicalFor(Session session) {
+    if (!session.isViewingHistory) return Future.value(null);
+    final target = session.viewingSession!;
+    final key = '${widget.collegeId}/$target';
+    if (_historicalKey != key || _historical == null) {
+      _historicalKey = key;
+      _historical = EnrollmentService.instance
+          .rosterOnce(widget.collegeId, target)
+          .then(
+            (roster) => _HistoricalSnapshot(
+              residents: roster.length,
+              heads: studentsByHostelFor(roster),
+              occupiedBeds: roster.where((e) => e.isAllotted).length,
+            ),
+          );
+    }
+    return _historical!;
+  }
+
   @override
   Widget build(BuildContext context) {
+    final session = Session.of(context);
     final thisPeriod = periodOf(DateTime.now());
 
     // Roles first: they are six documents, and counting per role is what
@@ -339,34 +412,45 @@ class _FeedState extends State<_Feed> {
                       builder: (context, revenue) =>
                           FutureBuilder<List<FeeRecord>>(
                             future: _recent,
-                            builder: (context, recent) {
-                              // Rendered as soon as users arrive; the rest fill
-                              // in as they land. Blocking on all nine would
-                              // leave the page blank for as long as the slowest
-                              // one takes.
-                              if (!counts.hasData) {
-                                return const Padding(
-                                  padding: EdgeInsets.all(80),
-                                  child: Center(
-                                    child: CircularProgressIndicator(),
-                                  ),
-                                );
-                              }
-                              return widget.builder(
-                                context,
-                                _Data(
-                                  counts: counts.data!,
-                                  hostels: hostels.data ?? const [],
-                                  requests: requests.data ?? const [],
-                                  fines: fines.data ?? const [],
-                                  feesThisMonth: fees.data ?? const [],
-                                  revenueByPeriod: revenue.data,
-                                  recentFees: recent.data ?? const [],
-                                  notices: notices.data ?? const [],
-                                  mess: mess.data ?? const MessConfig(),
+                            builder: (context, recent) =>
+                                FutureBuilder<_HistoricalSnapshot?>(
+                                  future: _historicalFor(session),
+                                  builder: (context, historical) {
+                                    // Rendered as soon as users arrive; the
+                                    // rest fill in as they land. Blocking on
+                                    // every future would leave the page blank
+                                    // for as long as the slowest one takes —
+                                    // except while viewing history, where the
+                                    // historical snapshot IS the resident
+                                    // count, so the strip must wait for it
+                                    // rather than flash today's number first.
+                                    if (!counts.hasData ||
+                                        (session.isViewingHistory &&
+                                            !historical.hasData)) {
+                                      return const Padding(
+                                        padding: EdgeInsets.all(80),
+                                        child: Center(
+                                          child: CircularProgressIndicator(),
+                                        ),
+                                      );
+                                    }
+                                    return widget.builder(
+                                      context,
+                                      _Data(
+                                        counts: counts.data!,
+                                        hostels: hostels.data ?? const [],
+                                        requests: requests.data ?? const [],
+                                        fines: fines.data ?? const [],
+                                        feesThisMonth: fees.data ?? const [],
+                                        revenueByPeriod: revenue.data,
+                                        recentFees: recent.data ?? const [],
+                                        notices: notices.data ?? const [],
+                                        mess: mess.data ?? const MessConfig(),
+                                        historical: historical.data,
+                                      ),
+                                    );
+                                  },
                                 ),
-                              );
-                            },
                           ),
                     ),
                   ),
@@ -399,13 +483,19 @@ class _KpiStrip extends StatelessWidget {
         icon: Icons.school_rounded,
         label: 'Residents',
         value: '${data.residents}',
-        // Alumni are named rather than quietly dropped. Without this line a
-        // campus that has just graduated everyone reads "0 residents, 1 person
-        // in total" and looks like the roster was deleted.
-        sub: data.counts.graduated == 0
-            ? '${data.totalPeople} people in total'
-            : '${data.totalPeople} current · '
-                  '${data.counts.graduated} graduated',
+        // While viewing history, `graduated` is today's figure and says
+        // nothing about that past year, so it is left out rather than shown
+        // and misread as "graduated as of $session".
+        //
+        // Live: alumni are named rather than quietly dropped. Without this
+        // line a campus that has just graduated everyone reads "0 residents,
+        // 1 person in total" and looks like the roster was deleted.
+        sub: data.historical != null
+            ? 'enrolled in ${Session.of(context).viewingSession}'
+            : (data.counts.graduated == 0
+                  ? '${data.totalPeople} people in total'
+                  : '${data.totalPeople} current · '
+                        '${data.counts.graduated} graduated'),
         navId: 'users',
       ),
       _Kpi(
@@ -1047,8 +1137,11 @@ class _Occupancy extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final blocks = [...data.hostels]
-      ..sort((a, b) => b.occupancy.compareTo(a.occupancy));
+    // Sorted by this session's occupancy, not the live one — a hostel's live
+    // fill rate says nothing about who was where the year being viewed.
+    double occOf(Hostel h) =>
+        h.bedCount == 0 ? 0 : data.occupiedIn(h) / h.bedCount;
+    final blocks = [...data.hostels]..sort((a, b) => occOf(b).compareTo(occOf(a)));
     final overall = data.occupancy;
 
     // Named so the footer can point at the block that is actually dragging
@@ -1067,7 +1160,7 @@ class _Occupancy extends StatelessWidget {
                 for (final h in blocks.take(6))
                   Padding(
                     padding: const EdgeInsets.only(bottom: 13),
-                    child: _OccRow(hostel: h),
+                    child: _OccRow(hostel: h, occupied: data.occupiedIn(h)),
                   ),
                 _Foot(
                   left: Text.rich(
@@ -1095,10 +1188,10 @@ class _Occupancy extends StatelessWidget {
                       ? null
                       : Text(
                           '${worst.code.isEmpty ? worst.name : worst.code} '
-                          'lowest at ${(worst.occupancy * 100).round()}%',
+                          'lowest at ${(occOf(worst) * 100).round()}%',
                           style: TextStyle(
                             fontSize: 11.5,
-                            color: worst.occupancy < 0.7
+                            color: occOf(worst) < 0.7
                                 ? AppColors.warning
                                 : AppColors.textMuted,
                             fontWeight: FontWeight.w600,
@@ -1113,11 +1206,17 @@ class _Occupancy extends StatelessWidget {
 
 class _OccRow extends StatelessWidget {
   final Hostel hostel;
-  const _OccRow({required this.hostel});
+
+  /// Occupied-bed count for whichever session is on screen. Passed in rather
+  /// than read off [hostel] so this row renders identically for the live
+  /// occupancy and for a past session's — see [_Data.occupiedIn].
+  final int occupied;
+
+  const _OccRow({required this.hostel, required this.occupied});
 
   @override
   Widget build(BuildContext context) {
-    final pct = hostel.occupancy;
+    final pct = hostel.bedCount == 0 ? 0.0 : occupied / hostel.bedCount;
     final low = pct < 0.7;
 
     return Column(
@@ -1146,7 +1245,7 @@ class _OccRow extends StatelessWidget {
             ),
             const Spacer(),
             Text(
-              '${hostel.occupiedBeds} / ${hostel.bedCount}',
+              '$occupied / ${hostel.bedCount}',
               style: TextStyle(
                 fontSize: 11.5,
                 color: AppColors.textMuted,

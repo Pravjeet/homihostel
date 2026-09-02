@@ -48,6 +48,15 @@ String? nextSessionAfter(String? session) {
 
 String _shortYear(int fullYear) => (fullYear % 100).toString().padLeft(2, '0');
 
+/// "2027-28" -> "2026-27". The inverse of [nextSessionAfter], used to walk
+/// backward through a workspace's history one session at a time without
+/// knowing in advance how far back it goes.
+String? previousSessionBefore(String? session) {
+  final start = startYearOf(session);
+  if (start == null) return null;
+  return '${start - 1}-${_shortYear(start)}';
+}
+
 /// How many of [studentUids] have no entry in [enrolledUids].
 ///
 /// The honest version of "is this session's roster complete?". The obvious

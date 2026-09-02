@@ -1,6 +1,7 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
 
 import 'app_user.dart';
+import 'enrollment.dart';
 
 /// Who a hostel accommodates. Stored as the enum `name` string.
 enum HostelGender { boys, girls, coed }
@@ -446,6 +447,23 @@ Map<String, int> studentsByHostel(Iterable<AppUser> users) {
   for (final u in users) {
     final id = u.hostelId;
     if (id == null || id.isEmpty || !u.isActive) continue;
+    counts[id] = (counts[id] ?? 0) + 1;
+  }
+  return counts;
+}
+
+/// The same tally as [studentsByHostel], from one session's enrollment
+/// records instead of the live roster.
+///
+/// Enrollment carries no `isActive` flag — deactivation is a live-account
+/// concept, and a past session's roster is a record of who was actually
+/// housed that year regardless of whether their account is active today —
+/// so this counts every enrollment with a room, full stop.
+Map<String, int> studentsByHostelFor(Iterable<Enrollment> enrollments) {
+  final counts = <String, int>{};
+  for (final e in enrollments) {
+    final id = e.hostelId;
+    if (id == null || id.isEmpty) continue;
     counts[id] = (counts[id] ?? 0) + 1;
   }
   return counts;

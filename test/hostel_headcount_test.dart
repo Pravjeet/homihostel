@@ -1,5 +1,6 @@
 import 'package:flutter_test/flutter_test.dart';
 import 'package:hostel_app/models/app_user.dart';
+import 'package:hostel_app/models/enrollment.dart';
 import 'package:hostel_app/models/hostel.dart';
 
 /// Students per hostel, counted from the roster.
@@ -103,6 +104,76 @@ void main() {
       ];
 
       expect(studentsByHostel(roster)['h1'], 400);
+    });
+  });
+
+  group('studentsByHostelFor', () {
+    // The past-session counterpart to studentsByHostel, used while browsing
+    // history — see Session.viewingSession. Same shape, deliberately
+    // different rule on one point: no isActive filter, because deactivation
+    // is a live-account concept with nothing to say about who was actually
+    // housed in a session that already happened.
+    Enrollment enrolled(String uid, {String? hostelId, String? roomId}) =>
+        Enrollment(
+          id: '${uid}_2025-26',
+          uid: uid,
+          session: '2025-26',
+          collegeId: 'c1',
+          year: 1,
+          name: uid,
+          hostelId: hostelId,
+          roomId: roomId,
+        );
+
+    test('counts everyone attached to a hostel that session', () {
+      final counts = studentsByHostelFor([
+        enrolled('a', hostelId: 'h1', roomId: '101'),
+        enrolled('b', hostelId: 'h1', roomId: '101'),
+        enrolled('c', hostelId: 'h1', roomId: '102'),
+      ]);
+
+      expect(counts['h1'], 3);
+    });
+
+    test('keeps hostels apart', () {
+      final counts = studentsByHostelFor([
+        enrolled('a', hostelId: 'h1'),
+        enrolled('b', hostelId: 'h2'),
+        enrolled('c', hostelId: 'h2'),
+      ]);
+
+      expect(counts['h1'], 1);
+      expect(counts['h2'], 2);
+    });
+
+    test('ignores enrollments with no hostel', () {
+      final counts = studentsByHostelFor([
+        enrolled('a'),
+        enrolled('b', hostelId: ''),
+        enrolled('c', hostelId: 'h1'),
+      ]);
+
+      expect(counts.keys, ['h1']);
+    });
+
+    test(
+      'does NOT exclude anyone by activity — a graduate is still counted '
+      'for the session they were actually enrolled in',
+      () {
+        // The whole reason this function exists rather than reusing
+        // studentsByHostel: those 765 graduates are inactive-by-status only
+        // in the live sense, and 2025-26 genuinely had them.
+        final counts = studentsByHostelFor([
+          enrolled('a', hostelId: 'h1'),
+          enrolled('b', hostelId: 'h1'),
+        ]);
+
+        expect(counts['h1'], 2);
+      },
+    );
+
+    test('an empty roster yields no entries', () {
+      expect(studentsByHostelFor(const []), isEmpty);
     });
   });
 }

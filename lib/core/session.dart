@@ -20,12 +20,43 @@ class Session {
   /// behaves exactly like one that has.
   final CollegeSettings settings;
 
+  /// A past session this person is *looking at*, or null for the live one.
+  ///
+  /// Deliberately not the same thing as `settings.session.current`. That value
+  /// is the workspace's real position in time — it is what Backfill and
+  /// Promotion operate on, and it is shared by everyone signed in. This one is
+  /// a private lens: it changes what you see and nothing else.
+  ///
+  /// Driving history browsing through System Settings instead would have wired
+  /// it to the most destructive button in the app — someone reading last
+  /// year's roster would have had a Promote button aimed at last year, ready
+  /// to re-run a promotion that already happened. It would also have dragged
+  /// every other signed-in admin back in time with them.
+  final String? viewingSession;
+
+  /// Switches the lens. Null returns to the live session.
+  final void Function(String?)? onViewSession;
+
   const Session({
     required this.user,
     this.role,
     required this.collegeName,
     this.settings = const CollegeSettings(),
+    this.viewingSession,
+    this.onViewSession,
   });
+
+  /// The session every read-only screen should render.
+  ///
+  /// Write paths must keep using `settings.session.current` — allotting a bed
+  /// or running a promotion always belongs to the live year, whatever the
+  /// reader happens to be looking at.
+  String? get effectiveSession => viewingSession ?? settings.session.current;
+
+  /// True when looking at a session that is not the live one, which is the
+  /// cue for read-only banners and for hiding actions that would write.
+  bool get isViewingHistory =>
+      viewingSession != null && viewingSession != settings.session.current;
 
   /// SuperAdmin short-circuits every check — they own the workspace.
   bool can(String permission) =>
@@ -71,7 +102,11 @@ class SessionScope extends InheritedWidget {
       oldWidget.session.role?.permissions != session.role?.permissions ||
       oldWidget.session.user.name != session.user.name ||
       oldWidget.session.collegeName != session.collegeName ||
-      oldWidget.session.settings.updatedAt != session.settings.updatedAt;
+      oldWidget.session.settings.updatedAt != session.settings.updatedAt ||
+      // Switching the lens has to rebuild everything that reads it, which is
+      // most of the app — the whole point is that the dashboard, hostels and
+      // rooms all move together.
+      oldWidget.session.viewingSession != session.viewingSession;
 }
 
 /// Convenience for reading permissions inline in build methods.

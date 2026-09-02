@@ -101,6 +101,48 @@ class EnrollmentService {
     return capacity;
   }
 
+  /// Which past sessions actually have enrollment data, newest first,
+  /// [currentSession] always included even if it is still empty.
+  ///
+  /// Firestore has no "distinct values" query, so this walks backward one
+  /// session at a time from [currentSession], each step a single cheap
+  /// existence check (`limit(1)`) rather than a full read of that session's
+  /// roster. It stops once it has seen [maxGap] consecutive sessions with
+  /// nothing in them — tolerating one skipped or renamed session without
+  /// walking through the workspace's entire history — or after [maxSteps]
+  /// regardless, as a hard backstop.
+  ///
+  /// Cheap by construction: a five-year-old workspace costs on the order of
+  /// five to seven reads, once, not one read per year of history.
+  Future<List<String>> sessionsWithData(
+    String collegeId,
+    String? currentSession, {
+    int maxGap = 2,
+    int maxSteps = 20,
+  }) async {
+    if (currentSession == null) return const [];
+
+    final found = <String>[currentSession];
+    var probe = previousSessionBefore(currentSession);
+    var gap = 0;
+    var steps = 0;
+
+    while (probe != null && gap < maxGap && steps < maxSteps) {
+      steps++;
+      final snap = await _enrollments(
+        collegeId,
+      ).where('session', isEqualTo: probe).limit(1).get();
+      if (snap.docs.isNotEmpty) {
+        found.add(probe);
+        gap = 0;
+      } else {
+        gap++;
+      }
+      probe = previousSessionBefore(probe);
+    }
+    return found;
+  }
+
   // ----------------------------- backfill ------------------------------
 
   /// Derives [uid]'s first enrollment record for [session] from their

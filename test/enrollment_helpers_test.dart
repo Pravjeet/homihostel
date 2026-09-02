@@ -62,6 +62,38 @@ void main() {
     });
   });
 
+  group('previousSessionBefore', () {
+    test('the inverse of nextSessionAfter', () {
+      expect(previousSessionBefore('2026-27'), '2025-26');
+      expect(previousSessionBefore('2025-26'), '2024-25');
+      expect(nextSessionAfter(previousSessionBefore('2026-27')), '2026-27');
+    });
+
+    test('null on anything that will not parse', () {
+      expect(previousSessionBefore(null), isNull);
+      expect(previousSessionBefore(''), isNull);
+      expect(previousSessionBefore('garbage'), isNull);
+    });
+
+    test('walking backward from a real end state reaches the real start', () {
+      // The exact chain this campus's history walk has to survive: five
+      // sessions, current at 2029-30.
+      var s = '2029-30';
+      final walked = <String>[s];
+      for (var i = 0; i < 4; i++) {
+        s = previousSessionBefore(s)!;
+        walked.add(s);
+      }
+      expect(walked, [
+        '2029-30',
+        '2028-29',
+        '2027-28',
+        '2026-27',
+        '2025-26',
+      ]);
+    });
+  });
+
   group('yearFromBatch', () {
     test('the four live batches against the 2026-27 session', () {
       expect(yearFromBatch('2025-26', '2026-27'), 2);
