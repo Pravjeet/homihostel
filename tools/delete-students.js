@@ -11,11 +11,12 @@
  *   2. mess fee records — colleges/{id}/feeRecords
  *   3. fines            — colleges/{id}/fines
  *   4. requests         — colleges/{id}/requests
- *   5. Firestore profiles
- *   6. Firebase Auth sign-in accounts
+ *   5. ID photos        — colleges/{id}/photos
+ *   6. Firestore profiles
+ *   7. Firebase Auth sign-in accounts
  *
- * Steps 1-5 are also available in the app under Settings -> Danger zone ->
- * "Delete ALL student data". Step 6 is the one that needs this script and can
+ * Steps 1-6 are also available in the app under Settings -> Danger zone ->
+ * "Delete ALL student data". Step 7 is the one that needs this script and can
  * never be done from a browser: the client SDK only deletes the account it is
  * currently signed in as. A profile deleted without its login leaves an orphan,
  * which is why re-importing the same registration number fails with "email
@@ -202,6 +203,9 @@ const attached = [
   // unreachable, and Academic Records goes on counting them — a roster of
   // thousands enrolled against a college with no students in it.
   ['enrollment record(s)', collegeRef.collection('enrollments'), 'uid'],
+  // ~50 KB each of the Spark plan's 1 GiB, and unreachable once the profile
+  // is gone. The doc id is the uid too; the field exists for this match.
+  ['ID photo(s)', collegeRef.collection('photos'), 'uid'],
 ];
 
 // Resolved before the commit check so a dry run reports the real numbers

@@ -709,3 +709,129 @@ describe('academic.manage graduating a student', () => {
     );
   });
 });
+
+// ID photos exist to catch impersonation, so who can SET one is the part that
+// matters: a student choosing their own face for their record defeats it.
+describe('ID photos', () => {
+  const photo = (db, collegeId, uid) =>
+    db.collection('colleges').doc(collegeId).collection('photos').doc(uid);
+
+  const body = (uid, by, bytes = 'aGVsbG8=') => ({
+    uid,
+    bytes,
+    mimeType: 'image/jpeg',
+    updatedByUid: by,
+    updatedByName: 'Test User',
+  });
+
+  async function seedPhoto(collegeId, uid) {
+    await testEnv.withSecurityRulesDisabled(async (ctx) => {
+      await photo(ctx.firestore(), collegeId, uid).set(body(uid, 'someone'));
+    });
+  }
+
+  it('users.edit can set a student\'s photo', async () => {
+    await seed(COLLEGE_A, { wardenRole: ['users.edit'] });
+    await seedUser(COLLEGE_A, 'warden-a', 'warden');
+    await seedUser(COLLEGE_A, 'student-a', 'student');
+
+    await assertSucceeds(
+      photo(asUser('warden-a'), COLLEGE_A, 'student-a').set(
+        body('student-a', 'warden-a'),
+      ),
+    );
+  });
+
+  it('a student cannot set their own photo', async () => {
+    await seed(COLLEGE_A);
+    await seedUser(COLLEGE_A, 'student-a', 'student');
+
+    await assertFails(
+      photo(asUser('student-a'), COLLEGE_A, 'student-a').set(
+        body('student-a', 'student-a'),
+      ),
+    );
+  });
+
+  it('users.edit cannot set their OWN photo either', async () => {
+    await seed(COLLEGE_A, { wardenRole: ['users.edit'] });
+    await seedUser(COLLEGE_A, 'warden-a', 'warden');
+
+    await assertFails(
+      photo(asUser('warden-a'), COLLEGE_A, 'warden-a').set(
+        body('warden-a', 'warden-a'),
+      ),
+    );
+  });
+
+  it('a photo cannot be planted on a student from another college', async () => {
+    await seed(COLLEGE_A, { wardenRole: ['users.edit'] });
+    await seed(COLLEGE_B);
+    await seedUser(COLLEGE_A, 'warden-a', 'warden');
+    await seedUser(COLLEGE_B, 'student-b', 'student');
+
+    await assertFails(
+      photo(asUser('warden-a'), COLLEGE_A, 'student-b').set(
+        body('student-b', 'warden-a'),
+      ),
+    );
+  });
+
+  it('the uploader cannot be spoofed', async () => {
+    await seed(COLLEGE_A, { wardenRole: ['users.edit'] });
+    await seedUser(COLLEGE_A, 'warden-a', 'warden');
+    await seedUser(COLLEGE_A, 'student-a', 'student');
+
+    await assertFails(
+      photo(asUser('warden-a'), COLLEGE_A, 'student-a').set(
+        body('student-a', 'someone-else'),
+      ),
+    );
+  });
+
+  it('an oversized photo is refused', async () => {
+    await seed(COLLEGE_A, { wardenRole: ['users.edit'] });
+    await seedUser(COLLEGE_A, 'warden-a', 'warden');
+    await seedUser(COLLEGE_A, 'student-a', 'student');
+
+    await assertFails(
+      photo(asUser('warden-a'), COLLEGE_A, 'student-a').set(
+        body('student-a', 'warden-a', 'A'.repeat(150001)),
+      ),
+    );
+  });
+
+  it('a student can see their own photo but not a classmate\'s', async () => {
+    await seed(COLLEGE_A);
+    await seedUser(COLLEGE_A, 'student-a', 'student');
+    await seedUser(COLLEGE_A, 'student-b', 'student');
+    await seedPhoto(COLLEGE_A, 'student-a');
+    await seedPhoto(COLLEGE_A, 'student-b');
+
+    const db = asUser('student-a');
+    await assertSucceeds(photo(db, COLLEGE_A, 'student-a').get());
+    await assertFails(photo(db, COLLEGE_A, 'student-b').get());
+  });
+
+  it('whoever runs the fines register can see the face on a fine', async () => {
+    await seed(COLLEGE_A);
+    await seedUser(COLLEGE_A, 'warden-a', 'warden');
+    await seedUser(COLLEGE_A, 'student-a', 'student');
+    await seedPhoto(COLLEGE_A, 'student-a');
+
+    await assertSucceeds(photo(asUser('warden-a'), COLLEGE_A, 'student-a').get());
+  });
+
+  it('nobody can list every photo in the college', async () => {
+    await seed(COLLEGE_A, { wardenRole: ['users.view', 'users.edit'] });
+    await seedUser(COLLEGE_A, 'warden-a', 'warden');
+
+    await assertFails(
+      asUser('warden-a')
+        .collection('colleges')
+        .doc(COLLEGE_A)
+        .collection('photos')
+        .get(),
+    );
+  });
+});

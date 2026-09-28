@@ -8,6 +8,7 @@ import '../../services/allotment_service.dart';
 import '../../services/auth_service.dart';
 import '../../services/data_service.dart';
 import '../../services/enrollment_service.dart';
+import '../../widgets/student_photo.dart';
 
 /// Renders one past-session enrollment through the same `_OccupantTile` a
 /// live [AppUser] uses, rather than forking the display code in two.
@@ -293,7 +294,7 @@ class _RoomDetailDialogState extends State<RoomDetailDialog> {
     return AlertDialog(
       title: Text('Room ${room.number}'),
       content: SizedBox(
-        width: 470,
+        width: 500,
         // Asks for this room's occupants rather than the whole roster.
         //
         // It used to stream every user in the college — 2,649 documents — and
@@ -647,91 +648,112 @@ class _OccupantList extends StatelessWidget {
               ),
           ],
         ),
-        const SizedBox(height: 8),
-        for (var i = 0; i < occupants.length; i++) ...[
-          if (i > 0) Divider(height: 1, color: AppColors.border),
-          _OccupantRow(student: occupants[i], onRemove: onRemove, busy: busy),
-        ],
+        const SizedBox(height: 10),
+        // Faces side by side, big enough to recognise — "who actually lives
+        // here" is answered by looking, not by reading three names.
+        Wrap(
+          spacing: 12,
+          runSpacing: 12,
+          children: [
+            for (final o in occupants)
+              _OccupantCard(student: o, onRemove: onRemove, busy: busy),
+          ],
+        ),
       ],
     );
   }
 }
 
-class _OccupantRow extends StatelessWidget {
+class _OccupantCard extends StatelessWidget {
   final AppUser student;
   final ValueChanged<AppUser>? onRemove;
   final bool busy;
 
-  const _OccupantRow({required this.student, this.onRemove, this.busy = false});
+  const _OccupantCard({
+    required this.student,
+    this.onRemove,
+    this.busy = false,
+  });
+
+  static const double _width = 142;
 
   @override
   Widget build(BuildContext context) {
     final u = student;
     final detail = [
-      if ((u.enrollmentNo ?? '').isNotEmpty) u.enrollmentNo!,
       if ((u.trade ?? '').isNotEmpty) u.trade!,
       if ((u.year ?? '').isNotEmpty) u.year!,
       if (u.sem != null) 'Sem ${u.sem}',
-    ].join('  ·  ');
+    ].join(' · ');
 
-    return Padding(
-      padding: const EdgeInsets.symmetric(vertical: 9),
-      child: Row(
+    return Container(
+      width: _width,
+      padding: const EdgeInsets.all(8),
+      decoration: BoxDecoration(
+        color: AppColors.canvas,
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: AppColors.border),
+      ),
+      child: Column(
         children: [
-          CircleAvatar(
-            radius: 17,
-            backgroundColor: AppColors.primarySoft,
-            child: Text(
-              u.initials,
+          StudentPhoto.user(u, width: _width - 16, height: 158, radius: 9),
+          const SizedBox(height: 8),
+          Text(
+            u.name,
+            maxLines: 2,
+            textAlign: TextAlign.center,
+            overflow: TextOverflow.ellipsis,
+            style: const TextStyle(
+              fontWeight: FontWeight.w700,
+              fontSize: 13,
+              height: 1.25,
+            ),
+          ),
+          if ((u.enrollmentNo ?? '').isNotEmpty) ...[
+            const SizedBox(height: 2),
+            Text(
+              u.enrollmentNo!,
+              overflow: TextOverflow.ellipsis,
               style: TextStyle(
-                color: AppColors.primary,
-                fontWeight: FontWeight.w700,
-                fontSize: 12,
+                fontSize: 11.5,
+                fontWeight: FontWeight.w600,
+                color: AppColors.textStrong,
               ),
             ),
-          ),
-          const SizedBox(width: 12),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  u.name,
-                  overflow: TextOverflow.ellipsis,
-                  style: const TextStyle(
-                    fontWeight: FontWeight.w600,
-                    fontSize: 13.5,
-                  ),
-                ),
-                if (detail.isNotEmpty) ...[
-                  const SizedBox(height: 2),
-                  Text(
-                    detail,
-                    overflow: TextOverflow.ellipsis,
-                    style: TextStyle(
-                      fontSize: 11.5,
-                      color: AppColors.textMuted,
-                    ),
-                  ),
-                ],
-              ],
+          ],
+          if (detail.isNotEmpty) ...[
+            const SizedBox(height: 2),
+            Text(
+              detail,
+              textAlign: TextAlign.center,
+              overflow: TextOverflow.ellipsis,
+              style: TextStyle(fontSize: 11, color: AppColors.textMuted),
             ),
-          ),
-          if ((u.phone ?? '').isNotEmpty)
+          ],
+          if ((u.phone ?? '').isNotEmpty) ...[
+            const SizedBox(height: 2),
             Text(
               u.phone!,
-              style: TextStyle(fontSize: 11.5, color: AppColors.textMuted),
+              style: TextStyle(fontSize: 11, color: AppColors.textMuted),
             ),
+          ],
           if (onRemove != null) ...[
-            const SizedBox(width: 4),
-            IconButton(
+            const SizedBox(height: 4),
+            TextButton.icon(
               onPressed: busy ? null : () => onRemove!(u),
               icon: Icon(
                 Icons.person_remove_outlined,
-                size: 18,
+                size: 15,
                 color: AppColors.danger,
               ),
-              tooltip: 'Move out of this room',
+              label: Text(
+                'Move out',
+                style: TextStyle(fontSize: 12, color: AppColors.danger),
+              ),
+              style: TextButton.styleFrom(
+                visualDensity: VisualDensity.compact,
+                padding: const EdgeInsets.symmetric(horizontal: 8),
+              ),
             ),
           ],
         ],

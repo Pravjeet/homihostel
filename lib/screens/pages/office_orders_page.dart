@@ -1,7 +1,6 @@
 import 'dart:typed_data';
 
 import 'package:flutter/material.dart';
-import 'package:url_launcher/url_launcher.dart';
 
 import '../../core/permissions.dart';
 import '../../core/session.dart';
@@ -9,6 +8,7 @@ import '../../core/theme.dart';
 import '../../models/office_order.dart';
 import '../../services/auth_service.dart';
 import '../../services/office_order_service.dart';
+import 'office_order_detail_dialog.dart';
 
 /// Office orders: the register of disciplinary orders issued against
 /// residents. An order names one or more students, and may or may not carry a
@@ -30,45 +30,17 @@ class _OfficeOrdersPageState extends State<OfficeOrdersPage> {
   String _query = '';
   DateTime? _onDate;
 
-  /// Opens an order the right way for how it was published.
-  ///
-  /// Photo orders open in a viewer inside the app; the older link-based ones
-  /// still hand off to the browser. Both paths stay because the register
-  /// contains a mix and always will.
-  Future<void> _open(OfficeOrder order) async {
-    if (order.hasImage) {
-      final bytes = decodedOrderImage(order);
-      if (bytes != null) {
-        await showDialog<void>(
-          context: context,
-          barrierColor: Colors.black.withValues(alpha: 0.86),
-          builder: (_) => OfficeOrderViewer(order: order, bytes: bytes),
-        );
-        return;
-      }
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('That photo could not be read')),
-        );
-      }
-      return;
-    }
-
-    final messenger = ScaffoldMessenger.of(context);
-    final uri = Uri.tryParse(order.pdfUrl ?? '');
-    if (uri == null || !order.hasLink) {
-      messenger.showSnackBar(
-        const SnackBar(content: Text('That order has no photo or link')),
-      );
-      return;
-    }
-    final ok = await launchUrl(uri, mode: LaunchMode.externalApplication);
-    if (!ok) {
-      messenger.showSnackBar(
-        const SnackBar(content: Text('Could not open that link')),
-      );
-    }
-  }
+  /// Opens the order's full detail — the scan, and a face and room for every
+  /// student it names — rather than just the scan, so the order can be
+  /// matched to the people it is about. The scan is one click further in.
+  Future<void> _open(OfficeOrder order) => showDialog<void>(
+    context: context,
+    builder: (_) => OfficeOrderDetailDialog(
+      order: order,
+      collegeId: Session.of(context).user.collegeId,
+      canSeeProfiles: Session.of(context).can(Perm.usersView),
+    ),
+  );
 
   Future<void> _pickDate() async {
     final now = DateTime.now();
@@ -553,13 +525,8 @@ class _OrderRow extends StatelessWidget {
             const SizedBox(width: 10),
             TextButton.icon(
               onPressed: onOpen,
-              icon: Icon(
-                order.hasImage
-                    ? Icons.zoom_in_rounded
-                    : Icons.open_in_new_rounded,
-                size: 16,
-              ),
-              label: Text(order.hasImage ? 'View' : 'Open'),
+              icon: const Icon(Icons.visibility_outlined, size: 16),
+              label: const Text('Details'),
             ),
             if (canDelete)
               PopupMenuButton<String>(

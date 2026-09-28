@@ -206,6 +206,54 @@ service cloud.firestore {
                     && request.auth.uid != userId;
     }
 
+    // ---------------- ID photos ----------------
+    //
+    // One document per person, id = their uid. Kept off users/{uid} because
+    // every roster read would otherwise carry every photo.
+    //
+    // The whole point is catching impersonation, so who may SET a photo is the
+    // tight part: users.edit, never your own, never a Super Admin, and only for
+    // someone who is actually in your college. A student choosing their own
+    // ID photo would defeat it.
+
+    function photoTargetInCollege(collegeId, uid) {
+      let target = get(/databases/$(database)/documents/users/$(uid)).data;
+      return target.collegeId == collegeId
+          && target.get('isSuperAdmin', false) == false;
+    }
+
+    match /colleges/{collegeId}/photos/{uid} {
+      // Your own, or anyone's if you are one of the people who has to check
+      // faces: the user directory, the fines register, office orders.
+      allow get: if sameCollege(collegeId) && (
+                   request.auth.uid == uid
+                   || hasPerm('users.view')
+                   || hasPerm('fines.viewAll')
+                   || hasPerm('officeOrders.view')
+                 );
+
+      // Always fetched one at a time by uid. A list would pull every photo in
+      // the college — tens of megabytes — so nothing is allowed to ask.
+      allow list: if false;
+
+      // ~90 KB JPEG -> ~120K base64 characters; the cap keeps a document from
+      // being stuffed toward Firestore's 1 MB limit.
+      allow create, update: if sameCollege(collegeId)
+                            && hasPerm('users.edit')
+                            && request.auth.uid != uid
+                            && photoTargetInCollege(collegeId, uid)
+                            && request.resource.data.uid == uid
+                            && request.resource.data.bytes is string
+                            && request.resource.data.bytes.size() <= 150000
+                            && request.resource.data.updatedByUid
+                               == request.auth.uid;
+
+      // users.delete too, so deleting a person can take their photo with them.
+      allow delete: if sameCollege(collegeId) && (
+                      hasPerm('users.edit') || hasPerm('users.delete')
+                    );
+    }
+
     // ---------------- hostels & rooms ----------------
 
     match /colleges/{collegeId}/hostels/{hostelId} {

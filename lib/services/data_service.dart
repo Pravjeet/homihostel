@@ -10,6 +10,7 @@ import 'audit_service.dart';
 import 'auth_service.dart';
 import 'fee_service.dart';
 import 'fine_service.dart';
+import 'photo_service.dart';
 import 'request_service.dart';
 import 'stream_cache.dart';
 
@@ -293,6 +294,14 @@ class DataService {
       .doc(uid)
       .update({...changes, 'updatedAt': FieldValue.serverTimestamp()});
 
+  /// One person's current profile, read once with no listener left open —
+  /// for a detail screen that needs a handful of people's room and trade,
+  /// not a live roster. Null when they no longer exist.
+  Future<AppUser?> fetchUser(String uid) async {
+    final d = await _db.collection('users').doc(uid).get();
+    return d.exists ? AppUser.fromMap(d.id, d.data()!) : null;
+  }
+
   /// One-shot lookup by email within a college. Used by the CSV importer to
   /// find an account it just created, since account creation happens on a
   /// throwaway Firebase instance and doesn't hand back a profile document.
@@ -463,6 +472,14 @@ class DataService {
       );
     } catch (_) {}
 
+    // Best-effort like the rest: a leftover photo is wasted storage, not a
+    // reason to keep the person.
+    if (user.hasPhoto) {
+      try {
+        await PhotoService.instance.deleteFor(collegeId, user.uid);
+      } catch (_) {}
+    }
+
     await deleteUserProfile(user.uid);
 
     if (actor != null && before != null) {
@@ -518,12 +535,18 @@ class DataService {
     final targets = users.where((u) => !u.isSuperAdmin).toList();
     var done = 0;
 
-    for (var i = 0; i < targets.length; i += 400) {
+    // 200 people is at most 400 deletes with their photos, under Firestore's
+    // 500-writes-per-batch limit. Photos only for those who have one — a
+    // delete of a missing document still spends a write from the daily quota.
+    for (var i = 0; i < targets.length; i += 200) {
       if (isCancelled?.call() ?? false) break;
-      final end = (i + 400).clamp(0, targets.length);
+      final end = (i + 200).clamp(0, targets.length);
       final batch = _db.batch();
       for (final u in targets.sublist(i, end)) {
         batch.delete(_db.collection('users').doc(u.uid));
+        if (u.hasPhoto) {
+          batch.delete(PhotoService.instance.refFor(u.collegeId, u.uid));
+        }
       }
       await batch.commit();
       done = end;

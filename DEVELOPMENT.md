@@ -78,6 +78,7 @@ colleges/{collegeId}
   ├── fines/{fineId}          feeRecords/{id}   mess fees
   ├── notices/  officeOrders/  auditLog/
   ├── settings/config         one fixed doc id — the whole workspace config
+  ├── photos/{uid}            ID photo, base64 JPEG (~40 KB) — never on users/
   └── mess/menu, mess/config  same single-doc pattern
 
 users/{uid}                   root collection, NOT under the college

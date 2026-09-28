@@ -1,3 +1,4 @@
+import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
 
 import '../../core/identity.dart';
@@ -15,11 +16,14 @@ import '../../services/data_service.dart';
 import '../../services/fine_service.dart';
 import '../../services/hostel_service.dart';
 import '../../services/office_order_service.dart';
+import '../../services/photo_service.dart';
 import '../../widgets/hostel_picker_chips.dart';
+import '../../widgets/student_photo.dart';
 import 'allot_room_view.dart';
 import 'fines_shared.dart' show FineRow, compactAmount;
 import 'impose_fine_view.dart';
-import 'office_orders_page.dart' show OfficeOrderThumb, OfficeOrderViewer;
+import 'office_order_detail_dialog.dart';
+import 'office_orders_page.dart' show OfficeOrderThumb;
 
 /// The full record for one person: everything that wasn't asked for at
 /// account creation, plus their room.
@@ -129,35 +133,132 @@ class _UserDetailViewState extends State<UserDetailView> {
 
 // -------------------------------- header --------------------------------
 
-class _Header extends StatelessWidget {
+class _Header extends StatefulWidget {
   final AppUser user;
   final VoidCallback onBack;
   const _Header({required this.user, required this.onBack});
 
   @override
+  State<_Header> createState() => _HeaderState();
+}
+
+/// Name, role, and the ID photo — first on the page on purpose: it is what a
+/// warden or guard opens this screen to check a face against.
+class _HeaderState extends State<_Header> {
+  bool _busy = false;
+
+  Future<void> _pickPhoto() async {
+    final actor = Session.of(context).user;
+    final messenger = ScaffoldMessenger.of(context);
+
+    final result = await FilePicker.platform.pickFiles(
+      type: FileType.custom,
+      allowedExtensions: ['jpg', 'jpeg', 'png', 'webp'],
+      withData: true,
+    );
+    final bytes = result?.files.single.bytes;
+    if (bytes == null) return;
+
+    setState(() => _busy = true);
+    try {
+      final jpeg = await PhotoService.prepare(bytes);
+      await PhotoService.instance.upload(
+        student: widget.user,
+        jpeg: jpeg,
+        actor: actor,
+      );
+      messenger.showSnackBar(
+        SnackBar(
+          content: Text(
+            'Photo saved (${(jpeg.lengthInBytes / 1024).round()} KB)',
+          ),
+        ),
+      );
+    } on PhotoRejected catch (e) {
+      messenger.showSnackBar(
+        SnackBar(
+          content: Text(e.message),
+          duration: const Duration(seconds: 7),
+        ),
+      );
+    } catch (e) {
+      messenger.showSnackBar(
+        SnackBar(content: Text(AuthService.describeError(e))),
+      );
+    } finally {
+      if (mounted) setState(() => _busy = false);
+    }
+  }
+
+  Future<void> _removePhoto() async {
+    final actor = Session.of(context).user;
+    final messenger = ScaffoldMessenger.of(context);
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (c) => AlertDialog(
+        title: const Text('Remove this photo?'),
+        content: Text(
+          '${widget.user.name} will show initials instead until a new photo '
+          'is uploaded.',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(c, false),
+            child: const Text('Keep it'),
+          ),
+          FilledButton(
+            style: FilledButton.styleFrom(backgroundColor: AppColors.danger),
+            onPressed: () => Navigator.pop(c, true),
+            child: const Text('Remove'),
+          ),
+        ],
+      ),
+    );
+    if (ok != true) return;
+
+    setState(() => _busy = true);
+    try {
+      await PhotoService.instance.remove(student: widget.user, actor: actor);
+      messenger.showSnackBar(const SnackBar(content: Text('Photo removed')));
+    } catch (e) {
+      messenger.showSnackBar(
+        SnackBar(content: Text(AuthService.describeError(e))),
+      );
+    } finally {
+      if (mounted) setState(() => _busy = false);
+    }
+  }
+
+  @override
   Widget build(BuildContext context) {
+    final session = Session.of(context);
+    final user = widget.user;
+
+    // Same line the rules draw: nobody sets their own ID photo (it would
+    // defeat the point), and nobody edits the Super Admin.
+    final canEditPhoto =
+        session.can(Perm.usersEdit) &&
+        !user.isSuperAdmin &&
+        session.user.uid != user.uid;
+
+    final facts = [
+      if ((user.enrollmentNo ?? '').isNotEmpty) user.enrollmentNo!,
+      if ((user.trade ?? '').isNotEmpty) user.trade!,
+      if (user.roomLabel != null) user.roomLabel!,
+    ].join('  ·  ');
+
     return AppCard(
       child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           IconButton(
-            onPressed: onBack,
+            onPressed: widget.onBack,
             icon: const Icon(Icons.arrow_back_rounded),
             tooltip: 'Back to users',
           ),
           const SizedBox(width: 4),
-          CircleAvatar(
-            radius: 24,
-            backgroundColor: AppColors.primarySoft,
-            child: Text(
-              user.initials,
-              style: TextStyle(
-                color: AppColors.primary,
-                fontWeight: FontWeight.w700,
-                fontSize: 15,
-              ),
-            ),
-          ),
-          const SizedBox(width: 14),
+          StudentPhoto.user(user, width: 96, radius: 12),
+          const SizedBox(width: 16),
           Expanded(
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
@@ -174,6 +275,63 @@ class _Header extends StatelessWidget {
                   '${Identity.display(user.email)} · ${user.displayRole}',
                   style: TextStyle(fontSize: 13, color: AppColors.textMuted),
                 ),
+                if (facts.isNotEmpty) ...[
+                  const SizedBox(height: 3),
+                  Text(
+                    facts,
+                    style: TextStyle(
+                      fontSize: 13,
+                      fontWeight: FontWeight.w600,
+                      color: AppColors.textStrong,
+                    ),
+                  ),
+                ],
+                if (canEditPhoto) ...[
+                  const SizedBox(height: 12),
+                  Wrap(
+                    spacing: 8,
+                    runSpacing: 8,
+                    crossAxisAlignment: WrapCrossAlignment.center,
+                    children: [
+                      OutlinedButton.icon(
+                        onPressed: _busy ? null : _pickPhoto,
+                        icon: const Icon(Icons.add_a_photo_outlined, size: 17),
+                        label: Text(
+                          user.hasPhoto ? 'Change photo' : 'Upload photo',
+                        ),
+                      ),
+                      if (user.hasPhoto)
+                        TextButton.icon(
+                          onPressed: _busy ? null : _removePhoto,
+                          icon: Icon(
+                            Icons.delete_outline_rounded,
+                            size: 17,
+                            color: AppColors.danger,
+                          ),
+                          label: Text(
+                            'Remove',
+                            style: TextStyle(color: AppColors.danger),
+                          ),
+                        ),
+                      if (_busy)
+                        const SizedBox(
+                          width: 18,
+                          height: 18,
+                          child: CircularProgressIndicator(strokeWidth: 2),
+                        ),
+                    ],
+                  ),
+                  const SizedBox(height: 6),
+                  Text(
+                    'A clear, front-facing photo — JPG or PNG, at least '
+                    '${PhotoService.minSourceBytes ~/ 1024} KB. It is shrunk '
+                    'automatically before saving.',
+                    style: TextStyle(
+                      fontSize: 11.5,
+                      color: AppColors.textMuted,
+                    ),
+                  ),
+                ],
               ],
             ),
           ),
@@ -317,18 +475,15 @@ class _OfficeOrdersSection extends StatelessWidget {
 
   const _OfficeOrdersSection({required this.user});
 
-  Future<void> _open(BuildContext context, OfficeOrder order) async {
-    final bytes = decodedOrderImage(order);
-    if (bytes == null) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('That photo could not be read')),
-      );
-      return;
-    }
-    await showDialog<void>(
+  Future<void> _open(BuildContext context, OfficeOrder order) {
+    final session = Session.of(context);
+    return showDialog<void>(
       context: context,
-      barrierColor: Colors.black.withValues(alpha: 0.86),
-      builder: (_) => OfficeOrderViewer(order: order, bytes: bytes),
+      builder: (_) => OfficeOrderDetailDialog(
+        order: order,
+        collegeId: session.user.collegeId,
+        canSeeProfiles: session.can(Perm.usersView),
+      ),
     );
   }
 

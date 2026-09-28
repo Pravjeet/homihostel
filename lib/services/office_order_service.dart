@@ -73,8 +73,42 @@ class OfficeOrderService {
             });
       });
 
+  /// One order by id, read once and remembered — for a fine's detail screen,
+  /// which needs just its own order and not the whole register.
+  ///
+  /// Safe to memoise because orders are never edited, only deleted (and
+  /// [delete] forgets it). Bounded tightly: each carries its scanned photo,
+  /// so a single entry can be most of a megabyte.
+  Future<OfficeOrder?> fetch(String collegeId, String orderId) {
+    final key = '$collegeId/$orderId';
+    final hit = _byId[key];
+    if (hit != null) return hit;
+    if (_byId.length >= 15) _byId.clear();
+    final future = _col(collegeId)
+        .doc(orderId)
+        .get()
+        .then((d) => d.exists ? OfficeOrder.fromMap(d.id, d.data()!) : null);
+    _byId[key] = future;
+    // A failed read (offline, refused) must not stick for the session.
+    future.catchError((_) {
+      _byId.remove(key);
+      return null;
+    });
+    return future;
+  }
+
+  final Map<String, Future<OfficeOrder?>> _byId = {};
+
+  /// Called on sign-out alongside [StreamCaches.disposeAll].
+  void clearCache() => _byId.clear();
+
   // ------------------------------ writes -----------------------------
 
-  Future<void> delete({required String collegeId, required String orderId}) =>
-      _col(collegeId).doc(orderId).delete();
+  Future<void> delete({
+    required String collegeId,
+    required String orderId,
+  }) async {
+    await _col(collegeId).doc(orderId).delete();
+    _byId.remove('$collegeId/$orderId');
+  }
 }

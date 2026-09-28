@@ -7,6 +7,8 @@ import '../core/identity.dart';
 import '../core/permissions.dart';
 import '../models/app_role.dart';
 import '../models/app_user.dart';
+import 'office_order_service.dart';
+import 'photo_service.dart';
 import 'stream_cache.dart';
 
 /// All authentication + provisioning logic. Widgets never touch
@@ -150,6 +152,8 @@ class AuthService {
   /// the login screen on the way out.
   Future<void> signOut() async {
     await StreamCaches.disposeAll();
+    PhotoService.instance.clearCache();
+    OfficeOrderService.instance.clearCache();
     await _auth.signOut();
   }
 
