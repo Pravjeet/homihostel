@@ -55,6 +55,11 @@ dependencies:
   # it also works on Windows desktop, not just mobile/web.
   file_picker: ^8.0.7
 
+  # JPEG-encoding student photos. dart:ui can only encode PNG, and a PNG
+  # photo is ~6x the size — thousands of them would not fit the Spark plan's
+  # 1 GiB Firestore storage.
+  image: ^4.10.1
+
 dev_dependencies:
   flutter_test:
     sdk: flutter

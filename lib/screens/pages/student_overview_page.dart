@@ -186,227 +186,253 @@ class _StudentOverviewPageState extends State<StudentOverviewPage> {
                 };
 
                 return StreamBuilder<List<AppUser>>(
-              stream: DataService.instance.watchUsers(collegeId),
-              builder: (context, userSnap) {
-                if (userSnap.hasError) {
-                  return AppCard(
-                    child: Text(AuthService.describeError(userSnap.error!)),
-                  );
-                }
-                if (!userSnap.hasData ||
-                    (_sessionScoped && !enrollSnap.hasData)) {
-                  return const Padding(
-                    padding: EdgeInsets.all(60),
-                    child: Center(child: CircularProgressIndicator()),
-                  );
-                }
+                  stream: DataService.instance.watchUsers(collegeId),
+                  builder: (context, userSnap) {
+                    if (userSnap.hasError) {
+                      return AppCard(
+                        child: Text(AuthService.describeError(userSnap.error!)),
+                      );
+                    }
+                    if (!userSnap.hasData ||
+                        (_sessionScoped && !enrollSnap.hasData)) {
+                      return const Padding(
+                        padding: EdgeInsets.all(60),
+                        child: Center(child: CircularProgressIndicator()),
+                      );
+                    }
 
-                final roster = userSnap.data!
-                    .where((u) => !u.isSuperAdmin)
-                    .where((u) => !staffRoleIds.contains(u.roleId))
-                    // In session mode the directory *is* that session's
-                    // roster: someone with no enrollment for it either
-                    // graduated, has not been backfilled, or was admitted
-                    // later. Listing them anyway is what made a fully
-                    // graduated campus still show 2,649 students.
-                    .where((u) => !_sessionScoped || _byUid.containsKey(u.uid))
-                    .toList();
+                    final roster = userSnap.data!
+                        .where((u) => !u.isSuperAdmin)
+                        .where((u) => !staffRoleIds.contains(u.roleId))
+                        // In session mode the directory *is* that session's
+                        // roster: someone with no enrollment for it either
+                        // graduated, has not been backfilled, or was admitted
+                        // later. Listing them anyway is what made a fully
+                        // graduated campus still show 2,649 students.
+                        .where(
+                          (u) => !_sessionScoped || _byUid.containsKey(u.uid),
+                        )
+                        .toList();
 
-                final shown = roster.where(_keep).toList()
-                  ..sort(
-                    (a, b) =>
-                        a.name.toLowerCase().compareTo(b.name.toLowerCase()),
-                  );
+                    final shown = roster.where(_keep).toList()
+                      ..sort(
+                        (a, b) => a.name.toLowerCase().compareTo(
+                          b.name.toLowerCase(),
+                        ),
+                      );
 
-                // Every option comes from the UNFILTERED roster — building
-                // them from `shown` would make picking a filter erase the
-                // very options that could get you back out of it.
-                final tradeOptions = ({
-                  for (final u in roster)
-                    if (u.trade != null) u.trade!,
-                }.toList()..sort());
-                // Built through the same accessors the filter compares
-                // against, so an option can never be offered that matches
-                // nobody. In session mode these are real ordinals — 1st, 2nd
-                // — rather than whatever free text the sheet happened to
-                // carry, so they also sort correctly.
-                final yearOptions =
-                    ({
-                          for (final u in roster)
-                            if (_yearLabel(u) != null) _yearLabel(u)!,
-                        }.toList()
-                        ..sort());
-                final semOptions = ({
-                  for (final u in roster)
-                    if (_semOf(u) != null) _semOf(u)!,
-                }.toList()..sort());
-                final hostelOptions = ({
-                  for (final u in roster) _hostelLabel(_hostelOf(u)),
-                  // BH-10 belongs after BH-9, not between BH-1 and BH-2.
-                }.toList()..sort(Hostel.compareLabels));
-                // 'Not set' is not a place, so it sorts to the end instead of
-                // landing between Nagaland and Odisha.
-                final stateOptions =
-                    ({for (final u in roster) _stateLabel(u.state)}.toList()
-                      ..sort((a, b) {
-                        if (a == _noState) return 1;
-                        if (b == _noState) return -1;
-                        return a.compareTo(b);
-                      }));
-                // Descending: the most recent intake is what a warden is
-                // usually looking for, not the oldest one still on the books.
-                final batchOptions = ({
-                  for (final u in roster)
-                    if (u.batch != null) u.batch!,
-                }.toList()..sort((a, b) => b.compareTo(a)));
+                    // Every option comes from the UNFILTERED roster — building
+                    // them from `shown` would make picking a filter erase the
+                    // very options that could get you back out of it.
+                    final tradeOptions = ({
+                      for (final u in roster)
+                        if (u.trade != null) u.trade!,
+                    }.toList()..sort());
+                    // Built through the same accessors the filter compares
+                    // against, so an option can never be offered that matches
+                    // nobody. In session mode these are real ordinals — 1st, 2nd
+                    // — rather than whatever free text the sheet happened to
+                    // carry, so they also sort correctly.
+                    final yearOptions = ({
+                      for (final u in roster)
+                        if (_yearLabel(u) != null) _yearLabel(u)!,
+                    }.toList()..sort());
+                    final semOptions = ({
+                      for (final u in roster)
+                        if (_semOf(u) != null) _semOf(u)!,
+                    }.toList()..sort());
+                    final hostelOptions = ({
+                      for (final u in roster) _hostelLabel(_hostelOf(u)),
+                      // BH-10 belongs after BH-9, not between BH-1 and BH-2.
+                    }.toList()..sort(Hostel.compareLabels));
+                    // 'Not set' is not a place, so it sorts to the end instead of
+                    // landing between Nagaland and Odisha.
+                    final stateOptions =
+                        ({for (final u in roster) _stateLabel(u.state)}.toList()
+                          ..sort((a, b) {
+                            if (a == _noState) return 1;
+                            if (b == _noState) return -1;
+                            return a.compareTo(b);
+                          }));
+                    // Descending: the most recent intake is what a warden is
+                    // usually looking for, not the oldest one still on the books.
+                    final batchOptions = ({
+                      for (final u in roster)
+                        if (u.batch != null) u.batch!,
+                    }.toList()..sort((a, b) => b.compareTo(a)));
 
-                final pageCount = shown.isEmpty
-                    ? 1
-                    : (shown.length / _pageSize).ceil();
-                final page = _page.clamp(0, pageCount - 1);
-                final pageStart = page * _pageSize;
-                final pageItems = shown
-                    .skip(pageStart)
-                    .take(_pageSize)
-                    .toList();
+                    final pageCount = shown.isEmpty
+                        ? 1
+                        : (shown.length / _pageSize).ceil();
+                    final page = _page.clamp(0, pageCount - 1);
+                    final pageStart = page * _pageSize;
+                    final pageItems = shown
+                        .skip(pageStart)
+                        .take(_pageSize)
+                        .toList();
 
-                return Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    _Header(
-                      total: roster.length,
-                      shown: shown.length,
-                      anyFilter: _anyFilter,
-                      onClear: _clearAll,
-                      session: currentSession,
-                    ),
-                    const SizedBox(height: 14),
+                    return Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        _Header(
+                          total: roster.length,
+                          shown: shown.length,
+                          anyFilter: _anyFilter,
+                          onClear: _clearAll,
+                          session: currentSession,
+                        ),
+                        const SizedBox(height: 14),
 
-                    // An empty session is a real answer, not a broken page.
-                    // Everyone graduating is the expected end state, and
-                    // saying so beats rendering filter chips over nothing.
-                    if (_sessionScoped && roster.isEmpty) ...[
-                      AppCard(
-                        padding: const EdgeInsets.symmetric(vertical: 46),
-                        child: Center(
-                          child: Column(
-                            children: [
-                              Icon(
-                                Icons.school_outlined,
-                                size: 34,
-                                color: AppColors.textMuted,
-                              ),
-                              const SizedBox(height: 12),
-                              Text(
-                                'Nobody is enrolled in $currentSession.',
-                                style: const TextStyle(
-                                  fontSize: 15,
-                                  fontWeight: FontWeight.w700,
-                                ),
-                              ),
-                              const SizedBox(height: 6),
-                              ConstrainedBox(
-                                constraints: const BoxConstraints(
-                                  maxWidth: 430,
-                                ),
-                                child: Text(
-                                  'This directory follows the current '
-                                  'academic session. Either everyone has '
-                                  'graduated, or this session has not been '
-                                  'backfilled yet — Academic Records is where '
-                                  'that is done.',
-                                  textAlign: TextAlign.center,
-                                  style: TextStyle(
+                        // An empty session is a real answer, not a broken page.
+                        // Everyone graduating is the expected end state, and
+                        // saying so beats rendering filter chips over nothing.
+                        if (_sessionScoped && roster.isEmpty) ...[
+                          AppCard(
+                            padding: const EdgeInsets.symmetric(vertical: 46),
+                            child: Center(
+                              child: Column(
+                                children: [
+                                  Icon(
+                                    Icons.school_outlined,
+                                    size: 34,
                                     color: AppColors.textMuted,
-                                    fontSize: 13,
-                                    height: 1.5,
                                   ),
+                                  const SizedBox(height: 12),
+                                  Text(
+                                    'Nobody is enrolled in $currentSession.',
+                                    style: const TextStyle(
+                                      fontSize: 15,
+                                      fontWeight: FontWeight.w700,
+                                    ),
+                                  ),
+                                  const SizedBox(height: 6),
+                                  ConstrainedBox(
+                                    constraints: const BoxConstraints(
+                                      maxWidth: 430,
+                                    ),
+                                    child: Text(
+                                      'This directory follows the current '
+                                      'academic session. Either everyone has '
+                                      'graduated, or this session has not been '
+                                      'backfilled yet — Academic Records is where '
+                                      'that is done.',
+                                      textAlign: TextAlign.center,
+                                      style: TextStyle(
+                                        color: AppColors.textMuted,
+                                        fontSize: 13,
+                                        height: 1.5,
+                                      ),
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            ),
+                          ),
+                        ] else ...[
+                          Row(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Expanded(
+                                child: Column(
+                                  crossAxisAlignment: CrossAxisAlignment.start,
+                                  children: [
+                                    _StudentList(
+                                      students: pageItems,
+                                      byUid: _byUid,
+                                    ),
+                                    if (pageCount > 1) ...[
+                                      const SizedBox(height: 14),
+                                      Row(
+                                        mainAxisAlignment:
+                                            MainAxisAlignment.center,
+                                        children: [
+                                          OutlinedButton(
+                                            onPressed: page > 0
+                                                ? () => setState(
+                                                    () => _page = page - 1,
+                                                  )
+                                                : null,
+                                            child: const Text('Previous'),
+                                          ),
+                                          Padding(
+                                            padding: const EdgeInsets.symmetric(
+                                              horizontal: 16,
+                                            ),
+                                            child: Text(
+                                              'Page ${page + 1} of $pageCount  '
+                                              '(${pageStart + 1}–'
+                                              '${pageStart + pageItems.length} of '
+                                              '${shown.length})',
+                                              style: TextStyle(
+                                                fontSize: 12.5,
+                                                fontWeight: FontWeight.w600,
+                                                color: AppColors.textMuted,
+                                              ),
+                                            ),
+                                          ),
+                                          OutlinedButton(
+                                            onPressed: page < pageCount - 1
+                                                ? () => setState(
+                                                    () => _page = page + 1,
+                                                  )
+                                                : null,
+                                            child: const Text('Next'),
+                                          ),
+                                        ],
+                                      ),
+                                    ],
+                                  ],
+                                ),
+                              ),
+                              const SizedBox(width: 14),
+                              SizedBox(
+                                width: 232,
+                                child: _SlicerRail(
+                                  tradeOptions: tradeOptions,
+                                  yearOptions: yearOptions,
+                                  sems: semOptions,
+                                  hostelOptions: hostelOptions,
+                                  stateOptions: stateOptions,
+                                  batchOptions: batchOptions,
+                                  trade: _trade,
+                                  year: _year,
+                                  sem: _sem,
+                                  hostel: _hostel,
+                                  state: _state,
+                                  batch: _batch,
+                                  tradeLabelFor: session.settings.tradeLabelFor,
+                                  onTrade: (v) => setState(() {
+                                    _trade = _trade == v ? null : v;
+                                    _page = 0;
+                                  }),
+                                  onYear: (v) => setState(() {
+                                    _year = _year == v ? null : v;
+                                    _page = 0;
+                                  }),
+                                  onSem: (v) => setState(() {
+                                    _sem = _sem == v ? null : v;
+                                    _page = 0;
+                                  }),
+                                  onHostel: (v) => setState(() {
+                                    _hostel = _hostel == v ? null : v;
+                                    _page = 0;
+                                  }),
+                                  onState: (v) => setState(() {
+                                    _state = _state == v ? null : v;
+                                    _page = 0;
+                                  }),
+                                  onBatch: (v) => setState(() {
+                                    _batch = _batch == v ? null : v;
+                                    _page = 0;
+                                  }),
                                 ),
                               ),
                             ],
                           ),
-                        ),
-                      ),
-                    ] else ...[
-                    _Filters(
-                      tradeOptions: tradeOptions,
-                      yearOptions: yearOptions,
-                      sems: semOptions,
-                      hostelOptions: hostelOptions,
-                      stateOptions: stateOptions,
-                      batchOptions: batchOptions,
-                      trade: _trade,
-                      year: _year,
-                      sem: _sem,
-                      hostel: _hostel,
-                      state: _state,
-                      batch: _batch,
-                      tradeLabelFor: session.settings.tradeLabelFor,
-                      onTrade: (v) => setState(() {
-                        _trade = v;
-                        _page = 0;
-                      }),
-                      onYear: (v) => setState(() {
-                        _year = v;
-                        _page = 0;
-                      }),
-                      onSem: (v) => setState(() {
-                        _sem = v;
-                        _page = 0;
-                      }),
-                      onHostel: (v) => setState(() {
-                        _hostel = v;
-                        _page = 0;
-                      }),
-                      onState: (v) => setState(() {
-                        _state = v;
-                        _page = 0;
-                      }),
-                      onBatch: (v) => setState(() {
-                        _batch = v;
-                        _page = 0;
-                      }),
-                    ),
-                    const SizedBox(height: 14),
-                    _StudentList(students: pageItems, byUid: _byUid),
-                    if (pageCount > 1) ...[
-                      const SizedBox(height: 14),
-                      Row(
-                        mainAxisAlignment: MainAxisAlignment.center,
-                        children: [
-                          OutlinedButton(
-                            onPressed: page > 0
-                                ? () => setState(() => _page = page - 1)
-                                : null,
-                            child: const Text('Previous'),
-                          ),
-                          Padding(
-                            padding: const EdgeInsets.symmetric(horizontal: 16),
-                            child: Text(
-                              'Page ${page + 1} of $pageCount  '
-                              '(${pageStart + 1}–'
-                              '${pageStart + pageItems.length} of '
-                              '${shown.length})',
-                              style: TextStyle(
-                                fontSize: 12.5,
-                                fontWeight: FontWeight.w600,
-                                color: AppColors.textMuted,
-                              ),
-                            ),
-                          ),
-                          OutlinedButton(
-                            onPressed: page < pageCount - 1
-                                ? () => setState(() => _page = page + 1)
-                                : null,
-                            child: const Text('Next'),
-                          ),
                         ],
-                      ),
-                    ],
-                    ],
-                  ],
-                );
-              },
+                      ],
+                    );
+                  },
                 );
               },
             );
@@ -481,9 +507,14 @@ class _Header extends StatelessWidget {
   );
 }
 
-// ------------------------------- filters -------------------------------
+// ----------------------------- slicer rail -----------------------------
 
-class _Filters extends StatelessWidget {
+/// Click-to-filter tiles, one box per dimension — the same interaction as
+/// the fines dashboard's slicer rail: tap a tile to filter by it, tap it
+/// again to clear just that one. Replaces what used to be a row of six
+/// dropdowns, which meant opening a menu and scanning a list to find "BH-5"
+/// instead of just seeing and tapping it.
+class _SlicerRail extends StatelessWidget {
   final List<String> tradeOptions;
   final List<String> yearOptions;
   final List<int> sems;
@@ -497,14 +528,14 @@ class _Filters extends StatelessWidget {
   final String? state;
   final String? batch;
   final String Function(String) tradeLabelFor;
-  final ValueChanged<String?> onTrade;
-  final ValueChanged<String?> onYear;
-  final ValueChanged<int?> onSem;
-  final ValueChanged<String?> onHostel;
-  final ValueChanged<String?> onState;
-  final ValueChanged<String?> onBatch;
+  final ValueChanged<String> onTrade;
+  final ValueChanged<String> onYear;
+  final ValueChanged<int> onSem;
+  final ValueChanged<String> onHostel;
+  final ValueChanged<String> onState;
+  final ValueChanged<String> onBatch;
 
-  const _Filters({
+  const _SlicerRail({
     required this.tradeOptions,
     required this.yearOptions,
     required this.sems,
@@ -527,99 +558,172 @@ class _Filters extends StatelessWidget {
   });
 
   @override
-  Widget build(BuildContext context) => AppCard(
-    padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
-    child: Wrap(
-      spacing: 12,
-      runSpacing: 12,
+  Widget build(BuildContext context) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
-        _Drop<String>(
-          label: 'Trade',
-          value: trade,
-          options: tradeOptions,
-          labelFor: tradeLabelFor,
-          onChanged: onTrade,
-          width: 220,
-        ),
-        _Drop<String>(
-          label: 'Year',
-          value: year,
-          options: yearOptions,
-          onChanged: onYear,
-          width: 140,
-        ),
-        _Drop<int>(
-          label: 'Semester',
-          value: sem,
-          options: sems,
-          labelFor: (s) => 'Sem $s',
-          onChanged: onSem,
-          width: 130,
-        ),
-        _Drop<String>(
-          label: 'Hostel',
-          value: hostel,
+        _SlicerBox<String>(
+          title: 'Hostel',
           options: hostelOptions,
-          onChanged: onHostel,
-          width: 170,
+          selected: hostel,
+          onTap: onHostel,
+          columns: 2,
+          maxHeight: 200,
         ),
-        _Drop<String>(
-          label: 'Home state',
-          value: state,
-          options: stateOptions,
-          onChanged: onState,
-          width: 200,
+        const SizedBox(height: 14),
+        _SlicerBox<String>(
+          title: 'Trade',
+          options: tradeOptions,
+          selected: trade,
+          labelFor: tradeLabelFor,
+          onTap: onTrade,
+          columns: 2,
+          maxHeight: 200,
         ),
-        _Drop<String>(
-          label: 'Batch',
-          value: batch,
+        const SizedBox(height: 14),
+        _SlicerBox<int>(
+          title: 'Semester',
+          options: sems,
+          selected: sem,
+          labelFor: (s) => 'Sem $s',
+          onTap: onSem,
+          columns: 3,
+        ),
+        const SizedBox(height: 14),
+        _SlicerBox<String>(
+          title: 'Year',
+          options: yearOptions,
+          selected: year,
+          onTap: onYear,
+          columns: 3,
+        ),
+        const SizedBox(height: 14),
+        _SlicerBox<String>(
+          title: 'Batch',
           options: batchOptions,
-          onChanged: onBatch,
-          width: 140,
+          selected: batch,
+          onTap: onBatch,
+          columns: 2,
+          maxHeight: 160,
+        ),
+        const SizedBox(height: 14),
+        _SlicerBox<String>(
+          title: 'Home State',
+          options: stateOptions,
+          selected: state,
+          onTap: onState,
+          columns: 1,
+          maxHeight: 200,
         ),
       ],
-    ),
-  );
+    );
+  }
 }
 
-class _Drop<T> extends StatelessWidget {
-  final String label;
-  final T? value;
+class _SlicerBox<T> extends StatelessWidget {
+  final String title;
   final List<T> options;
+  final T? selected;
+  final ValueChanged<T> onTap;
+  final int columns;
+  final double? maxHeight;
   final String Function(T)? labelFor;
-  final ValueChanged<T?> onChanged;
+
+  const _SlicerBox({
+    required this.title,
+    required this.options,
+    required this.selected,
+    required this.onTap,
+    required this.columns,
+    this.maxHeight,
+    this.labelFor,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    if (options.isEmpty) return const SizedBox.shrink();
+
+    final grid = Wrap(
+      spacing: 6,
+      runSpacing: 6,
+      children: [
+        for (final o in options)
+          _Tile(
+            label: labelFor == null ? '$o' : labelFor!(o),
+            selected: selected == o,
+            onTap: () => onTap(o),
+            width: columns == 1
+                ? double.infinity
+                : (200 - (columns - 1) * 6) / columns,
+          ),
+      ],
+    );
+
+    return AppCard(
+      padding: const EdgeInsets.all(14),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            title,
+            style: const TextStyle(fontSize: 12.5, fontWeight: FontWeight.w800),
+          ),
+          const SizedBox(height: 10),
+          if (maxHeight == null)
+            grid
+          else
+            ConstrainedBox(
+              constraints: BoxConstraints(maxHeight: maxHeight!),
+              child: SingleChildScrollView(child: grid),
+            ),
+        ],
+      ),
+    );
+  }
+}
+
+class _Tile extends StatelessWidget {
+  final String label;
+  final bool selected;
+  final VoidCallback onTap;
   final double width;
 
-  const _Drop({
+  const _Tile({
     required this.label,
-    required this.value,
-    required this.options,
-    required this.onChanged,
-    this.labelFor,
-    this.width = 200,
+    required this.selected,
+    required this.onTap,
+    required this.width,
   });
 
   @override
   Widget build(BuildContext context) => SizedBox(
-    width: width,
-    child: DropdownButtonFormField<T>(
-      initialValue: options.contains(value) ? value : null,
-      isExpanded: true,
-      decoration: InputDecoration(labelText: label, isDense: true),
-      hint: const Text('All'),
-      items: [
-        DropdownMenuItem<T>(value: null, child: const Text('All')),
-        ...options.map(
-          (o) => DropdownMenuItem(
-            value: o,
-            child: Text(
-              labelFor == null ? '$o' : labelFor!(o),
-              overflow: TextOverflow.ellipsis,
-            ),
+    width: width == double.infinity ? null : width,
+    child: InkWell(
+      onTap: onTap,
+      borderRadius: BorderRadius.circular(8),
+      child: Container(
+        width: width == double.infinity ? double.infinity : null,
+        alignment: Alignment.center,
+        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 9),
+        decoration: BoxDecoration(
+          color: selected ? AppColors.primary : AppColors.canvas,
+          borderRadius: BorderRadius.circular(8),
+          border: Border.all(
+            color: selected ? AppColors.primary : AppColors.border,
           ),
         ),
-      ],
-      onChanged: onChanged,
+        child: Text(
+          label,
+          maxLines: 1,
+          overflow: TextOverflow.ellipsis,
+          textAlign: TextAlign.center,
+          style: TextStyle(
+            fontSize: 11.5,
+            fontWeight: FontWeight.w700,
+            color: selected ? Colors.white : AppColors.textStrong,
+          ),
+        ),
+      ),
     ),
   );
 }
@@ -628,6 +732,7 @@ class _Drop<T> extends StatelessWidget {
 
 class _StudentList extends StatelessWidget {
   final List<AppUser> students;
+
   /// This session's enrollment per student, so a row can show the year
   /// promotion actually maintains rather than the import sheet's stale
   /// free text. Empty when no session is set, in which case the row

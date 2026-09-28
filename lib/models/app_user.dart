@@ -114,6 +114,15 @@ class AppUser {
   /// haven't been assigned one yet.
   final List<String> managedHostelIds;
 
+  /// When the ID photo was last set, or null when there isn't one.
+  ///
+  /// The photo itself lives in `colleges/{collegeId}/photos/{uid}`, never on
+  /// this document — every roster stream reads every user doc, and ~40 KB
+  /// each would make the full roster tens of megabytes. This stamp is what
+  /// lets a screen skip the photo read for someone who has none, and doubles
+  /// as the cache key so a replaced photo is fetched fresh.
+  final DateTime? photoUpdatedAt;
+
   const AppUser({
     required this.uid,
     required this.name,
@@ -157,6 +166,7 @@ class AppUser {
     this.roomNumber,
     this.allottedAt,
     this.managedHostelIds = const [],
+    this.photoUpdatedAt,
   });
 
   factory AppUser.fromMap(String uid, Map<String, dynamic> m) {
@@ -207,6 +217,7 @@ class AppUser {
       managedHostelIds: ((m['managedHostelIds'] as List?) ?? const [])
           .map((e) => e.toString())
           .toList(),
+      photoUpdatedAt: (m['photoUpdatedAt'] as Timestamp?)?.toDate(),
     );
   }
 
@@ -264,6 +275,8 @@ class AppUser {
       isSuperAdmin ? 'Super Admin' : (roleName ?? 'Unassigned');
 
   bool get isAllotted => roomId != null && hostelId != null;
+
+  bool get hasPhoto => photoUpdatedAt != null;
 
   /// True once annual promotion has moved this student past their course's
   /// length. A graduated student is not deleted or deactivated — they simply
