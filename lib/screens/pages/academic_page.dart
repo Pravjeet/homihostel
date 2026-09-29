@@ -9,6 +9,7 @@ import '../../services/auth_service.dart';
 import '../../services/data_service.dart';
 import '../../services/enrollment_service.dart';
 import '../../utils/enrollment_helpers.dart';
+import '../dashboard_shell.dart' show HistoryBanner;
 
 /// Session rosters, the one-time backfill, and the annual promotion run.
 ///
@@ -209,8 +210,8 @@ class _AcademicPageState extends State<AcademicPage> {
       );
     }
 
-    final currentSession = session.settings.session.current;
-    if (currentSession == null) {
+    final liveSession = session.settings.session.current;
+    if (liveSession == null) {
       return AppCard(
         padding: const EdgeInsets.symmetric(vertical: 46),
         child: Center(
@@ -240,8 +241,14 @@ class _AcademicPageState extends State<AcademicPage> {
       );
     }
 
+    // The year picker in the top bar, same lens the Dashboard and Hostels &
+    // Rooms already follow. Backfill and Promotion stay pinned to the live
+    // session regardless — see the long comment on [Session.viewingSession].
+    final viewedSession = session.effectiveSession!;
+    final isHistory = session.isViewingHistory;
+
     final nextSession =
-        session.settings.session.next ?? nextSessionAfter(currentSession);
+        session.settings.session.next ?? nextSessionAfter(liveSession);
 
     return StreamBuilder<List<AppUser>>(
       stream: DataService.instance.watchUsers(collegeId),
@@ -254,7 +261,7 @@ class _AcademicPageState extends State<AcademicPage> {
         return StreamBuilder<List<Enrollment>>(
           stream: EnrollmentService.instance.watchRoster(
             collegeId,
-            currentSession,
+            viewedSession,
           ),
           builder: (context, rosterSnap) {
             if (rosterSnap.hasError) {
@@ -268,30 +275,37 @@ class _AcademicPageState extends State<AcademicPage> {
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  _Header(
-                    currentSession: currentSession,
-                    nextSession: nextSession,
-                    studentCount: students.length,
-                    rosterCount: roster.length,
-                    missingCount: countMissing(
-                      students.map((u) => u.uid),
-                      roster.map((e) => e.uid),
+                  const HistoryBanner(),
+                  if (isHistory)
+                    _HistoryHeader(
+                      session: viewedSession,
+                      rosterCount: roster.length,
+                    )
+                  else
+                    _Header(
+                      currentSession: liveSession,
+                      nextSession: nextSession,
+                      studentCount: students.length,
+                      rosterCount: roster.length,
+                      missingCount: countMissing(
+                        students.map((u) => u.uid),
+                        roster.map((e) => e.uid),
+                      ),
+                      busy: _busy,
+                      canManage: session.can(Perm.academicManage),
+                      onBackfill: () =>
+                          _runBackfill(session, students, liveSession),
+                      onPromote: nextSession == null
+                          ? null
+                          : () => _runPromotion(
+                              session,
+                              students,
+                              liveSession,
+                              nextSession,
+                              roster,
+                            ),
                     ),
-                    busy: _busy,
-                    canManage: session.can(Perm.academicManage),
-                    onBackfill: () =>
-                        _runBackfill(session, students, currentSession),
-                    onPromote: nextSession == null
-                        ? null
-                        : () => _runPromotion(
-                            session,
-                            students,
-                            currentSession,
-                            nextSession,
-                            roster,
-                          ),
-                  ),
-                  if (_message != null) ...[
+                  if (!isHistory && _message != null) ...[
                     const SizedBox(height: 14),
                     Container(
                       width: double.infinity,
@@ -315,7 +329,7 @@ class _AcademicPageState extends State<AcademicPage> {
                     ),
                   ],
                   const SizedBox(height: 14),
-                  _YearBreakdown(roster: roster, session: currentSession),
+                  _YearBreakdown(roster: roster, session: viewedSession),
                 ],
               ),
             );
@@ -484,6 +498,41 @@ class _Header extends StatelessWidget {
       ),
     );
   }
+}
+
+/// Stands in for [_Header] while viewing a past session. No tallies, no
+/// mismatch warning, no Backfill/Promote — those are live-session concepts
+/// (they ask "does this year's roster match who's here today"), which has no
+/// honest answer for a year that isn't the live one.
+class _HistoryHeader extends StatelessWidget {
+  final String session;
+  final int rosterCount;
+
+  const _HistoryHeader({required this.session, required this.rosterCount});
+
+  @override
+  Widget build(BuildContext context) => AppCard(
+    child: Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        SectionHeader(
+          'Academic records',
+          trailing: StatusPill(
+            session,
+            AppColors.warning,
+            AppColors.warningSoft,
+          ),
+        ),
+        const SizedBox(height: 4),
+        Text(
+          'A read-only look at $session\'s enrollment roster — '
+          '$rosterCount record${rosterCount == 1 ? '' : 's'}. Switch back to '
+          'the live session from the year picker to backfill or promote.',
+          style: TextStyle(fontSize: 13, color: AppColors.textMuted),
+        ),
+      ],
+    ),
+  );
 }
 
 class _YearBreakdown extends StatelessWidget {

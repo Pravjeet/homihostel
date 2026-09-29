@@ -1,21 +1,13 @@
 import 'dart:convert';
 import 'dart:typed_data';
-import 'dart:ui' as ui;
 
 import 'package:cloud_firestore/cloud_firestore.dart';
-import 'package:image/image.dart' as img;
 
 import '../models/app_user.dart';
+import '../utils/jpeg_shrink.dart';
 import 'audit_service.dart';
 
-/// A picked file that can't become an ID photo. [message] is shown verbatim.
-class PhotoRejected implements Exception {
-  final String message;
-  const PhotoRejected(this.message);
-
-  @override
-  String toString() => message;
-}
+export '../utils/jpeg_shrink.dart' show PhotoRejected;
 
 /// Student ID photos — what a warden or guard checks a face against when they
 /// don't know the student, so impersonation can be caught at the gate.
@@ -59,10 +51,6 @@ class PhotoService {
   // ------------------------------ preparing ------------------------------
 
   /// Turns whatever was picked into a small JPEG, or throws [PhotoRejected].
-  ///
-  /// Decoding and downscaling go through the engine's own codec (fast, and it
-  /// honours a phone's EXIF rotation); only the final JPEG encode is pure
-  /// Dart, and by then the image is a few hundred pixels across.
   static Future<Uint8List> prepare(Uint8List source) async {
     if (source.lengthInBytes < minSourceBytes) {
       throw PhotoRejected(
@@ -71,50 +59,15 @@ class PhotoService {
         'photo of at least ${minSourceBytes ~/ 1024} KB.',
       );
     }
-
-    final ui.Image image;
-    try {
-      final buffer = await ui.ImmutableBuffer.fromUint8List(source);
-      final codec = await ui.instantiateImageCodecWithSize(
-        buffer,
-        getTargetSize: (w, h) {
-          if (w <= maxEdge && h <= maxEdge) {
-            return ui.TargetImageSize(width: w, height: h);
-          }
-          // One side only — the engine keeps the aspect ratio.
-          return w >= h
-              ? const ui.TargetImageSize(width: maxEdge)
-              : const ui.TargetImageSize(height: maxEdge);
-        },
-      );
-      image = (await codec.getNextFrame()).image;
-      codec.dispose();
-    } catch (_) {
-      throw const PhotoRejected('That file could not be read as an image.');
-    }
-
-    try {
-      final data = await image.toByteData(format: ui.ImageByteFormat.rawRgba);
-      if (data == null) {
-        throw const PhotoRejected('That file could not be read as an image.');
-      }
-      final pixels = img.Image.fromBytes(
-        width: image.width,
-        height: image.height,
-        bytes: data.buffer,
-        numChannels: 4,
-        order: img.ChannelOrder.rgba,
-      );
-      for (final quality in const [82, 72, 62, 52]) {
-        final jpeg = img.encodeJpg(pixels, quality: quality);
-        if (jpeg.lengthInBytes <= maxStoredBytes) return jpeg;
-      }
-      throw const PhotoRejected(
-        'That photo could not be compressed small enough to store.',
-      );
-    } finally {
-      image.dispose();
-    }
+    // Size fixed at maxEdge: a face needs the pixels more than the bytes, and
+    // 480px fits the budget at every quality tried.
+    return shrinkToJpeg(
+      source,
+      maxEdge: maxEdge,
+      maxBytes: maxStoredBytes,
+      edgeSteps: const [1],
+      qualities: const [82, 72, 62, 52],
+    );
   }
 
   // ------------------------------- reading -------------------------------

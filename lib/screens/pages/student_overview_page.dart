@@ -12,6 +12,7 @@ import '../../services/data_service.dart';
 import '../../services/enrollment_service.dart';
 import '../../services/hostel_service.dart';
 import '../../utils/enrollment_helpers.dart';
+import '../dashboard_shell.dart' show HistoryBanner;
 
 /// A filterable directory of residents — trade, year, semester, hostel,
 /// home state, batch.
@@ -31,6 +32,12 @@ import '../../utils/enrollment_helpers.dart';
 /// Records owns promotion and the year-by-session breakdown. This page
 /// answers one question — "who, filtered by these six things" — and stops
 /// there.
+///
+/// Session-scoping follows the year picker in the top bar
+/// ([Session.effectiveSession]), same lens as the Dashboard and Hostels &
+/// Rooms: switch to a past session and this becomes that year's roster,
+/// enrollment fields and all — which is free, since read-only means there
+/// was never a live/history distinction to make here in the first place.
 ///
 /// Paginated the same way as Users / Room Allotment: rendering every match
 /// at once is what makes a large roster crawl.
@@ -169,7 +176,7 @@ class _StudentOverviewPageState extends State<StudentOverviewPage> {
             // The session drives who is listed at all. Both streams are
             // pooled and both are already open from Academic Records, so this
             // attaches listeners rather than paying for either query again.
-            final currentSession = session.settings.session.current;
+            final currentSession = session.effectiveSession;
 
             return StreamBuilder<List<Enrollment>>(
               stream: currentSession == null
@@ -274,6 +281,7 @@ class _StudentOverviewPageState extends State<StudentOverviewPage> {
                     return Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
+                        const HistoryBanner(),
                         _Header(
                           total: roster.length,
                           shown: shown.length,

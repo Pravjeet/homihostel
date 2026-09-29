@@ -25,6 +25,11 @@ import {
   query,
   where,
   getCountFromServer,
+  // Sentinels for the photo batch tests below. The compat db accepts the
+  // modular ones: its writes unwrap to the same modular instance.
+  serverTimestamp,
+  deleteField,
+  Timestamp,
 } from 'firebase/firestore';
 
 let testEnv;
@@ -278,6 +283,19 @@ describe('office orders covering several students', () => {
     ],
     studentUids: ['student-a', 'student-b'],
     ...extra,
+  });
+
+  it('a scan within 70 KB is accepted, a bigger one refused', async () => {
+    await seed(COLLEGE_A);
+    await seedUser(COLLEGE_A, 'warden-a', 'warden');
+
+    const db = asUser('warden-a');
+    await assertSucceeds(
+      ORDERS(db).add(order('warden-a', { imageBase64: 'A'.repeat(95000) })),
+    );
+    await assertFails(
+      ORDERS(db).add(order('warden-a', { imageBase64: 'A'.repeat(96001) })),
+    );
   });
 
   it('fines.manage can issue a group order that fines everyone', async () => {
@@ -833,5 +851,215 @@ describe('ID photos', () => {
         .collection('photos')
         .get(),
     );
+  });
+});
+
+// The same photo writes, made by a Super Admin, in exactly the shape
+// PhotoService.upload / remove send them: ONE batch that sets the photo doc
+// and stamps users/{uid}.photoUpdatedAt. The block above tests the photo doc
+// on its own with a users.edit role; this one proves the whole batch goes
+// through for the account that holds no role permissions at all and relies
+// on isSuperAdmin() inside hasPerm().
+describe('ID photos — Super Admin', () => {
+  const photo = (db, collegeId, uid) =>
+    db.collection('colleges').doc(collegeId).collection('photos').doc(uid);
+
+  // What prepare() can produce at most: 90 KB of JPEG -> 122,880 base64 chars.
+  const BYTES = 'A'.repeat(4 * Math.ceil((90 * 1024) / 3));
+
+  /** PhotoService.upload's batch, verbatim in shape. */
+  function uploadBatch(db, collegeId, studentUid, actorUid) {
+    const stamp = Timestamp.now();
+    const batch = db.batch();
+    batch.set(photo(db, collegeId, studentUid), {
+      uid: studentUid,
+      bytes: BYTES,
+      mimeType: 'image/jpeg',
+      updatedAt: stamp,
+      updatedByUid: actorUid,
+      updatedByName: 'Super Admin',
+    });
+    batch.update(db.collection('users').doc(studentUid), {
+      photoUpdatedAt: stamp,
+      updatedAt: serverTimestamp(),
+    });
+    return batch.commit();
+  }
+
+  /** PhotoService.remove's batch, verbatim in shape. */
+  function removeBatch(db, collegeId, studentUid) {
+    const batch = db.batch();
+    batch.delete(photo(db, collegeId, studentUid));
+    batch.update(db.collection('users').doc(studentUid), {
+      photoUpdatedAt: deleteField(),
+      updatedAt: serverTimestamp(),
+    });
+    return batch.commit();
+  }
+
+  /** The Super Admin as AuthService.register writes them. */
+  async function seedSuperAdmin(collegeId, uid, roleId = 'super-admin') {
+    await seedUser(collegeId, uid, roleId, {
+      roleName: 'Super Admin',
+      isSuperAdmin: true,
+    });
+  }
+
+  async function seedExistingPhoto(collegeId, uid) {
+    await testEnv.withSecurityRulesDisabled(async (ctx) => {
+      const db = ctx.firestore();
+      await photo(db, collegeId, uid).set({
+        uid,
+        bytes: 'aGVsbG8=',
+        mimeType: 'image/jpeg',
+        updatedAt: Timestamp.now(),
+        updatedByUid: 'someone',
+        updatedByName: 'Someone',
+      });
+      await db.collection('users').doc(uid).update({
+        photoUpdatedAt: Timestamp.now(),
+      });
+    });
+  }
+
+  const smallPhoto = (uid, by) => ({
+    uid,
+    bytes: 'aGVsbG8=',
+    mimeType: 'image/jpeg',
+    updatedAt: Timestamp.now(),
+    updatedByUid: by,
+    updatedByName: 'Super Admin',
+  });
+
+  /** For the edge case that is recorded rather than asserted. */
+  async function outcome(p) {
+    try {
+      await p;
+      return 'ALLOWED';
+    } catch (e) {
+      return `DENIED (${e.code ?? ''}) ${String(e.message).split('\n')[0]}`;
+    }
+  }
+
+  it('(a) a Super Admin can upload a student\'s photo (photo + users stamp, one batch)', async () => {
+    await seed(COLLEGE_A);
+    await seedSuperAdmin(COLLEGE_A, 'super-a');
+    await seedUser(COLLEGE_A, 'student-a', 'student');
+
+    await assertSucceeds(
+      uploadBatch(asUser('super-a'), COLLEGE_A, 'student-a', 'super-a'),
+    );
+
+    // And both halves actually landed.
+    await testEnv.withSecurityRulesDisabled(async (ctx) => {
+      const db = ctx.firestore();
+      const p = await photo(db, COLLEGE_A, 'student-a').get();
+      assert.equal(p.exists, true);
+      assert.equal(p.data().bytes.length, BYTES.length);
+      const u = await db.collection('users').doc('student-a').get();
+      assert.ok(u.data().photoUpdatedAt, 'photoUpdatedAt should be stamped');
+    });
+  });
+
+  it('(a) the same upload also works for a Super Admin with roleId null', async () => {
+    await seed(COLLEGE_A);
+    await seedSuperAdmin(COLLEGE_A, 'super-a', null);
+    await seedUser(COLLEGE_A, 'student-a', 'student');
+
+    await assertSucceeds(
+      uploadBatch(asUser('super-a'), COLLEGE_A, 'student-a', 'super-a'),
+    );
+  });
+
+  it('(a) a Super Admin can REPLACE an existing photo (set() on an existing doc = update)', async () => {
+    await seed(COLLEGE_A);
+    await seedSuperAdmin(COLLEGE_A, 'super-a');
+    await seedUser(COLLEGE_A, 'student-a', 'student');
+    await seedExistingPhoto(COLLEGE_A, 'student-a');
+
+    await assertSucceeds(
+      uploadBatch(asUser('super-a'), COLLEGE_A, 'student-a', 'super-a'),
+    );
+  });
+
+  it('(b) a Super Admin can remove a student\'s photo (delete + clear stamp, one batch)', async () => {
+    await seed(COLLEGE_A);
+    await seedSuperAdmin(COLLEGE_A, 'super-a');
+    await seedUser(COLLEGE_A, 'student-a', 'student');
+    await seedExistingPhoto(COLLEGE_A, 'student-a');
+
+    await assertSucceeds(removeBatch(asUser('super-a'), COLLEGE_A, 'student-a'));
+
+    await testEnv.withSecurityRulesDisabled(async (ctx) => {
+      const db = ctx.firestore();
+      const p = await photo(db, COLLEGE_A, 'student-a').get();
+      assert.equal(p.exists, false);
+      const u = await db.collection('users').doc('student-a').get();
+      assert.equal(u.data().photoUpdatedAt, undefined);
+    });
+  });
+
+  it('(c) a Super Admin can read a student\'s photo', async () => {
+    await seed(COLLEGE_A);
+    await seedSuperAdmin(COLLEGE_A, 'super-a');
+    await seedUser(COLLEGE_A, 'student-a', 'student');
+    await seedExistingPhoto(COLLEGE_A, 'student-a');
+
+    await assertSucceeds(photo(asUser('super-a'), COLLEGE_A, 'student-a').get());
+  });
+
+  it('(d) a Super Admin cannot set a photo on ANOTHER Super Admin (by design)', async () => {
+    await seed(COLLEGE_A);
+    await seedSuperAdmin(COLLEGE_A, 'super-a');
+    await seedSuperAdmin(COLLEGE_A, 'super-b');
+
+    const db = asUser('super-a');
+    await assertFails(uploadBatch(db, COLLEGE_A, 'super-b', 'super-a'));
+    // The photo rule refuses on its own, not just the users/{uid} half.
+    await assertFails(
+      photo(db, COLLEGE_A, 'super-b').set(smallPhoto('super-b', 'super-a')),
+    );
+  });
+
+  it('(d) a Super Admin cannot set their OWN photo (by design)', async () => {
+    await seed(COLLEGE_A);
+    await seedSuperAdmin(COLLEGE_A, 'super-a');
+
+    const db = asUser('super-a');
+    await assertFails(uploadBatch(db, COLLEGE_A, 'super-a', 'super-a'));
+    await assertFails(
+      photo(db, COLLEGE_A, 'super-a').set(smallPhoto('super-a', 'super-a')),
+    );
+  });
+
+  it('(e) [recorded, not asserted] student whose user doc has NO collegeId field', async () => {
+    await seed(COLLEGE_A);
+    await seedSuperAdmin(COLLEGE_A, 'super-a');
+    await testEnv.withSecurityRulesDisabled(async (ctx) => {
+      await ctx.firestore().collection('users').doc('student-x').set({
+        name: 'No College',
+        email: 'student-x@test.local',
+        roleId: 'student',
+        isActive: true,
+        isSuperAdmin: false,
+      });
+    });
+
+    const db = asUser('super-a');
+    const batchResult = await outcome(
+      uploadBatch(db, COLLEGE_A, 'student-x', 'super-a'),
+    );
+    const photoOnly = await outcome(
+      photo(db, COLLEGE_A, 'student-x').set(smallPhoto('student-x', 'super-a')),
+    );
+    const usersOnly = await outcome(
+      db.collection('users').doc('student-x').update({
+        photoUpdatedAt: Timestamp.now(),
+        updatedAt: serverTimestamp(),
+      }),
+    );
+    console.log('      [e] full upload batch :', batchResult);
+    console.log('      [e] photo doc alone   :', photoOnly);
+    console.log('      [e] users stamp alone :', usersOnly);
   });
 });

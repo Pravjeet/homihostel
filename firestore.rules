@@ -560,6 +560,14 @@ service cloud.firestore {
                     && request.resource.data.postedByUid == request.auth.uid
                     && request.resource.data.studentUids is list
                     && request.resource.data.studentUids.size() > 0
+                    // The scan is shrunk to 70 KB in the app; 70 KB of JPEG
+                    // is ~95.6K base64 characters. Checked via keys() for the
+                    // same reason as fineTotal below.
+                    && (
+                         !request.resource.data.keys().hasAny(['imageBase64'])
+                         || request.resource.data.imageBase64 == null
+                         || request.resource.data.imageBase64.size() <= 96000
+                       )
                     && (
                          hasPerm('fines.manage')
                          || (
