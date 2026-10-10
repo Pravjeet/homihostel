@@ -22,6 +22,7 @@ void main() {
     String? gender,
     bool isActive = true,
     bool isSuperAdmin = false,
+    bool graduated = false,
   }) => AppUser(
     uid: name,
     name: name,
@@ -31,6 +32,7 @@ void main() {
     roleName: 'Student',
     isActive: isActive,
     isSuperAdmin: isSuperAdmin,
+    status: graduated ? 'graduated' : 'active',
     hostelId: hostelId,
     roomId: roomId,
     roomNumber: roomId == null ? null : '101',
@@ -66,6 +68,17 @@ void main() {
         roster: [student('gone', isActive: false), student('here')],
       );
       expect(names(out), ['here']);
+    });
+
+    test('excludes graduates — only current students can take a bed', () {
+      // Promotion vacates a graduate's room, so they look exactly like
+      // someone waiting for one. Offering them is how four passed-out
+      // students ended up in BH-3 while appearing in no session roster.
+      final out = AllotmentService.bedCandidates(
+        hostel: hostel('h1'),
+        roster: [student('passed-out', graduated: true), student('current')],
+      );
+      expect(names(out), ['current']);
     });
 
     test('excludes the Super Admin, who is staff not a resident', () {

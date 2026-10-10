@@ -406,7 +406,8 @@ class _RoomDetailDialogState extends State<RoomDetailDialog> {
                     else if (room.status != RoomStatus.active)
                       _Banner(
                         'This room is marked ${room.status.label}, so it '
-                        'can\'t take students until that changes.',
+                        'can\'t take students until that changes.'
+                        '${room.status == RoomStatus.maintenance && (room.maintenanceNote ?? '').trim().isNotEmpty ? ' ${room.maintenanceNote}' : ''}',
                         AppColors.warning,
                         AppColors.warningSoft,
                       )
@@ -805,7 +806,10 @@ class _Picker extends StatelessWidget {
     // Counted separately only to explain the omission: silently dropping the
     // students a Boys/Girls hostel can't take looks like a missing roster.
     final hiddenByGender = roster
-        .where((u) => u.isActive && !u.isSuperAdmin && !u.isAllotted)
+        .where(
+          (u) =>
+              u.isActive && !u.isGraduated && !u.isSuperAdmin && !u.isAllotted,
+        )
         .where((u) => !AllotmentService.genderAllows(hostel.gender, u.gender))
         .length;
 

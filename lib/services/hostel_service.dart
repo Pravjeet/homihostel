@@ -74,6 +74,30 @@ class HostelService {
         }),
       );
 
+  final CachedStreamPool<List<Room>> _maintenancePool = CachedStreamPool();
+
+  /// Just this hostel's rooms currently flagged [RoomStatus.maintenance] —
+  /// filtered server-side, so opening this costs a handful of reads
+  /// regardless of how many rooms the hostel actually has.
+  Stream<List<Room>> watchMaintenanceRooms(String collegeId, String hostelId) =>
+      _maintenancePool.stream(
+        '$collegeId/$hostelId',
+        () => _rooms(collegeId, hostelId)
+            .where('status', isEqualTo: RoomStatus.maintenance.name)
+            .snapshots()
+            .map((s) {
+              final rooms = s.docs
+                  .map((d) => Room.fromMap(d.id, d.data()))
+                  .toList();
+              rooms.sort((a, b) {
+                final byFloor = a.floor.compareTo(b.floor);
+                if (byFloor != 0) return byFloor;
+                return _numericCompare(a.number, b.number);
+              });
+              return rooms;
+            }),
+      );
+
   /// One-shot read of a hostel's rooms.
   ///
   /// The bulk importer needs this rather than `watchRooms(...).first`: taking

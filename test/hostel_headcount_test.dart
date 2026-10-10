@@ -16,6 +16,7 @@ void main() {
     String? hostelId,
     String? roomId,
     bool isActive = true,
+    bool graduated = false,
   }) => AppUser(
     uid: uid,
     name: uid,
@@ -24,6 +25,7 @@ void main() {
     roleId: 'r1',
     roleName: 'Student',
     isActive: isActive,
+    status: graduated ? 'graduated' : 'active',
     hostelId: hostelId,
     roomId: roomId,
     roomNumber: roomId,
@@ -71,6 +73,20 @@ void main() {
       ]);
 
       expect(counts['h1'], 1);
+    });
+
+    test('excludes graduates — promotion is what moves the head-count', () {
+      // A graduate still carrying a hostel would otherwise keep a block
+      // looking occupied long after they left, and the Hostels page would
+      // disagree with Student Overview, which lists current students only.
+      final counts = studentsByHostel([
+        student('a', hostelId: 'h1', roomId: '101'),
+        student('b', hostelId: 'h1', roomId: '102', graduated: true),
+        student('c', hostelId: 'h2', roomId: '201', graduated: true),
+      ]);
+
+      expect(counts['h1'], 1);
+      expect(counts['h2'], isNull);
     });
 
     test('a hostel with nobody in it is absent, not zero', () {

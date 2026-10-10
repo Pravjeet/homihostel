@@ -333,7 +333,7 @@ class _HostelDetailViewState extends State<HostelDetailView> {
     await showDialog(
       context: context,
       builder: (_) =>
-          _RoomEditorDialog(collegeId: collegeId, hostel: hostel, room: room),
+          RoomEditorDialog(collegeId: collegeId, hostel: hostel, room: room),
     );
   }
 
@@ -341,7 +341,7 @@ class _HostelDetailViewState extends State<HostelDetailView> {
     await showDialog(
       context: context,
       builder: (_) =>
-          _RoomEditorDialog(collegeId: collegeId, hostel: hostel, room: null),
+          RoomEditorDialog(collegeId: collegeId, hostel: hostel, room: null),
     );
   }
 
@@ -705,7 +705,8 @@ class _RoomTile extends StatelessWidget {
       message:
           '${room.capacityLabel}'
           '${room.features.isEmpty ? '' : ' · ${room.features.join(', ')}'}'
-          '\n$occupied/${room.capacity} occupied · ${room.status.label}',
+          '\n$occupied/${room.capacity} occupied · ${room.status.label}'
+          '${room.status == RoomStatus.maintenance && (room.maintenanceNote ?? '').isNotEmpty ? ': ${room.maintenanceNote}' : ''}',
       child: InkWell(
         onTap: onTap,
         borderRadius: BorderRadius.circular(10),
@@ -795,29 +796,34 @@ class _LegendDot extends StatelessWidget {
 // Room editor
 // =====================================================================
 
-class _RoomEditorDialog extends StatefulWidget {
+/// Public so the Under Maintenance page can open the exact same form on a
+/// room it picked from a different hostel's list, rather than duplicating
+/// the status/message fields in a second dialog.
+class RoomEditorDialog extends StatefulWidget {
   final String collegeId;
   final Hostel hostel;
 
   /// Null when adding a new room.
   final Room? room;
 
-  const _RoomEditorDialog({
+  const RoomEditorDialog({
+    super.key,
     required this.collegeId,
     required this.hostel,
     this.room,
   });
 
   @override
-  State<_RoomEditorDialog> createState() => _RoomEditorDialogState();
+  State<RoomEditorDialog> createState() => _RoomEditorDialogState();
 }
 
-class _RoomEditorDialogState extends State<_RoomEditorDialog> {
+class _RoomEditorDialogState extends State<RoomEditorDialog> {
   final _formKey = GlobalKey<FormState>();
   late final TextEditingController _number;
   late final TextEditingController _floor;
   late final TextEditingController _rent;
   late final TextEditingController _note;
+  late final TextEditingController _maintenanceNote;
 
   late int _capacity;
   late RoomStatus _status;
@@ -838,6 +844,7 @@ class _RoomEditorDialogState extends State<_RoomEditorDialog> {
       text: r?.rentPerBed == null ? '' : '${r!.rentPerBed}',
     );
     _note = TextEditingController(text: r?.note ?? '');
+    _maintenanceNote = TextEditingController(text: r?.maintenanceNote ?? '');
     _capacity = r?.capacity ?? 2;
     _status = r?.status ?? RoomStatus.active;
     _features = {...?r?.features};
@@ -845,7 +852,7 @@ class _RoomEditorDialogState extends State<_RoomEditorDialog> {
 
   @override
   void dispose() {
-    for (final c in [_number, _floor, _rent, _note]) {
+    for (final c in [_number, _floor, _rent, _note, _maintenanceNote]) {
       c.dispose();
     }
     super.dispose();
@@ -875,6 +882,14 @@ class _RoomEditorDialogState extends State<_RoomEditorDialog> {
     try {
       final rent = num.tryParse(_rent.text.trim());
       final note = _note.text.trim().isEmpty ? null : _note.text.trim();
+      // Forced to null the moment status isn't Maintenance, regardless of
+      // what's still typed in the field — leaving it behind status would
+      // read as a live issue on a room that's fine again.
+      final maintenanceNote = _status != RoomStatus.maintenance
+          ? null
+          : (_maintenanceNote.text.trim().isEmpty
+                ? null
+                : _maintenanceNote.text.trim());
 
       if (_isNew) {
         final number = _number.text.trim();
@@ -890,6 +905,7 @@ class _RoomEditorDialogState extends State<_RoomEditorDialog> {
             status: _status,
             rentPerBed: rent,
             note: note,
+            maintenanceNote: maintenanceNote,
           ),
         );
       } else {
@@ -910,6 +926,7 @@ class _RoomEditorDialogState extends State<_RoomEditorDialog> {
             occupantUids: widget.room!.occupantUids,
             rentPerBed: rent,
             note: note,
+            maintenanceNote: maintenanceNote,
           ),
         );
       }
@@ -1087,6 +1104,18 @@ class _RoomEditorDialogState extends State<_RoomEditorDialog> {
                     ),
                   ],
                 ),
+                if (_status == RoomStatus.maintenance) ...[
+                  const SizedBox(height: 14),
+                  TextFormField(
+                    controller: _maintenanceNote,
+                    enabled: !_busy,
+                    maxLines: 2,
+                    decoration: const InputDecoration(
+                      labelText: "What's wrong",
+                      hintText: 'e.g. AC not cooling, leaking tap',
+                    ),
+                  ),
+                ],
                 const SizedBox(height: 14),
 
                 TextFormField(

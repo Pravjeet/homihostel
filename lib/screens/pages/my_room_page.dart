@@ -209,6 +209,27 @@ class _RoomHeader extends StatelessWidget {
             style: const TextStyle(fontSize: 13.5, fontWeight: FontWeight.w600),
           ),
         ],
+        if (room.status == RoomStatus.maintenance) ...[
+          const SizedBox(height: 16),
+          Container(
+            width: double.infinity,
+            padding: const EdgeInsets.all(12),
+            decoration: BoxDecoration(
+              color: AppColors.warningSoft,
+              borderRadius: BorderRadius.circular(10),
+            ),
+            child: Text(
+              (room.maintenanceNote ?? '').trim().isEmpty
+                  ? 'This room is currently under maintenance.'
+                  : 'Under maintenance: ${room.maintenanceNote}',
+              style: TextStyle(
+                color: AppColors.warning,
+                fontSize: 12.5,
+                height: 1.4,
+              ),
+            ),
+          ),
+        ],
         if (room.note != null && room.note!.isNotEmpty) ...[
           const SizedBox(height: 8),
           Text(

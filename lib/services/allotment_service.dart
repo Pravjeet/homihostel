@@ -84,12 +84,21 @@ class AllotmentService {
     };
   }
 
+  static String graduatedRefusal(String name) =>
+      '$name has graduated, so can\'t be given a room. Only current students '
+      'can be allotted.';
+
   /// Students who could take a free bed in [hostel], best match first.
   ///
   /// Pure, so the rule can be tested without a widget tree or a database. The
-  /// four exclusions are each here for a reason:
+  /// five exclusions are each here for a reason:
   ///
   ///  * **inactive** — a deactivated account can't be allotted at all.
+  ///  * **graduated** — they left. Promotion vacates a graduate's room, so
+  ///    anyone offered here and allotted would be holding a bed for the rest
+  ///    of time while appearing in no session roster — which is how a
+  ///    "student" could sit in BH-3 and be invisible in Student Overview.
+  ///    Room Allotment's worklist already drops them for the same reason.
   ///  * **Super Admin** — staff, not a resident. Same exclusion Room
   ///    Allotment makes on its worklist.
   ///  * **already allotted** — [allot] refuses these outright; offering them
@@ -110,6 +119,7 @@ class AllotmentService {
             .where(
               (u) =>
                   u.isActive &&
+                  !u.isGraduated &&
                   !u.isSuperAdmin &&
                   !u.isAllotted &&
                   genderAllows(hostel.gender, u.gender),
@@ -141,6 +151,9 @@ class AllotmentService {
     required Hostel hostel,
     required Room room,
   }) async {
+    if (student.isGraduated) {
+      throw AllotmentFailure(graduatedRefusal(student.name));
+    }
     if (student.isAllotted) {
       throw AllotmentFailure(
         '${student.name} already has ${student.roomLabel}. '
@@ -185,7 +198,11 @@ class AllotmentService {
       final freshUser = AppUser.fromMap(userSnap.id, userSnap.data()!);
 
       // Re-check against what's actually in the database right now, not what
-      // the warden's screen was showing when they clicked.
+      // the warden's screen was showing when they clicked. A promotion run
+      // can graduate someone between the list rendering and the tap.
+      if (freshUser.isGraduated) {
+        throw AllotmentFailure(graduatedRefusal(freshUser.name));
+      }
       if (freshUser.isAllotted) {
         throw AllotmentFailure(
           '${freshUser.name} was just allotted ${freshUser.roomLabel} by '
@@ -251,6 +268,9 @@ class AllotmentService {
     required AppUser student,
     required Hostel hostel,
   }) async {
+    if (student.isGraduated) {
+      throw AllotmentFailure(graduatedRefusal(student.name));
+    }
     if (student.isAllotted) {
       throw AllotmentFailure(
         '${student.name} already has ${student.roomLabel}. '
@@ -406,6 +426,12 @@ class AllotmentService {
     required Hostel toHostel,
     required Room toRoom,
   }) async {
+    // Checked here as well as in `allot`: the rebuilt `cleared` student below
+    // carries no status, so `allot` can't see the graduation, and by then the
+    // vacate has already happened — a refusal after it would strand them.
+    if (student.isGraduated) {
+      throw AllotmentFailure(graduatedRefusal(student.name));
+    }
     if (!genderAllows(toHostel.gender, student.gender)) {
       throw AllotmentFailure(genderRefusal(toHostel.gender, student.gender));
     }

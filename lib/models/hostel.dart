@@ -237,6 +237,13 @@ class Room {
   final num? rentPerBed;
   final String? note;
 
+  /// What's wrong, while [status] is [RoomStatus.maintenance] — separate from
+  /// [note], which is a standing remark about the room ("corner room") and
+  /// has nothing to do with whether it's currently out of service. Set
+  /// alongside the status flip and cleared when it flips back to active, so
+  /// it never lingers as a stale warning on a room that's fine again.
+  final String? maintenanceNote;
+
   const Room({
     required this.id,
     required this.number,
@@ -247,6 +254,7 @@ class Room {
     this.occupantUids = const [],
     this.rentPerBed,
     this.note,
+    this.maintenanceNote,
   });
 
   factory Room.fromMap(String id, Map<String, dynamic> m) => Room(
@@ -263,6 +271,7 @@ class Room {
         .toList(),
     rentPerBed: m['rentPerBed'] as num?,
     note: m['note'] as String?,
+    maintenanceNote: m['maintenanceNote'] as String?,
   );
 
   Map<String, dynamic> toMap() => {
@@ -274,6 +283,7 @@ class Room {
     'occupantUids': occupantUids,
     'rentPerBed': rentPerBed,
     'note': note,
+    'maintenanceNote': maintenanceNote,
   };
 
   int get occupied => occupantUids.length;
@@ -291,6 +301,7 @@ class Room {
     List<String>? occupantUids,
     num? rentPerBed,
     String? note,
+    String? maintenanceNote,
   }) => Room(
     id: id,
     number: number,
@@ -301,6 +312,7 @@ class Room {
     occupantUids: occupantUids ?? this.occupantUids,
     rentPerBed: rentPerBed ?? this.rentPerBed,
     note: note ?? this.note,
+    maintenanceNote: maintenanceNote ?? this.maintenanceNote,
   );
 }
 
@@ -442,11 +454,15 @@ class RoomPlan {
   }
 }
 
+/// Graduates are skipped as well as the deactivated: a hostel's head-count is
+/// the people who live there now, and promotion is what is supposed to move
+/// that number. The live tally in `DataService.countStudentsByHostel` applies
+/// the same rule.
 Map<String, int> studentsByHostel(Iterable<AppUser> users) {
   final counts = <String, int>{};
   for (final u in users) {
     final id = u.hostelId;
-    if (id == null || id.isEmpty || !u.isActive) continue;
+    if (id == null || id.isEmpty || !u.isActive || u.isGraduated) continue;
     counts[id] = (counts[id] ?? 0) + 1;
   }
   return counts;

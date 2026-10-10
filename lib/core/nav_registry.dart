@@ -6,6 +6,7 @@ import '../screens/pages/audit_page.dart';
 import '../screens/pages/fees_page.dart';
 import '../screens/pages/fines_page.dart';
 import '../screens/pages/hostels_page.dart';
+import '../screens/pages/maintenance_page.dart';
 import '../screens/pages/mess_page.dart';
 import '../screens/pages/my_room_page.dart';
 import '../screens/pages/office_orders_page.dart';
@@ -116,6 +117,13 @@ const List<NavSection> _allSections = [
         icon: Icons.apartment_rounded,
         requires: [Perm.hostelsView],
         builder: _hostels,
+      ),
+      NavItem(
+        id: 'maintenance',
+        label: 'Under Maintenance',
+        icon: Icons.handyman_rounded,
+        requires: [Perm.hostelsView],
+        builder: _maintenance,
       ),
       NavItem(
         id: 'allotment',
@@ -242,6 +250,7 @@ Widget _profile(BuildContext c) => const ProfilePage();
 // Placeholder builders for modules you haven't built yet. Replacing one is a
 // one-line change here — the sidebar, routing and gating already work.
 Widget _hostels(BuildContext c) => const HostelsPage();
+Widget _maintenance(BuildContext c) => const MaintenanceRoomsPage();
 Widget _allotment(BuildContext c) => const AllotmentPage();
 
 Widget _mess(BuildContext c) => const MessPage();

@@ -13,6 +13,7 @@ import '../../services/enrollment_service.dart';
 import '../../services/hostel_service.dart';
 import '../../utils/enrollment_helpers.dart';
 import '../dashboard_shell.dart' show HistoryBanner;
+import 'user_detail_view.dart';
 
 /// A filterable directory of residents — trade, year, semester, hostel,
 /// home state, batch.
@@ -27,11 +28,13 @@ import '../dashboard_shell.dart' show HistoryBanner;
 /// 1st/2nd/3rd/4th list. `batch` is cleaner — see
 /// `batchFromRegistrationNo` — but is filtered the same way for consistency.
 ///
-/// Deliberately read-only: no drill-down, no editing. Users & Roles already
-/// owns editing a student; Room Allotment already owns moving them; Academic
-/// Records owns promotion and the year-by-session breakdown. This page
-/// answers one question — "who, filtered by these six things" — and stops
-/// there.
+/// Tapping a row opens the same [UserDetailView] User Management uses, held
+/// as state rather than pushed as a route — same reasoning as
+/// `UsersPage._openUser` — so the sidebar stays visible and the page falls
+/// straight back to the filtered list on the way out. This page still owns
+/// none of the actual workflows: Users & Roles owns editing, Room Allotment
+/// owns moving people, Academic Records owns promotion. It only answers "who,
+/// filtered by these six things" and hands off to those from there.
 ///
 /// Session-scoping follows the year picker in the top bar
 /// ([Session.effectiveSession]), same lens as the Dashboard and Hostels &
@@ -58,6 +61,10 @@ class _StudentOverviewPageState extends State<StudentOverviewPage> {
 
   static const _pageSize = 50;
   int _page = 0;
+
+  /// Set when a row is tapped. Held as state rather than pushed as a route so
+  /// the sidebar stays visible — same pattern as `UsersPage._openUser`.
+  AppUser? _openUser;
 
   /// Hostel full name -> short code, so a filter chip reads "BH-5" rather
   /// than the full "CV Raman House".
@@ -110,6 +117,19 @@ class _StudentOverviewPageState extends State<StudentOverviewPage> {
   String? _hostelOf(AppUser u) =>
       _sessionScoped ? _byUid[u.uid]?.hostelName : u.hostelName;
 
+  // Same as `_yearLabel`/`_semOf` but without the "no data for this session
+  // means blank" gate — used only to build the *permanent* filter options
+  // below. A resident whose batch/course puts them outside the currently
+  // viewed session still has a real year and semester; they just don't have
+  // one *for this session*, which is exactly the distinction `_keep` still
+  // needs to keep filtering correctly.
+  String? _anyYearLabel(AppUser u) {
+    final e = _byUid[u.uid];
+    return e != null ? ordinal(e.year) : u.year;
+  }
+
+  int? _anySemOf(AppUser u) => _byUid[u.uid]?.sem ?? u.sem;
+
   bool _keep(AppUser u) =>
       (_trade == null || u.trade == _trade) &&
       (_year == null || _yearLabel(u) == _year) &&
@@ -150,6 +170,14 @@ class _StudentOverviewPageState extends State<StudentOverviewPage> {
             style: TextStyle(color: AppColors.textMuted),
           ),
         ),
+      );
+    }
+
+    if (_openUser != null) {
+      return UserDetailView(
+        uid: _openUser!.uid,
+        initial: _openUser!,
+        onBack: () => setState(() => _openUser = null),
       );
     }
 
@@ -208,9 +236,12 @@ class _StudentOverviewPageState extends State<StudentOverviewPage> {
                       );
                     }
 
-                    final roster = userSnap.data!
+                    final allResidents = userSnap.data!
                         .where((u) => !u.isSuperAdmin)
                         .where((u) => !staffRoleIds.contains(u.roleId))
+                        .toList();
+
+                    final roster = allResidents
                         // In session mode the directory *is* that session's
                         // roster: someone with no enrollment for it either
                         // graduated, has not been backfilled, or was admitted
@@ -228,43 +259,58 @@ class _StudentOverviewPageState extends State<StudentOverviewPage> {
                         ),
                       );
 
-                    // Every option comes from the UNFILTERED roster — building
-                    // them from `shown` would make picking a filter erase the
-                    // very options that could get you back out of it.
+                    // Every option is permanent: built from the full resident
+                    // list (never `roster`, which a session view or a filter
+                    // selection can narrow) and, where the college configures
+                    // a master list, from that too — so switching sessions or
+                    // picking a filter can empty the results without ever
+                    // making an option disappear. A filter with nobody in it
+                    // just shows no students; see the empty state below.
                     final tradeOptions = ({
-                      for (final u in roster)
+                      ...session.settings.tradeCodes,
+                      for (final u in allResidents)
                         if (u.trade != null) u.trade!,
                     }.toList()..sort());
                     // Built through the same accessors the filter compares
                     // against, so an option can never be offered that matches
-                    // nobody. In session mode these are real ordinals — 1st, 2nd
-                    // — rather than whatever free text the sheet happened to
-                    // carry, so they also sort correctly.
+                    // nobody *whenever they're looked up the same way* — see
+                    // `_anyYearLabel`/`_anySemOf` for why options use the
+                    // session-independent versions.
                     final yearOptions = ({
-                      for (final u in roster)
-                        if (_yearLabel(u) != null) _yearLabel(u)!,
+                      for (final u in allResidents)
+                        if (_anyYearLabel(u) != null) _anyYearLabel(u)!,
                     }.toList()..sort());
                     final semOptions = ({
-                      for (final u in roster)
-                        if (_semOf(u) != null) _semOf(u)!,
+                      for (final u in allResidents)
+                        if (_anySemOf(u) != null) _anySemOf(u)!,
                     }.toList()..sort());
                     final hostelOptions = ({
-                      for (final u in roster) _hostelLabel(_hostelOf(u)),
+                      'Unallotted',
+                      for (final h in hostels) _hostelLabel(h.name),
+                      for (final u in allResidents) _hostelLabel(_hostelOf(u)),
                       // BH-10 belongs after BH-9, not between BH-1 and BH-2.
                     }.toList()..sort(Hostel.compareLabels));
                     // 'Not set' is not a place, so it sorts to the end instead of
                     // landing between Nagaland and Odisha.
                     final stateOptions =
-                        ({for (final u in roster) _stateLabel(u.state)}.toList()
-                          ..sort((a, b) {
-                            if (a == _noState) return 1;
-                            if (b == _noState) return -1;
-                            return a.compareTo(b);
-                          }));
+                        ({
+                          ...kIndianStates,
+                          _noState,
+                          for (final u in allResidents) _stateLabel(u.state),
+                        }.toList()..sort((a, b) {
+                          if (a == _noState) return 1;
+                          if (b == _noState) return -1;
+                          return a.compareTo(b);
+                        }));
+                    // No college-wide master list of batches exists — they're
+                    // whatever admission years the roster actually has — so
+                    // this is the one option list still built from real data
+                    // rather than a config. Still pulled from `allResidents`,
+                    // not `roster`, so it doesn't shrink with the session view.
                     // Descending: the most recent intake is what a warden is
                     // usually looking for, not the oldest one still on the books.
                     final batchOptions = ({
-                      for (final u in roster)
+                      for (final u in allResidents)
                         if (u.batch != null) u.batch!,
                     }.toList()..sort((a, b) => b.compareTo(a)));
 
@@ -347,6 +393,8 @@ class _StudentOverviewPageState extends State<StudentOverviewPage> {
                                     _StudentList(
                                       students: pageItems,
                                       byUid: _byUid,
+                                      onTap: (u) =>
+                                          setState(() => _openUser = u),
                                     ),
                                     if (pageCount > 1) ...[
                                       const SizedBox(height: 14),
@@ -747,7 +795,14 @@ class _StudentList extends StatelessWidget {
   /// falls back to the profile fields.
   final Map<String, Enrollment> byUid;
 
-  const _StudentList({required this.students, required this.byUid});
+  /// Opens the tapped student's full detail view — see [UserDetailView].
+  final ValueChanged<AppUser> onTap;
+
+  const _StudentList({
+    required this.students,
+    required this.byUid,
+    required this.onTap,
+  });
 
   @override
   Widget build(BuildContext context) {
@@ -772,6 +827,7 @@ class _StudentList extends StatelessWidget {
             _StudentRow(
               student: students[i],
               enrollment: byUid[students[i].uid],
+              onTap: () => onTap(students[i]),
             ),
           ],
         ],
@@ -783,8 +839,13 @@ class _StudentList extends StatelessWidget {
 class _StudentRow extends StatelessWidget {
   final AppUser student;
   final Enrollment? enrollment;
+  final VoidCallback onTap;
 
-  const _StudentRow({required this.student, this.enrollment});
+  const _StudentRow({
+    required this.student,
+    this.enrollment,
+    required this.onTap,
+  });
 
   @override
   Widget build(BuildContext context) {
@@ -800,92 +861,101 @@ class _StudentRow extends StatelessWidget {
         ? null
         : (roomNumber == null ? hostelName : '$hostelName · $roomNumber');
 
-    return Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
-      child: Row(
-        children: [
-          CircleAvatar(
-            radius: 19,
-            backgroundColor: AppColors.primarySoft,
-            child: Text(
-              u.initials,
-              style: TextStyle(
-                color: AppColors.primary,
-                fontWeight: FontWeight.w700,
-                fontSize: 13,
+    return InkWell(
+      onTap: onTap,
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
+        child: Row(
+          children: [
+            CircleAvatar(
+              radius: 19,
+              backgroundColor: AppColors.primarySoft,
+              child: Text(
+                u.initials,
+                style: TextStyle(
+                  color: AppColors.primary,
+                  fontWeight: FontWeight.w700,
+                  fontSize: 13,
+                ),
               ),
             ),
-          ),
-          const SizedBox(width: 14),
-          Expanded(
-            flex: 3,
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  u.name,
-                  overflow: TextOverflow.ellipsis,
-                  style: const TextStyle(
-                    fontWeight: FontWeight.w600,
-                    fontSize: 14,
-                  ),
-                ),
-                const SizedBox(height: 2),
-                Text(
-                  [
-                    if (u.enrollmentNo != null) u.enrollmentNo!,
-                    if (u.course != null) u.course!,
-                  ].join('  ·  '),
-                  overflow: TextOverflow.ellipsis,
-                  style: TextStyle(color: AppColors.textMuted, fontSize: 12),
-                ),
-              ],
-            ),
-          ),
-          Expanded(
-            flex: 2,
-            child: Text(
-              u.trade ?? '—',
-              overflow: TextOverflow.ellipsis,
-              style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w600),
-            ),
-          ),
-          Expanded(
-            flex: 2,
-            child: Builder(
-              builder: (context) {
-                final year = e != null ? ordinal(e.year) : u.year;
-                final sem = e?.sem ?? u.sem;
-                final parts = [
-                  if (year != null) year,
-                  if (sem != null) 'Sem $sem',
-                ];
-                return Text(
-                  parts.isEmpty ? '—' : parts.join(' · '),
-                  overflow: TextOverflow.ellipsis,
-                  style: const TextStyle(
-                    fontSize: 13,
-                    fontWeight: FontWeight.w600,
-                  ),
-                );
-              },
-            ),
-          ),
-          Expanded(
-            flex: 3,
-            child: hostelLabel == null
-                ? StatusPill(
-                    'UNALLOTTED',
-                    AppColors.warning,
-                    AppColors.warningSoft,
-                  )
-                : Text(
-                    hostelLabel,
+            const SizedBox(width: 14),
+            Expanded(
+              flex: 3,
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    u.name,
                     overflow: TextOverflow.ellipsis,
-                    style: TextStyle(fontSize: 13, color: AppColors.textMuted),
+                    style: const TextStyle(
+                      fontWeight: FontWeight.w600,
+                      fontSize: 14,
+                    ),
                   ),
-          ),
-        ],
+                  const SizedBox(height: 2),
+                  Text(
+                    [
+                      if (u.enrollmentNo != null) u.enrollmentNo!,
+                      if (u.course != null) u.course!,
+                    ].join('  ·  '),
+                    overflow: TextOverflow.ellipsis,
+                    style: TextStyle(color: AppColors.textMuted, fontSize: 12),
+                  ),
+                ],
+              ),
+            ),
+            Expanded(
+              flex: 2,
+              child: Text(
+                u.trade ?? '—',
+                overflow: TextOverflow.ellipsis,
+                style: const TextStyle(
+                  fontSize: 13,
+                  fontWeight: FontWeight.w600,
+                ),
+              ),
+            ),
+            Expanded(
+              flex: 2,
+              child: Builder(
+                builder: (context) {
+                  final year = e != null ? ordinal(e.year) : u.year;
+                  final sem = e?.sem ?? u.sem;
+                  final parts = [
+                    if (year != null) year,
+                    if (sem != null) 'Sem $sem',
+                  ];
+                  return Text(
+                    parts.isEmpty ? '—' : parts.join(' · '),
+                    overflow: TextOverflow.ellipsis,
+                    style: const TextStyle(
+                      fontSize: 13,
+                      fontWeight: FontWeight.w600,
+                    ),
+                  );
+                },
+              ),
+            ),
+            Expanded(
+              flex: 3,
+              child: hostelLabel == null
+                  ? StatusPill(
+                      'UNALLOTTED',
+                      AppColors.warning,
+                      AppColors.warningSoft,
+                    )
+                  : Text(
+                      hostelLabel,
+                      overflow: TextOverflow.ellipsis,
+                      style: TextStyle(
+                        fontSize: 13,
+                        color: AppColors.textMuted,
+                      ),
+                    ),
+            ),
+          ],
+        ),
       ),
     );
   }

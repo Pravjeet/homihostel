@@ -202,26 +202,37 @@ class DataService {
   /// without downloading it: one aggregation per block, so fourteen blocks
   /// cost about fourteen reads instead of 2,649.
   ///
-  /// Counts `isActive` students, matching `studentsByHostel` exactly rather
-  /// than reusing the hostel document's `occupiedBeds`. Those two are not the
-  /// same number — a deactivated student still occupies their bed — and
-  /// quietly swapping one for the other would change what the page reports.
+  /// Counts `isActive`, not-graduated students, matching `studentsByHostel`
+  /// exactly rather than reusing the hostel document's `occupiedBeds`. Those
+  /// two are not the same number — a deactivated student still occupies their
+  /// bed — and quietly swapping one for the other would change what the page
+  /// reports.
+  ///
+  /// Graduates are subtracted rather than filtered out in the query, for the
+  /// reason [countUsers] spells out: `status != 'graduated'` would drop every
+  /// imported student, who has no `status` field at all. Two counts per
+  /// hostel, then, but both still aggregations — no documents cross the wire.
   Future<Map<String, int>> countStudentsByHostel(
     String collegeId,
     List<String> hostelIds,
   ) async {
-    final counts = await Future.wait([
-      for (final id in hostelIds)
-        _usersIn(collegeId)
-            .where('hostelId', isEqualTo: id)
-            .where('isActive', isEqualTo: true)
-            .count()
-            .get()
-            .then((s) => s.count ?? 0),
+    Query<Map<String, dynamic>> active(String id) => _usersIn(
+      collegeId,
+    ).where('hostelId', isEqualTo: id).where('isActive', isEqualTo: true);
+
+    Future<int> count(Query<Map<String, dynamic>> q) =>
+        q.count().get().then((s) => s.count ?? 0);
+
+    final results = await Future.wait([
+      for (final id in hostelIds) ...[
+        count(active(id)),
+        count(active(id).where('status', isEqualTo: 'graduated')),
+      ],
     ]);
     return {
       for (var i = 0; i < hostelIds.length; i++)
-        if (counts[i] > 0) hostelIds[i]: counts[i],
+        if (results[2 * i] - results[2 * i + 1] > 0)
+          hostelIds[i]: results[2 * i] - results[2 * i + 1],
     };
   }
 

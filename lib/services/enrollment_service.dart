@@ -353,7 +353,10 @@ class EnrollmentService {
     if (plan.vacates) await _vacateQuietly(collegeId, user);
 
     if (plan.graduates) {
-      await _db.collection('users').doc(user.uid).update(_graduationFields);
+      await _db
+          .collection('users')
+          .doc(user.uid)
+          .update(_graduationFieldsFor(user));
     } else {
       await _enrollments(collegeId).doc(plan.next!.id).set({
         ...plan.next!.toMap(),
@@ -363,8 +366,17 @@ class EnrollmentService {
     return plan.result;
   }
 
-  static Map<String, dynamic> get _graduationFields => {
+  /// A graduate leaves the hostel with the degree. A student holding a room is
+  /// handed it back by the vacate that runs before this, which clears every
+  /// field below; someone recorded against a hostel with *no* room is not
+  /// "allotted", so nothing vacates them, and their hostel would otherwise
+  /// stay on the profile and keep counting toward that hostel's head-count.
+  static Map<String, dynamic> _graduationFieldsFor(AppUser user) => {
     'status': 'graduated',
+    if (!user.isAllotted && user.hostelId != null) ...{
+      'hostelId': null,
+      'hostelName': null,
+    },
     'updatedAt': FieldValue.serverTimestamp(),
   };
 
@@ -536,7 +548,7 @@ class EnrollmentService {
         if (plan.graduates) {
           batch.update(
             _db.collection('users').doc(plan.result.user.uid),
-            _graduationFields,
+            _graduationFieldsFor(plan.result.user),
           );
         } else {
           batch.set(_enrollments(collegeId).doc(plan.next!.id), {
