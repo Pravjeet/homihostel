@@ -1,10 +1,12 @@
 import 'package:flutter/material.dart';
 
+import '../../core/hostel_codes.dart';
 import '../../core/permissions.dart';
 import '../../core/session.dart';
 import '../../core/theme.dart';
 import '../../models/app_role.dart';
 import '../../models/app_user.dart';
+import '../../models/college_settings.dart';
 import '../../models/enrollment.dart';
 import '../../models/hostel.dart';
 import '../../services/auth_service.dart';
@@ -15,8 +17,8 @@ import '../../utils/enrollment_helpers.dart';
 import '../dashboard_shell.dart' show HistoryBanner;
 import 'user_detail_view.dart';
 
-/// A filterable directory of residents — trade, year, semester, hostel,
-/// home state, batch.
+/// A filterable directory of residents — hostel, course, trade, semester,
+/// year, batch, religion, category, blood group, home state.
 ///
 /// Reads straight off [AppUser], not off `Enrollment` (see
 /// enrollment_service.dart) — this page's job is a snapshot of the whole
@@ -34,7 +36,7 @@ import 'user_detail_view.dart';
 /// straight back to the filtered list on the way out. This page still owns
 /// none of the actual workflows: Users & Roles owns editing, Room Allotment
 /// owns moving people, Academic Records owns promotion. It only answers "who,
-/// filtered by these six things" and hands off to those from there.
+/// filtered by these things" and hands off to those from there.
 ///
 /// Session-scoping follows the year picker in the top bar
 /// ([Session.effectiveSession]), same lens as the Dashboard and Hostels &
@@ -58,30 +60,81 @@ class _StudentOverviewPageState extends State<StudentOverviewPage> {
   String? _hostel;
   String? _state;
   String? _batch;
+  String? _religion;
+  String? _course;
+  String? _category;
+  String? _blood;
 
   static const _pageSize = 50;
   int _page = 0;
+
+  /// Free-text search over name, registration number and email — the same
+  /// fields User Management searches. Owned as a controller for the same
+  /// reason as there: "Clear filters" has to be able to empty the box, not
+  /// just the query behind it.
+  String _query = '';
+  final _search = TextEditingController();
+
+  @override
+  void dispose() {
+    _search.dispose();
+    super.dispose();
+  }
+
+  bool _matchesQuery(AppUser u) {
+    final q = _query.trim().toLowerCase();
+    return q.isEmpty ||
+        u.name.toLowerCase().contains(q) ||
+        u.email.toLowerCase().contains(q) ||
+        (u.enrollmentNo ?? '').toLowerCase().contains(q);
+  }
 
   /// Set when a row is tapped. Held as state rather than pushed as a route so
   /// the sidebar stays visible — same pattern as `UsersPage._openUser`.
   AppUser? _openUser;
 
-  /// Hostel full name -> short code, so a filter chip reads "BH-5" rather
-  /// than the full "CV Raman House".
-  Map<String, String> _codes = const {};
-
+  /// A filter chip reads "BH-5" rather than the full "CV Raman House" — see
+  /// [HostelCodes].
   String _hostelLabel(String? name) {
     if (name == null || name.trim().isEmpty) return 'Unallotted';
-    return _codes[name] ?? name;
+    return HostelCodes.of(name)!;
   }
 
   /// `state` is only as good as the address it was parsed from, so a blank is
   /// common and gets its own bucket — the same 'Not set' wording the fines
   /// dashboard uses — rather than being silently dropped from the roster.
+  /// Religion, course, category and blood group use the same bucket for the
+  /// same reason.
   static const _noState = 'Not set';
 
   static String _stateLabel(String? s) =>
       (s == null || s.trim().isEmpty) ? _noState : s;
+
+  static String _religionOf(AppUser u) => religionLabel(u.religion) ?? _noState;
+
+  static String _categoryOf(AppUser u) => categoryLabel(u.category) ?? _noState;
+
+  static String _bloodOf(AppUser u) =>
+      bloodGroupLabel(u.bloodGroup) ?? _noState;
+
+  /// Read at the top of [build]. Course is matched through the college's
+  /// course rules, so a student is grouped under the same course promotion
+  /// treats them as.
+  CollegeSettings _settings = const CollegeSettings();
+
+  String _courseOf(AppUser u) => _settings.courseNameFor(u.course) ?? _noState;
+
+  /// [standard] first, in its own order, then any other value the roster
+  /// actually has, sorted, then 'Not set' last — so a sheet's one-off
+  /// spelling stays findable without shuffling the familiar options.
+  static List<String> _withExtras(
+    List<String> standard,
+    Iterable<String> found,
+  ) => [
+    ...standard,
+    ...(({...found}..removeAll([...standard, _noState])).toList()..sort()),
+    _noState,
+  ];
 
   /// This session's enrollment per student. Empty when no session is set.
   Map<String, Enrollment> _byUid = const {};
@@ -131,28 +184,44 @@ class _StudentOverviewPageState extends State<StudentOverviewPage> {
   int? _anySemOf(AppUser u) => _byUid[u.uid]?.sem ?? u.sem;
 
   bool _keep(AppUser u) =>
+      _matchesQuery(u) &&
       (_trade == null || u.trade == _trade) &&
       (_year == null || _yearLabel(u) == _year) &&
       (_sem == null || _semOf(u) == _sem) &&
       (_hostel == null || _hostelLabel(_hostelOf(u)) == _hostel) &&
       (_state == null || _stateLabel(u.state) == _state) &&
-      (_batch == null || u.batch == _batch);
+      (_batch == null || u.batch == _batch) &&
+      (_religion == null || _religionOf(u) == _religion) &&
+      (_course == null || _courseOf(u) == _course) &&
+      (_category == null || _categoryOf(u) == _category) &&
+      (_blood == null || _bloodOf(u) == _blood);
 
   bool get _anyFilter =>
+      _query.trim().isNotEmpty ||
       _trade != null ||
       _year != null ||
       _sem != null ||
       _hostel != null ||
       _state != null ||
-      _batch != null;
+      _batch != null ||
+      _religion != null ||
+      _course != null ||
+      _category != null ||
+      _blood != null;
 
   void _clearAll() => setState(() {
+    _search.clear();
+    _query = '';
     _trade = null;
     _year = null;
     _sem = null;
     _hostel = null;
     _state = null;
     _batch = null;
+    _religion = null;
+    _course = null;
+    _category = null;
+    _blood = null;
     _page = 0;
   });
 
@@ -160,6 +229,7 @@ class _StudentOverviewPageState extends State<StudentOverviewPage> {
   Widget build(BuildContext context) {
     final session = Session.of(context);
     final collegeId = session.user.collegeId;
+    _settings = session.settings;
 
     if (!session.can(Perm.usersView)) {
       return AppCard(
@@ -185,10 +255,6 @@ class _StudentOverviewPageState extends State<StudentOverviewPage> {
       stream: HostelService.instance.watchHostels(collegeId),
       builder: (context, hostelSnap) {
         final hostels = hostelSnap.data ?? const <Hostel>[];
-        _codes = {
-          for (final h in hostels)
-            if (h.code.trim().isNotEmpty) h.name: h.code,
-        };
 
         return StreamBuilder<List<AppRole>>(
           stream: DataService.instance.watchRoles(collegeId),
@@ -286,7 +352,7 @@ class _StudentOverviewPageState extends State<StudentOverviewPage> {
                     }.toList()..sort());
                     final hostelOptions = ({
                       'Unallotted',
-                      for (final h in hostels) _hostelLabel(h.name),
+                      for (final h in hostels) h.label,
                       for (final u in allResidents) _hostelLabel(_hostelOf(u)),
                       // BH-10 belongs after BH-9, not between BH-1 and BH-2.
                     }.toList()..sort(Hostel.compareLabels));
@@ -313,6 +379,26 @@ class _StudentOverviewPageState extends State<StudentOverviewPage> {
                       for (final u in allResidents)
                         if (u.batch != null) u.batch!,
                     }.toList()..sort((a, b) => b.compareTo(a)));
+                    // The standard list first, in its own order, then anything
+                    // else a sheet recorded, then 'Not set' last.
+                    final religionOptions = _withExtras(
+                      kReligions,
+                      allResidents.map(_religionOf),
+                    );
+                    // Courses come from Settings' course rules (ICD, UG, PG
+                    // here), so a course with nobody in it is still offered.
+                    final courseOptions = _withExtras(
+                      _settings.courseNames,
+                      allResidents.map(_courseOf),
+                    );
+                    final categoryOptions = _withExtras(
+                      kCategories,
+                      allResidents.map(_categoryOf),
+                    );
+                    final bloodOptions = _withExtras(
+                      kBloodGroups,
+                      allResidents.map(_bloodOf),
+                    );
 
                     final pageCount = shown.isEmpty
                         ? 1
@@ -334,6 +420,11 @@ class _StudentOverviewPageState extends State<StudentOverviewPage> {
                           anyFilter: _anyFilter,
                           onClear: _clearAll,
                           session: currentSession,
+                          search: _search,
+                          onSearch: (v) => setState(() {
+                            _query = v;
+                            _page = 0;
+                          }),
                         ),
                         const SizedBox(height: 14),
 
@@ -450,6 +541,30 @@ class _StudentOverviewPageState extends State<StudentOverviewPage> {
                                   hostelOptions: hostelOptions,
                                   stateOptions: stateOptions,
                                   batchOptions: batchOptions,
+                                  religionOptions: religionOptions,
+                                  religion: _religion,
+                                  onReligion: (v) => setState(() {
+                                    _religion = _religion == v ? null : v;
+                                    _page = 0;
+                                  }),
+                                  courseOptions: courseOptions,
+                                  course: _course,
+                                  onCourse: (v) => setState(() {
+                                    _course = _course == v ? null : v;
+                                    _page = 0;
+                                  }),
+                                  categoryOptions: categoryOptions,
+                                  category: _category,
+                                  onCategory: (v) => setState(() {
+                                    _category = _category == v ? null : v;
+                                    _page = 0;
+                                  }),
+                                  bloodOptions: bloodOptions,
+                                  blood: _blood,
+                                  onBlood: (v) => setState(() {
+                                    _blood = _blood == v ? null : v;
+                                    _page = 0;
+                                  }),
                                   trade: _trade,
                                   year: _year,
                                   sem: _sem,
@@ -511,12 +626,17 @@ class _Header extends StatelessWidget {
   /// the standing roster and says so.
   final String? session;
 
+  final TextEditingController search;
+  final ValueChanged<String> onSearch;
+
   const _Header({
     required this.total,
     required this.shown,
     required this.anyFilter,
     required this.onClear,
     required this.session,
+    required this.search,
+    required this.onSearch,
   });
 
   @override
@@ -540,6 +660,16 @@ class _Header extends StatelessWidget {
                     'hostel and home state. Year and room come from that '
                     'session\'s record, so they follow promotion.',
           style: TextStyle(fontSize: 13, color: AppColors.textMuted),
+        ),
+        const SizedBox(height: 16),
+        TextField(
+          controller: search,
+          onChanged: onSearch,
+          decoration: const InputDecoration(
+            hintText: 'Search by name, registration number or email',
+            prefixIcon: Icon(Icons.search_rounded),
+            isDense: true,
+          ),
         ),
         const SizedBox(height: 16),
         Row(
@@ -577,12 +707,20 @@ class _SlicerRail extends StatelessWidget {
   final List<String> hostelOptions;
   final List<String> stateOptions;
   final List<String> batchOptions;
+  final List<String> religionOptions;
+  final List<String> courseOptions;
+  final List<String> categoryOptions;
+  final List<String> bloodOptions;
   final String? trade;
   final String? year;
   final int? sem;
   final String? hostel;
   final String? state;
   final String? batch;
+  final String? religion;
+  final String? course;
+  final String? category;
+  final String? blood;
   final String Function(String) tradeLabelFor;
   final ValueChanged<String> onTrade;
   final ValueChanged<String> onYear;
@@ -590,6 +728,10 @@ class _SlicerRail extends StatelessWidget {
   final ValueChanged<String> onHostel;
   final ValueChanged<String> onState;
   final ValueChanged<String> onBatch;
+  final ValueChanged<String> onReligion;
+  final ValueChanged<String> onCourse;
+  final ValueChanged<String> onCategory;
+  final ValueChanged<String> onBlood;
 
   const _SlicerRail({
     required this.tradeOptions,
@@ -598,12 +740,20 @@ class _SlicerRail extends StatelessWidget {
     required this.hostelOptions,
     required this.stateOptions,
     required this.batchOptions,
+    required this.religionOptions,
+    required this.courseOptions,
+    required this.categoryOptions,
+    required this.bloodOptions,
     required this.trade,
     required this.year,
     required this.sem,
     required this.hostel,
     required this.state,
     required this.batch,
+    required this.religion,
+    required this.course,
+    required this.category,
+    required this.blood,
     required this.tradeLabelFor,
     required this.onTrade,
     required this.onYear,
@@ -611,6 +761,10 @@ class _SlicerRail extends StatelessWidget {
     required this.onHostel,
     required this.onState,
     required this.onBatch,
+    required this.onReligion,
+    required this.onCourse,
+    required this.onCategory,
+    required this.onBlood,
   });
 
   @override
@@ -625,6 +779,15 @@ class _SlicerRail extends StatelessWidget {
           onTap: onHostel,
           columns: 2,
           maxHeight: 200,
+        ),
+        const SizedBox(height: 14),
+        _SlicerBox<String>(
+          title: 'Course',
+          options: courseOptions,
+          selected: course,
+          labelFor: courseLabel,
+          onTap: onCourse,
+          columns: 1,
         ),
         const SizedBox(height: 14),
         _SlicerBox<String>(
@@ -661,6 +824,32 @@ class _SlicerRail extends StatelessWidget {
           onTap: onBatch,
           columns: 2,
           maxHeight: 160,
+        ),
+        const SizedBox(height: 14),
+        _SlicerBox<String>(
+          title: 'Religion',
+          options: religionOptions,
+          selected: religion,
+          onTap: onReligion,
+          columns: 2,
+          maxHeight: 200,
+        ),
+        const SizedBox(height: 14),
+        _SlicerBox<String>(
+          title: 'Category',
+          options: categoryOptions,
+          selected: category,
+          onTap: onCategory,
+          columns: 2,
+        ),
+        const SizedBox(height: 14),
+        _SlicerBox<String>(
+          title: 'Blood Group',
+          options: bloodOptions,
+          selected: blood,
+          onTap: onBlood,
+          columns: 3,
+          maxHeight: 200,
         ),
         const SizedBox(height: 14),
         _SlicerBox<String>(
@@ -855,7 +1044,9 @@ class _StudentRow extends StatelessWidget {
     // The enrollment wins wherever it exists: it is the record promotion
     // maintains, and for a past session it is also the honest answer about
     // which room this student actually held at the time.
-    final hostelName = e?.hostelName ?? u.hostelName;
+    final hostelName = e?.hostelName != null
+        ? HostelCodes.of(e!.hostelName, id: e.hostelId)
+        : u.hostelLabel;
     final roomNumber = e?.roomNumber ?? u.roomNumber;
     final hostelLabel = hostelName == null
         ? null

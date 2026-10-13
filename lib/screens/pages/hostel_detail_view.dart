@@ -426,7 +426,7 @@ class _Header extends StatelessWidget {
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                     Text(
-                      hostel.name,
+                      hostel.label,
                       style: const TextStyle(
                         fontSize: 19,
                         fontWeight: FontWeight.w800,
@@ -434,6 +434,7 @@ class _Header extends StatelessWidget {
                     ),
                     const SizedBox(height: 3),
                     Text(
+                      '${hostel.label == hostel.name ? '' : '${hostel.name} · '}'
                       '${hostel.gender.label} · ${hostel.floors} floors · '
                       '${hostel.roomCount} rooms · ${hostel.bedCount} beds '
                       '(${hostel.freeBeds} free)',

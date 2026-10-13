@@ -1,6 +1,7 @@
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
 
+import '../core/hostel_codes.dart';
 import '../core/identity.dart';
 import '../core/permissions.dart';
 import '../core/session.dart';
@@ -8,9 +9,11 @@ import '../core/theme.dart';
 import '../models/app_role.dart';
 import '../models/app_user.dart';
 import '../models/college_settings.dart';
+import '../models/hostel.dart';
 import '../services/auth_service.dart';
 import '../services/data_service.dart';
 import '../services/enrollment_service.dart';
+import '../services/hostel_service.dart';
 import '../services/settings_service.dart';
 import '../services/theme_cache.dart';
 import 'dashboard_shell.dart';
@@ -149,41 +152,69 @@ class _SessionLoaderState extends State<_SessionLoader> {
                       MediaQuery.platformBrightnessOf(context),
                     );
 
-                    return SessionScope(
-                      session: Session(
-                        user: profile,
-                        role: role,
-                        collegeName: nameSnap.data ?? 'Institution',
-                        settings: settings,
-                        // Ignored once it matches the live session again, so
-                        // returning to "now" clears the lens rather than
-                        // pinning it to a value that will go stale in July.
-                        viewingSession: _viewing == settings.session.current
-                            ? null
-                            : _viewing,
-                        onViewSession: (s) => setState(() => _viewing = s),
-                      ),
-                      // Applied here rather than at MaterialApp, because the
-                      // palette lives in the workspace's settings and there is
-                      // no workspace until someone has signed in.
-                      //
-                      // PaletteScope must wrap the Theme: it rewrites the
-                      // AppColors tokens that buildAppTheme then reads.
-                      child: PaletteScope(
-                        accent: settings.theming.seed,
-                        dark: dark,
-                        child: Builder(
-                          builder: (context) => Theme(
-                            data: buildAppTheme(
-                              seed: settings.theming.seed,
-                              dark: dark,
-                            ),
-                            child: const _HistoryChooserGate(
-                              child: DashboardShell(),
+                    // Hostel codes for every screen (see HostelCodes). Only
+                    // for accounts the rules let read hostels — a student's
+                    // read would be refused, and they fall back to names.
+                    final canSeeHostels =
+                        profile.isSuperAdmin ||
+                        (role?.permissions.contains(Perm.hostelsView) ?? false);
+
+                    return StreamBuilder<List<Hostel>>(
+                      stream: canSeeHostels
+                          ? HostelService.instance.watchHostels(
+                              profile.collegeId,
+                            )
+                          : const Stream<List<Hostel>>.empty(),
+                      builder: (context, hostelSnap) {
+                        // Waited for once, so no screen draws a hostel's full
+                        // name and then flips to its code a moment later.
+                        if (canSeeHostels &&
+                            !hostelSnap.hasData &&
+                            !hostelSnap.hasError) {
+                          return const _Loading('Loading your workspace…');
+                        }
+                        if (hostelSnap.hasData) {
+                          HostelCodes.update(hostelSnap.data!);
+                        }
+
+                        return SessionScope(
+                          session: Session(
+                            user: profile,
+                            role: role,
+                            collegeName: nameSnap.data ?? 'Institution',
+                            settings: settings,
+                            // Ignored once it matches the live session again, so
+                            // returning to "now" clears the lens rather than
+                            // pinning it to a value that will go stale in July.
+                            viewingSession: _viewing == settings.session.current
+                                ? null
+                                : _viewing,
+                            onViewSession: (s) => setState(() => _viewing = s),
+                            hostelCodes: HostelCodes.signature,
+                          ),
+                          // Applied here rather than at MaterialApp, because the
+                          // palette lives in the workspace's settings and there is
+                          // no workspace until someone has signed in.
+                          //
+                          // PaletteScope must wrap the Theme: it rewrites the
+                          // AppColors tokens that buildAppTheme then reads.
+                          child: PaletteScope(
+                            accent: settings.theming.seed,
+                            dark: dark,
+                            child: Builder(
+                              builder: (context) => Theme(
+                                data: buildAppTheme(
+                                  seed: settings.theming.seed,
+                                  dark: dark,
+                                ),
+                                child: const _HistoryChooserGate(
+                                  child: DashboardShell(),
+                                ),
+                              ),
                             ),
                           ),
-                        ),
-                      ),
+                        );
+                      },
                     );
                   },
                 );
@@ -407,10 +438,7 @@ class _SessionChooserDialog extends StatelessWidget {
               onTap: () => Navigator.pop(context, s),
               borderRadius: BorderRadius.circular(8),
               child: Padding(
-                padding: const EdgeInsets.symmetric(
-                  vertical: 9,
-                  horizontal: 4,
-                ),
+                padding: const EdgeInsets.symmetric(vertical: 9, horizontal: 4),
                 child: Row(
                   children: [
                     Icon(

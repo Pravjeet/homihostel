@@ -119,7 +119,7 @@ class _RoomDetailDialogState extends State<RoomDetailDialog> {
   /// or is waiting in Room Allotment to be given both, and a half-state of
   /// hostel-without-room is exactly what this app no longer tracks.
   Future<void> _removeOccupant(AppUser student) async {
-    final hostelName = widget.hostel.name;
+    final hostelName = widget.hostel.label;
     // Captured before the confirm dialog: reading it afterwards would be
     // reaching through a context that may no longer be mounted.
     final messenger = ScaffoldMessenger.of(context);
@@ -185,7 +185,7 @@ class _RoomDetailDialogState extends State<RoomDetailDialog> {
       builder: (c) => AlertDialog(
         title: Text('Empty room ${widget.room.number}?'),
         content: Text(
-          'All $n student${n == 1 ? '' : 's'} leave ${widget.hostel.name} and '
+          'All $n student${n == 1 ? '' : 's'} leave ${widget.hostel.label} and '
           'the beds are freed. They will appear in Room Allotment awaiting a '
           'room, where you can give each a new hostel and room together.',
         ),

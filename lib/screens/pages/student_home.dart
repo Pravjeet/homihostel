@@ -231,7 +231,7 @@ class _StatRow extends StatelessWidget {
           _Tile(
             label: 'Your room',
             value: user.roomNumber ?? 'Not allotted',
-            sub: user.hostelName ?? 'Ask your warden',
+            sub: user.hostelLabel ?? 'Ask your warden',
             icon: Icons.meeting_room_rounded,
             color: user.isAllotted ? AppColors.primary : AppColors.warning,
             navId: 'my-room',

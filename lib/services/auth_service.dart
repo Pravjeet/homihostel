@@ -3,10 +3,12 @@ import 'package:firebase_auth/firebase_auth.dart';
 import 'package:firebase_core/firebase_core.dart';
 import 'package:flutter/foundation.dart' show kIsWeb;
 
+import '../core/hostel_codes.dart';
 import '../core/identity.dart';
 import '../core/permissions.dart';
 import '../models/app_role.dart';
 import '../models/app_user.dart';
+import '../utils/web_update.dart';
 import 'office_order_service.dart';
 import 'photo_service.dart';
 import 'stream_cache.dart';
@@ -142,6 +144,9 @@ class AuthService {
       email: Identity.toAuthEmail(identifier),
       password: password,
     );
+    // A login screen left open across a deploy would otherwise sign the user
+    // into last week's app. The session survives the reload either way.
+    if (kIsWeb) await reloadIfNewVersion();
   }
 
   /// Signs out and drops every cached query.
@@ -152,6 +157,7 @@ class AuthService {
   /// the login screen on the way out.
   Future<void> signOut() async {
     await StreamCaches.disposeAll();
+    HostelCodes.update(const []);
     PhotoService.instance.clearCache();
     OfficeOrderService.instance.clearCache();
     await _auth.signOut();

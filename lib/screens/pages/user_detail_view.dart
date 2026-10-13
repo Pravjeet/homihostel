@@ -688,7 +688,8 @@ class _DetailFormState extends State<_DetailForm> {
       'permanentMobile': TextEditingController(text: u.permanentMobile ?? ''),
     };
     _gender = u.gender;
-    _bloodGroup = u.bloodGroup;
+    // "0+" from a sheet becomes "O+"; see [bloodGroupLabel].
+    _bloodGroup = bloodGroupLabel(u.bloodGroup);
     _trade = u.trade;
     _sem = u.sem;
     // Fall back to whatever the address already says, so an existing student
@@ -873,15 +874,14 @@ class _DetailFormState extends State<_DetailForm> {
                         labelText: 'Blood group',
                       ),
                       items:
-                          const [
-                                'A+',
-                                'A-',
-                                'B+',
-                                'B-',
-                                'O+',
-                                'O-',
-                                'AB+',
-                                'AB-',
+                          [
+                                ...kBloodGroups,
+                                // A value the sheet recorded that isn't one of
+                                // the eight ("B", "O=") — listed so the field
+                                // shows it for correction instead of failing.
+                                if (_bloodGroup != null &&
+                                    !kBloodGroups.contains(_bloodGroup))
+                                  _bloodGroup!,
                               ]
                               .map(
                                 (g) =>
@@ -1237,7 +1237,7 @@ class _RoomSection extends StatelessWidget {
                   u.isAllotted
                       ? u.roomLabel!
                       : hostelOnly
-                      ? u.hostelName!
+                      ? u.hostelLabel!
                       : 'No room allotted',
                   style: const TextStyle(
                     fontSize: 15,
@@ -1310,7 +1310,7 @@ class _RoomSection extends StatelessWidget {
         hostel: hostel,
       );
       messenger.showSnackBar(
-        SnackBar(content: Text('Assigned to ${hostel.name}')),
+        SnackBar(content: Text('Assigned to ${hostel.label}')),
       );
     } catch (e) {
       messenger.showSnackBar(SnackBar(content: Text(_describe(e))));
@@ -1322,7 +1322,7 @@ class _RoomSection extends StatelessWidget {
     final ok = await showDialog<bool>(
       context: context,
       builder: (c) => AlertDialog(
-        title: Text('Remove ${u.name} from ${u.hostelName}?'),
+        title: Text('Remove ${u.name} from ${u.hostelLabel}?'),
         content: const Text(
           'They will no longer be recorded as belonging to this hostel.',
         ),

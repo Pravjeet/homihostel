@@ -285,7 +285,7 @@ class _HostelSection extends StatelessWidget {
         Padding(
           padding: const EdgeInsets.fromLTRB(16, 14, 16, 10),
           child: Text(
-            '${hostel.name} (${hostel.code})  ·  ${rooms.length} '
+            '${hostel.label}  ·  ${rooms.length} '
             'room${rooms.length == 1 ? '' : 's'}',
             style: const TextStyle(fontSize: 14, fontWeight: FontWeight.w800),
           ),
@@ -426,7 +426,7 @@ class _FlagRoomDialogState extends State<_FlagRoomDialog> {
                   .map(
                     (h) => DropdownMenuItem(
                       value: h,
-                      child: Text('${h.name} (${h.code})'),
+                      child: Text(h.label),
                     ),
                   )
                   .toList(),

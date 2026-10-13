@@ -37,6 +37,10 @@ class Session {
   /// Switches the lens. Null returns to the live session.
   final void Function(String?)? onViewSession;
 
+  /// [HostelCodes.signature] at the time this session was built. Carried only
+  /// so [SessionScope] can rebuild every screen when a hostel's code changes.
+  final String hostelCodes;
+
   const Session({
     required this.user,
     this.role,
@@ -44,6 +48,7 @@ class Session {
     this.settings = const CollegeSettings(),
     this.viewingSession,
     this.onViewSession,
+    this.hostelCodes = '',
   });
 
   /// The session every read-only screen should render.
@@ -106,7 +111,8 @@ class SessionScope extends InheritedWidget {
       // Switching the lens has to rebuild everything that reads it, which is
       // most of the app — the whole point is that the dashboard, hostels and
       // rooms all move together.
-      oldWidget.session.viewingSession != session.viewingSession;
+      oldWidget.session.viewingSession != session.viewingSession ||
+      oldWidget.session.hostelCodes != session.hostelCodes;
 }
 
 /// Convenience for reading permissions inline in build methods.

@@ -1,4 +1,5 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
+import '../core/hostel_codes.dart';
 
 /// A monetary penalty imposed on a resident.
 ///
@@ -155,7 +156,7 @@ class Fine {
   /// "BH-02 · Room 101", or null when the student had no room.
   String? get whereFrom => (hostelName == null || roomNumber == null)
       ? null
-      : '$hostelName · Room $roomNumber';
+      : '${HostelCodes.of(hostelName, id: hostelId)} · Room $roomNumber';
 }
 
 /// Everything the mini-dashboard needs, worked out in one pass over a list of

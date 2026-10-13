@@ -1,4 +1,5 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
+import '../core/hostel_codes.dart';
 
 /// Typed wrapper around the `users/{uid}` document.
 ///
@@ -284,7 +285,12 @@ class AppUser {
   bool get isGraduated => status == 'graduated';
 
   /// "Block A · Room 101", or null when not allotted.
-  String? get roomLabel => isAllotted ? '$hostelName · Room $roomNumber' : null;
+  String? get roomLabel => isAllotted
+      ? '${HostelCodes.of(hostelName, id: hostelId)} · Room $roomNumber'
+      : null;
+
+  /// The hostel as staff refer to it — its code, e.g. "BH-3".
+  String? get hostelLabel => HostelCodes.of(hostelName, id: hostelId);
 }
 
 /// Trade/branch codes a workspace starts with, taken from SLIET's own
@@ -395,6 +401,114 @@ const Map<String, String> kTradeNames = {
 String tradeLabel(String code) {
   final name = kTradeNames[code];
   return name == null ? code : '$code — $name';
+}
+
+/// What this institute's course codes stand for, so the Course filter reads
+/// "UG — Graduation" rather than leaving staff to decode "UG". Same idea as
+/// [kTradeNames]: a course a college adds under Settings shows as itself.
+const Map<String, String> kCourseNames = {
+  'ICD': 'Diploma',
+  'UG': 'Graduation',
+  'PG': 'Post-graduation',
+};
+
+/// "UG — Graduation", or just the course when it isn't one of the above.
+String courseLabel(String course) {
+  final name = kCourseNames[course.toUpperCase()];
+  return name == null ? course : '$course — $name';
+}
+
+/// Religions the Student Overview filter always offers, whether or not
+/// anyone currently on the roll records them. Values found on students that
+/// aren't in this list are still offered alongside — see [religionLabel].
+const List<String> kReligions = [
+  'Hindu',
+  'Muslim',
+  'Sikh',
+  'Christian',
+  'Buddhist',
+  'Jain',
+  'Parsi',
+  'Jewish',
+  'Other',
+];
+
+/// [raw] as the filter should show it: matched to [kReligions] ignoring case
+/// and spacing, so "hindu" and "HINDU " from different import sheets land in
+/// one bucket; otherwise trimmed as typed. Null when nothing was recorded.
+String? religionLabel(String? raw) {
+  final v = raw?.trim() ?? '';
+  if (v.isEmpty) return null;
+  // The import sheets say "Others"; the list says "Other". One bucket.
+  if (v.toLowerCase() == 'others') return 'Other';
+  for (final r in kReligions) {
+    if (r.toLowerCase() == v.toLowerCase()) return r;
+  }
+  return v;
+}
+
+/// Admission categories the Student Overview filter always offers. Anything
+/// else a sheet records ("Minority") is still offered alongside — see
+/// [categoryLabel].
+const List<String> kCategories = ['General', 'OBC', 'SC', 'ST', 'EWS'];
+
+/// Other ways the sheets write the same category.
+const Map<String, String> _categoryAliases = {
+  'gen': 'General',
+  'gn': 'General',
+  'ur': 'General',
+  'unreserved': 'General',
+  'obcncl': 'OBC',
+};
+
+/// [raw] as the filter should show it: matched to [kCategories] ignoring
+/// case and punctuation, so the import's "GENERAL" and a hand-typed
+/// "General" are one bucket; otherwise trimmed as typed. Null when nothing
+/// was recorded.
+String? categoryLabel(String? raw) {
+  final v = raw?.trim() ?? '';
+  if (v.isEmpty) return null;
+  final key = v.toLowerCase().replaceAll(RegExp(r'[^a-z0-9]'), '');
+  for (final c in kCategories) {
+    if (c.toLowerCase() == key) return c;
+  }
+  return _categoryAliases[key] ?? v;
+}
+
+/// The eight ABO/Rh groups, in the order the profile form lists them.
+const List<String> kBloodGroups = [
+  'A+',
+  'A-',
+  'B+',
+  'B-',
+  'O+',
+  'O-',
+  'AB+',
+  'AB-',
+];
+
+/// [raw] as the filter and the profile form should show it.
+///
+/// Only fixes what is unambiguous: case ("b+"), spacing, "+ve"/"positive",
+/// and a zero typed for the letter O ("0+"), since no blood group is called
+/// zero. Anything else is kept as typed — a bare "B" has no Rh factor
+/// recorded, and "O=" could be a slip for either "O+" or "O-", which on a
+/// blood group is not a guess worth making. Those show as their own filter
+/// option so someone can find and correct them. Null when nothing was
+/// recorded.
+String? bloodGroupLabel(String? raw) {
+  final typed = raw?.trim() ?? '';
+  if (typed.isEmpty) return null;
+  var v = typed.toUpperCase().replaceAll(RegExp(r'\s+'), '');
+  v = v
+      .replaceAll('POSITIVE', '+')
+      .replaceAll('NEGATIVE', '-')
+      .replaceAll(RegExp(r'[−–]'), '-')
+      .replaceAllMapped(RegExp(r'([+-])VE$'), (m) => m[1]!);
+  if (v.startsWith('0')) v = 'O${v.substring(1)}';
+  if (kBloodGroups.contains(v)) return v;
+  if (const ['A', 'B', 'AB', 'O'].contains(v)) return v;
+  return typed;
 }
 
 /// States and union territories, as the dashboard should label them.

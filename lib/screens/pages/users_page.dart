@@ -352,9 +352,7 @@ class _UsersPageState extends State<UsersPage> {
                                       (h) => DropdownMenuItem(
                                         value: h.name,
                                         child: Text(
-                                          h.code.isEmpty
-                                              ? h.name
-                                              : '${h.code} · ${h.name}',
+                                          h.label,
                                           overflow: TextOverflow.ellipsis,
                                         ),
                                       ),
@@ -1266,24 +1264,14 @@ class _CreateUserDialogState extends State<_CreateUserDialog> {
                               decoration: const InputDecoration(
                                 labelText: 'Blood group',
                               ),
-                              items:
-                                  const [
-                                        'A+',
-                                        'A-',
-                                        'B+',
-                                        'B-',
-                                        'O+',
-                                        'O-',
-                                        'AB+',
-                                        'AB-',
-                                      ]
-                                      .map(
-                                        (g) => DropdownMenuItem(
-                                          value: g,
-                                          child: Text(g),
-                                        ),
-                                      )
-                                      .toList(),
+                              items: kBloodGroups
+                                  .map(
+                                    (g) => DropdownMenuItem(
+                                      value: g,
+                                      child: Text(g),
+                                    ),
+                                  )
+                                  .toList(),
                               onChanged: _busy
                                   ? null
                                   : (v) => setState(() => _bloodGroup = v),

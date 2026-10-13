@@ -184,6 +184,12 @@ class Hostel {
     return ax.length.compareTo(bx.length);
   }
 
+  /// What the app shows for this hostel: its code ("BH-3"), which is what
+  /// staff actually call it. The full name is an alias, kept for the Hostels
+  /// & Rooms page and the editor. Falls back to the name only when no code
+  /// has been set.
+  String get label => code.trim().isEmpty ? name : code.trim();
+
   int get freeBeds => (bedCount - occupiedBeds).clamp(0, bedCount);
 
   /// 0.0 – 1.0. Guarded against divide-by-zero on a hostel with no rooms.

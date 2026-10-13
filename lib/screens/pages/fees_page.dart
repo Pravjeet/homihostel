@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 
+import '../../core/hostel_codes.dart';
 import '../../core/permissions.dart';
 import '../../core/session.dart';
 import '../../core/theme.dart';
@@ -271,7 +272,7 @@ class _Roster extends StatelessWidget {
 
             final hostels =
                 students
-                    .map((s) => s.hostelName)
+                    .map((s) => s.hostelLabel)
                     .whereType<String>()
                     .toSet()
                     .toList()
@@ -280,7 +281,9 @@ class _Roster extends StatelessWidget {
 
             final q = query.trim().toLowerCase();
             final shown = all.where((s) {
-              if (hostel != null && s.hostelName != hostel) return false;
+              if (hostel != null && HostelCodes.of(s.hostelName) != hostel) {
+                return false;
+              }
               if (status == 'paid' && !s.isPaid) return false;
               if (status == 'unpaid' && s.isPaid) return false;
               if (q.isEmpty) return true;
@@ -745,7 +748,8 @@ class _StandingRow extends StatelessWidget {
                 Text(
                   [
                     if (standing.studentRegNo != null) standing.studentRegNo!,
-                    if (standing.hostelName != null) standing.hostelName!,
+                    if (standing.hostelName != null)
+                      HostelCodes.of(standing.hostelName)!,
                     if (standing.roomNumber != null)
                       'Room ${standing.roomNumber}',
                   ].join(' · '),

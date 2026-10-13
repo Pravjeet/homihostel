@@ -39,7 +39,7 @@ class HostelPickerChips extends StatelessWidget {
       children: hostels.map((h) {
         final isOn = selectedIds.contains(h.id);
         return FilterChip(
-          label: Text(h.code.isEmpty ? h.name : '${h.code} · ${h.name}'),
+          label: Text(h.label),
           selected: isOn,
           onSelected: enabled
               ? (v) {

@@ -185,7 +185,7 @@ class _RoomHeader extends StatelessWidget {
                   ),
                   const SizedBox(height: 3),
                   Text(
-                    '${user.hostelName} · Floor ${room.floor} · '
+                    '${user.hostelLabel} · Floor ${room.floor} · '
                     '${room.capacityLabel}',
                     style: TextStyle(
                       color: AppColors.textMuted,

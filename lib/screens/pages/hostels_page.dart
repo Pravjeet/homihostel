@@ -420,7 +420,7 @@ class _HostelsPageState extends State<HostelsPage> {
     final ok = await showDialog<bool>(
       context: context,
       builder: (c) => AlertDialog(
-        title: Text('Delete ${hostel.name}?'),
+        title: Text('Delete ${hostel.label}?'),
         content: Text(
           hostel.occupiedBeds > 0
               ? 'This hostel currently has ${hostel.occupiedBeds} student(s) '
@@ -449,7 +449,7 @@ class _HostelsPageState extends State<HostelsPage> {
     );
     try {
       await HostelService.instance.deleteHostel(collegeId, hostel.id);
-      messenger.showSnackBar(SnackBar(content: Text('${hostel.name} deleted')));
+      messenger.showSnackBar(SnackBar(content: Text('${hostel.label} deleted')));
     } catch (e) {
       messenger.showSnackBar(
         SnackBar(content: Text(AuthService.describeError(e))),
@@ -626,7 +626,7 @@ class _HostelCard extends StatelessWidget {
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
                       Text(
-                        hostel.name,
+                        hostel.label,
                         maxLines: 1,
                         overflow: TextOverflow.ellipsis,
                         style: const TextStyle(
@@ -635,9 +635,15 @@ class _HostelCard extends StatelessWidget {
                         ),
                       ),
                       const SizedBox(height: 3),
+                      // The full name stays visible here, and only here and
+                      // in the editor — it's an alias, not how staff refer to
+                      // the block.
                       Text(
+                        '${hostel.label == hostel.name ? '' : '${hostel.name} · '}'
                         '${hostel.gender.label} · ${hostel.floors} floor'
                         '${hostel.floors == 1 ? '' : 's'}',
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
                         style: TextStyle(
                           color: AppColors.textMuted,
                           fontSize: 12.5,

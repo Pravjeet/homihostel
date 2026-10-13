@@ -124,6 +124,27 @@ class CollegeSettings {
   /// meaning [requiredRoomCapacity] should enforce nothing rather than guess.
   CourseRule? courseRuleFor(String? course) => _ruleFor(course);
 
+  /// Every configured course, in the order Settings lists them — the
+  /// Student Overview's permanent Course filter options. A rule repeated in
+  /// another case ("UG", "ug") is listed once, spelled as the first one —
+  /// the one [courseNameFor] resolves to.
+  List<String> get courseNames {
+    final seen = <String>{};
+    return [
+      for (final r in _rules)
+        if (seen.add(r.course.trim().toLowerCase())) r.course,
+    ];
+  }
+
+  /// [course] spelled the way its rule is ("ug" → "UG"), so filtering
+  /// groups a student the same way promotion does; otherwise trimmed as
+  /// typed. Null when blank.
+  String? courseNameFor(String? course) {
+    final c = course?.trim() ?? '';
+    if (c.isEmpty) return null;
+    return _ruleFor(c)?.course ?? c;
+  }
+
   num? defaultAmountFor(String category) {
     for (final c in fineCategories) {
       if (c.name == category) return c.defaultAmount;
