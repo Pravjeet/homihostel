@@ -1,6 +1,7 @@
 import '../models/app_user.dart';
 import 'audit_service.dart';
 import 'data_service.dart';
+import 'enrollment_service.dart';
 import 'fee_service.dart';
 import 'fine_service.dart';
 import 'hostel_service.dart';
@@ -13,6 +14,7 @@ enum ResetStage {
   fees('Clearing mess fee records'),
   fines('Clearing fines'),
   requests('Clearing requests'),
+  enrollments('Clearing academic records'),
   rooms('Emptying rooms'),
   done('Finished');
 
@@ -25,6 +27,7 @@ class StudentDataResetOutcome {
   final int feeRecordsDeleted;
   final int finesDeleted;
   final int requestsDeleted;
+  final int enrollmentsDeleted;
   final int roomsCleared;
   final int bedsFreed;
 
@@ -43,6 +46,7 @@ class StudentDataResetOutcome {
     required this.feeRecordsDeleted,
     required this.finesDeleted,
     required this.requestsDeleted,
+    required this.enrollmentsDeleted,
     required this.roomsCleared,
     required this.bedsFreed,
     required this.adminsKept,
@@ -51,7 +55,11 @@ class StudentDataResetOutcome {
   });
 
   int get totalRecords =>
-      profilesDeleted + feeRecordsDeleted + finesDeleted + requestsDeleted;
+      profilesDeleted +
+      feeRecordsDeleted +
+      finesDeleted +
+      requestsDeleted +
+      enrollmentsDeleted;
 }
 
 /// The single "clear every student and everything attached to them" operation.
@@ -158,6 +166,23 @@ class ResetService {
       }
     }
 
+    // ------------------------------------------------ academic records
+    //
+    // The per-session enrollments that Academic Records and Student Overview
+    // read. They live beside `users`, not on it, so deleting the profiles never
+    // reached them.
+    var enrollmentsDeleted = 0;
+    if (!cancelled()) {
+      onProgress?.call(ResetStage.enrollments, 0, 0);
+      try {
+        enrollmentsDeleted = await EnrollmentService.instance.deleteAll(
+          collegeId,
+        );
+      } catch (e) {
+        failures.add('Academic records: $e');
+      }
+    }
+
     // ------------------------------------------------ room occupancy
     //
     // Last, and unconditional. The profiles are already gone by this point, so
@@ -185,6 +210,7 @@ class ResetService {
       feeRecordsDeleted: feeRecordsDeleted,
       finesDeleted: finesDeleted,
       requestsDeleted: requestsDeleted,
+      enrollmentsDeleted: enrollmentsDeleted,
       roomsCleared: roomsCleared,
       bedsFreed: bedsFreed,
       adminsKept: adminsKept,
@@ -204,6 +230,7 @@ class ResetService {
           '${outcome.feeRecordsDeleted} fee record(s), '
           '${outcome.finesDeleted} fine(s), '
           '${outcome.requestsDeleted} request(s), '
+          '${outcome.enrollmentsDeleted} academic record(s), '
           '${outcome.bedsFreed} bed(s) freed'
           '${outcome.stoppedEarly ? ' (stopped early)' : ''}',
       targetLabel: 'All students',

@@ -143,6 +143,54 @@ class EnrollmentService {
     return found;
   }
 
+  // ----------------------------- deletion ------------------------------
+
+  /// Deletes every enrollment in the college, across all sessions.
+  ///
+  /// Part of the master student-data reset. The roster pages read this
+  /// collection, not `users`, so clearing the profiles alone left Academic
+  /// Records and Student Overview reporting thousands of students who no
+  /// longer existed — and the next backfill simply added to them.
+  ///
+  /// Paged for the same reason as `FeeService.deleteAll`. Super Admin only;
+  /// the rules refuse this to everyone else.
+  Future<int> deleteAll(String collegeId) async {
+    final col = _enrollments(collegeId);
+    var removed = 0;
+    while (true) {
+      final snap = await col.limit(400).get();
+      if (snap.docs.isEmpty) break;
+      final batch = _db.batch();
+      for (final d in snap.docs) {
+        batch.delete(d.reference);
+      }
+      await batch.commit();
+      removed += snap.docs.length;
+      if (snap.docs.length < 400) break;
+    }
+    return removed;
+  }
+
+  /// Removes enrollments whose student is no longer in [liveUids] — the
+  /// cleanup for a roster that was cleared before [deleteAll] existed.
+  Future<int> deleteOrphaned(String collegeId, Set<String> liveUids) async {
+    final snap = await _enrollments(collegeId).get();
+    final orphaned = snap.docs.where((d) {
+      final uid = d.data()['uid'] as String?;
+      return uid == null || uid.isEmpty || !liveUids.contains(uid);
+    }).toList();
+
+    for (var i = 0; i < orphaned.length; i += 400) {
+      final end = (i + 400).clamp(0, orphaned.length);
+      final batch = _db.batch();
+      for (final d in orphaned.sublist(i, end)) {
+        batch.delete(d.reference);
+      }
+      await batch.commit();
+    }
+    return orphaned.length;
+  }
+
   // ----------------------------- backfill ------------------------------
 
   /// Derives [uid]'s first enrollment record for [session] from their

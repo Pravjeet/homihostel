@@ -633,9 +633,12 @@ service cloud.firestore {
                       )
                     );
 
-      // Never from the client — a wrong-year record is fixed by re-running
-      // promotion/backfill (both idempotent), not by deleting history.
-      allow delete: if false;
+      // A wrong-year record is fixed by re-running promotion/backfill (both
+      // idempotent), not by deleting history — so only a Super Admin may
+      // delete, and the one caller is the master "delete all students" reset.
+      // Without this, the reset left every enrollment behind and Academic
+      // Records kept reporting students who no longer existed.
+      allow delete: if sameCollege(collegeId) && isSuperAdmin();
     }
 
     // ---------------- future modules ----------------

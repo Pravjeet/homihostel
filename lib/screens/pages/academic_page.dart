@@ -4,6 +4,7 @@ import '../../core/permissions.dart';
 import '../../core/session.dart';
 import '../../core/theme.dart';
 import '../../models/app_user.dart';
+import '../../models/college_settings.dart';
 import '../../models/enrollment.dart';
 import '../../services/auth_service.dart';
 import '../../services/data_service.dart';
@@ -330,6 +331,13 @@ class _AcademicPageState extends State<AcademicPage> {
                   ],
                   const SizedBox(height: 14),
                   _YearBreakdown(roster: roster, session: viewedSession),
+                  if (roster.isNotEmpty) ...[
+                    const SizedBox(height: 14),
+                    _CourseBreakdowns(
+                      roster: roster,
+                      settings: session.settings,
+                    ),
+                  ],
                 ],
               ),
             );
@@ -345,6 +353,7 @@ class _Header extends StatelessWidget {
   final String? nextSession;
   final int studentCount;
   final int rosterCount;
+
   /// How many current students have no record for this session.
   ///
   /// Counted per student rather than inferred from the two tallies. Comparing
@@ -567,52 +576,196 @@ class _YearBreakdown extends StatelessWidget {
         children: [
           SectionHeader('$session roster'),
           const SizedBox(height: 16),
-          for (final year in years) ...[
-            Padding(
-              padding: const EdgeInsets.only(bottom: 10),
-              child: Row(
-                children: [
-                  SizedBox(
-                    width: 70,
-                    child: Text(
-                      '${ordinal(year)} year',
-                      style: const TextStyle(
-                        fontSize: 13,
-                        fontWeight: FontWeight.w700,
-                      ),
-                    ),
-                  ),
-                  const SizedBox(width: 12),
-                  Expanded(
-                    child: ClipRRect(
-                      borderRadius: BorderRadius.circular(5),
-                      child: LinearProgressIndicator(
-                        value: byYear[year]!.length / roster.length,
-                        minHeight: 8,
-                        backgroundColor: AppColors.border,
-                      ),
-                    ),
-                  ),
-                  const SizedBox(width: 12),
-                  SizedBox(
-                    width: 40,
-                    child: Text(
-                      '${byYear[year]!.length}',
-                      textAlign: TextAlign.right,
-                      style: const TextStyle(
-                        fontSize: 13,
-                        fontWeight: FontWeight.w700,
-                      ),
-                    ),
-                  ),
-                ],
-              ),
+          for (final year in years)
+            _YearBar(
+              year: year,
+              count: byYear[year]!.length,
+              total: roster.length,
             ),
-          ],
         ],
       ),
     );
   }
+}
+
+/// One panel per course (ICD, UG, PG …) under the combined roster, each
+/// counting its own students by year.
+///
+/// The course list comes from Settings, not from a hardcoded set, so a college
+/// that adds or renames a course gets a panel for it without a code change.
+/// Every year the course runs is listed even when nobody is in it — an empty
+/// 3rd year is something to notice, not something to hide. A course present
+/// in the roster but missing from Settings still gets a panel, after the
+/// configured ones, so no student silently drops out of the counts.
+class _CourseBreakdowns extends StatelessWidget {
+  final List<Enrollment> roster;
+  final CollegeSettings settings;
+
+  const _CourseBreakdowns({required this.roster, required this.settings});
+
+  static const _noCourse = 'No course';
+
+  @override
+  Widget build(BuildContext context) {
+    final byCourse = <String, List<Enrollment>>{};
+    for (final e in roster) {
+      final course = settings.courseNameFor(e.course) ?? _noCourse;
+      byCourse.putIfAbsent(course, () => []).add(e);
+    }
+
+    final configured = settings.courseNames;
+    final courses = [
+      ...configured,
+      for (final c in byCourse.keys)
+        if (!configured.contains(c)) c,
+    ];
+
+    final panels = [
+      for (final course in courses)
+        _CoursePanel(
+          course: course,
+          enrollments: byCourse[course] ?? const [],
+          totalYears: course == _noCourse
+              ? null
+              : settings.totalYearsFor(course),
+        ),
+    ];
+
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        if (constraints.maxWidth < 760) {
+          return Column(
+            children: [
+              for (var i = 0; i < panels.length; i++) ...[
+                if (i > 0) const SizedBox(height: 14),
+                panels[i],
+              ],
+            ],
+          );
+        }
+        return Row(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            for (var i = 0; i < panels.length; i++) ...[
+              if (i > 0) const SizedBox(width: 14),
+              Expanded(child: panels[i]),
+            ],
+          ],
+        );
+      },
+    );
+  }
+}
+
+class _CoursePanel extends StatelessWidget {
+  final String course;
+  final List<Enrollment> enrollments;
+
+  /// How many years the course runs, or null for students with no course.
+  final int? totalYears;
+
+  const _CoursePanel({
+    required this.course,
+    required this.enrollments,
+    required this.totalYears,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final byYear = <int, int>{};
+    for (final e in enrollments) {
+      byYear[e.year] = (byYear[e.year] ?? 0) + 1;
+    }
+    // The course's own years always, plus any stray year a record carries
+    // beyond them, so a bad record is visible rather than uncounted.
+    final years = {
+      if (totalYears != null)
+        for (var y = 1; y <= totalYears!; y++) y,
+      ...byYear.keys,
+    }.toList()..sort();
+
+    return AppCard(
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Expanded(child: SectionHeader(courseLabel(course))),
+              Text(
+                '${enrollments.length}',
+                style: const TextStyle(
+                  fontSize: 22,
+                  fontWeight: FontWeight.w800,
+                ),
+              ),
+            ],
+          ),
+          if (totalYears != null)
+            Text(
+              '$totalYears-year course',
+              style: TextStyle(fontSize: 12, color: AppColors.textMuted),
+            ),
+          const SizedBox(height: 16),
+          for (final year in years)
+            _YearBar(
+              year: year,
+              count: byYear[year] ?? 0,
+              total: enrollments.length,
+            ),
+        ],
+      ),
+    );
+  }
+}
+
+/// "2nd year ▬▬▬▬░░░ 977" — shared by the combined roster and the per-course
+/// panels so the two always read the same way.
+class _YearBar extends StatelessWidget {
+  final int year;
+  final int count;
+  final int total;
+
+  const _YearBar({
+    required this.year,
+    required this.count,
+    required this.total,
+  });
+
+  @override
+  Widget build(BuildContext context) => Padding(
+    padding: const EdgeInsets.only(bottom: 10),
+    child: Row(
+      children: [
+        SizedBox(
+          width: 70,
+          child: Text(
+            '${ordinal(year)} year',
+            style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w700),
+          ),
+        ),
+        const SizedBox(width: 12),
+        Expanded(
+          child: ClipRRect(
+            borderRadius: BorderRadius.circular(5),
+            child: LinearProgressIndicator(
+              value: total == 0 ? 0 : count / total,
+              minHeight: 8,
+              backgroundColor: AppColors.border,
+            ),
+          ),
+        ),
+        const SizedBox(width: 12),
+        SizedBox(
+          width: 40,
+          child: Text(
+            '$count',
+            textAlign: TextAlign.right,
+            style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w700),
+          ),
+        ),
+      ],
+    ),
+  );
 }
 
 class _Tally extends StatelessWidget {

@@ -610,6 +610,54 @@ describe('enrollments', () => {
     );
   });
 
+  it('only a Super Admin can delete an enrollment (the master reset)', async () => {
+    // academic.manage can rewrite history by re-running promotion, but not
+    // erase it. Deletion exists for exactly one caller: "delete all students".
+    await seed(COLLEGE_A, { wardenRole: ['academic.manage'] });
+    await seedUser(COLLEGE_A, 'warden-a', 'warden');
+    await seedUser(COLLEGE_A, 'admin-a', 'warden', { isSuperAdmin: true });
+    await testEnv.withSecurityRulesDisabled(async (ctx) => {
+      const col = ctx
+        .firestore()
+        .collection('colleges')
+        .doc(COLLEGE_A)
+        .collection('enrollments');
+      await col.doc('student-a_2026-27').set(enrollment('student-a'));
+      await col.doc('student-b_2026-27').set(enrollment('student-b'));
+    });
+
+    await assertFails(
+      enrollmentsOf(asUser('warden-a'), COLLEGE_A)
+        .doc('student-a_2026-27')
+        .delete(),
+    );
+    await assertSucceeds(
+      enrollmentsOf(asUser('admin-a'), COLLEGE_A)
+        .doc('student-a_2026-27')
+        .delete(),
+    );
+  });
+
+  it('a Super Admin cannot delete another college\'s enrollments', async () => {
+    await seed(COLLEGE_A);
+    await seedUser(COLLEGE_A, 'admin-a', 'warden', { isSuperAdmin: true });
+    await testEnv.withSecurityRulesDisabled(async (ctx) => {
+      await ctx
+        .firestore()
+        .collection('colleges')
+        .doc(COLLEGE_B)
+        .collection('enrollments')
+        .doc('student-x_2026-27')
+        .set(enrollment('student-x', { collegeId: COLLEGE_B }));
+    });
+
+    await assertFails(
+      enrollmentsOf(asUser('admin-a'), COLLEGE_B)
+        .doc('student-x_2026-27')
+        .delete(),
+    );
+  });
+
   it('allotment.manage may update only the room fields on an enrollment', async () => {
     await seed(COLLEGE_A, { wardenRole: ['allotment.manage'] });
     await seedUser(COLLEGE_A, 'warden-a', 'warden');
