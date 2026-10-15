@@ -418,6 +418,36 @@ String courseLabel(String course) {
   return name == null ? course : '$course — $name';
 }
 
+/// The course that takes lateral-entry (LEET) students — diploma holders
+/// admitted straight into 2nd year of graduation.
+const String kLateralEntryCourse = 'UG';
+
+const String kEntryRegular = 'Regular';
+const String kEntryLeet = 'LEET';
+
+/// True when [course] is the one LEET applies to, however it's cased.
+bool hasLateralEntry(String? course) =>
+    course?.trim().toUpperCase() == kLateralEntryCourse;
+
+/// [kEntryLeet] or [kEntryRegular] for a graduation student; null for any
+/// other course, or when the sheet didn't give both years.
+///
+/// Worked out, not stored: no sheet has a LEET column. A LEET student is
+/// counted in the batch they'd have started 1st year with, but admitted a
+/// year later — batch "2024-25", admissionYear "2025-26". In the source sheet
+/// this agrees with the registration number's own LEET marker on every
+/// student that carries one (617 of 617), and there are no 1st-year LEET
+/// students, as there shouldn't be.
+String? entryTypeOf(AppUser u) {
+  if (!hasLateralEntry(u.course)) return null;
+  int? start(String? span) =>
+      int.tryParse((span ?? '').trim().split('-').first);
+  final batch = start(u.batch);
+  final admitted = start(u.admissionYear);
+  if (batch == null || admitted == null) return null;
+  return admitted > batch ? kEntryLeet : kEntryRegular;
+}
+
 /// Religions the Student Overview filter always offers, whether or not
 /// anyone currently on the roll records them. Values found on students that
 /// aren't in this list are still offered alongside — see [religionLabel].

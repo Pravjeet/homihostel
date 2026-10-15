@@ -166,7 +166,9 @@ class _RoomDetailDialogState extends State<RoomDetailDialog> {
       if (!mounted) return;
       setState(() {
         _busy = false;
-        _error = AuthService.describeError(e);
+        _error = e is AllotmentFailure
+            ? e.message
+            : AuthService.describeError(e);
       });
     }
   }
@@ -275,7 +277,9 @@ class _RoomDetailDialogState extends State<RoomDetailDialog> {
       // instead of guessing why it refused.
       setState(() {
         _busy = false;
-        _error = AuthService.describeError(e);
+        _error = e is AllotmentFailure
+            ? e.message
+            : AuthService.describeError(e);
       });
     }
   }

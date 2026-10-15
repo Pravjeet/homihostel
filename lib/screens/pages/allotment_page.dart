@@ -13,6 +13,7 @@ import '../../services/enrollment_service.dart';
 import '../../services/hostel_service.dart';
 import '../../utils/enrollment_helpers.dart';
 import 'allot_room_view.dart';
+import 'auto_allot_dialog.dart';
 import 'user_detail_view.dart';
 
 /// Room Allotment: who has a bed, who doesn't, and the actions to fix that.
@@ -25,13 +26,23 @@ class AllotmentPage extends StatefulWidget {
 
 class _AllotmentPageState extends State<AllotmentPage> {
   String _query = '';
+  final _searchCtl = TextEditingController();
   _Filter _filter = _Filter.pending;
+
+  @override
+  void dispose() {
+    _searchCtl.dispose();
+    super.dispose();
+  }
 
   /// Course as Settings spells it ("UG"), or null for every course.
   String? _course;
 
   /// Academic year (1, 2, …), or null for every year.
   int? _year;
+
+  /// LEET or Regular — a sub-filter of Graduation, null for everyone.
+  String? _entry;
 
   /// A student's year in the live session.
   ///
@@ -154,11 +165,25 @@ class _AllotmentPageState extends State<AllotmentPage> {
                 bool courseOk(AppUser u) =>
                     _course == null || courseOf(u) == _course;
                 bool yearOk(AppUser u) => _year == null || yearOf(u) == _year;
+                bool entryOk(AppUser u) =>
+                    _entry == null || entryTypeOf(u) == _entry;
 
                 final searched = source.where(matchesQuery).toList();
                 final shown = searched
-                    .where((u) => courseOk(u) && yearOk(u))
+                    .where((u) => courseOk(u) && yearOk(u) && entryOk(u))
                     .toList();
+
+                // LEET / Regular, counted under the course and year picked.
+                final showEntry = hasLateralEntry(_course);
+                final entryCounts = <String, int>{};
+                if (showEntry) {
+                  for (final u in searched.where(
+                    (u) => courseOk(u) && yearOk(u),
+                  )) {
+                    final t = entryTypeOf(u);
+                    if (t != null) entryCounts[t] = (entryCounts[t] ?? 0) + 1;
+                  }
+                }
 
                 // Each chip counts what you'd get by tapping it, given the other
                 // filter — so "2nd year (40)" means 40 under the course picked.
@@ -173,7 +198,9 @@ class _AllotmentPageState extends State<AllotmentPage> {
                   }.toList()..sort()),
                 ];
                 final courseCounts = <String, int>{};
-                for (final u in searched.where(yearOk)) {
+                for (final u in searched.where(
+                  (u) => yearOk(u) && entryOk(u),
+                )) {
                   final c = courseOf(u);
                   if (c != null) courseCounts[c] = (courseCounts[c] ?? 0) + 1;
                 }
@@ -189,7 +216,9 @@ class _AllotmentPageState extends State<AllotmentPage> {
                             : m,
                       );
                 final yearCounts = <int, int>{};
-                for (final u in searched.where(courseOk)) {
+                for (final u in searched.where(
+                  (u) => courseOk(u) && entryOk(u),
+                )) {
                   final y = yearOf(u);
                   if (y != null) yearCounts[y] = (yearCounts[y] ?? 0) + 1;
                 }
@@ -197,6 +226,40 @@ class _AllotmentPageState extends State<AllotmentPage> {
                   for (var y = 1; y <= maxYears; y++) y,
                   ...yearCounts.keys,
                 }.toList()..sort();
+
+                // Auto-allot works on exactly the group the Pending tab shows
+                // under these filters — whichever status tab is open — and
+                // only once a course or year narrows it, so one click can't
+                // sweep the whole institute into a single hostel.
+                final autoCandidates = pending
+                    .where(
+                      (u) =>
+                          matchesQuery(u) &&
+                          courseOk(u) &&
+                          yearOk(u) &&
+                          entryOk(u),
+                    )
+                    .toList();
+                // The roster carries each student's seating-policy room type
+                // and live year. Planning before it arrives — or after it was
+                // refused — would quietly drop the policy and put a PG student
+                // in a 3-Seater, so the button waits and says why.
+                final rosterError = enrollSnap.hasError
+                    ? AuthService.describeError(enrollSnap.error!)
+                    : null;
+                final rosterReady =
+                    liveSession == null ||
+                    (enrollSnap.hasData && rosterError == null);
+                final autoReady =
+                    (_course != null || _year != null || _entry != null) &&
+                    autoCandidates.isNotEmpty &&
+                    rosterReady;
+                final scopeLabel = [
+                  if (_course != null) courseLabel(_course!),
+                  if (_year != null) '${ordinal(_year!)} year',
+                  if (_entry != null) _entry!,
+                  if (q.isNotEmpty) 'matching "$q"',
+                ].join(' · ');
 
                 final pageCount = shown.isEmpty
                     ? 1
@@ -271,24 +334,31 @@ class _AllotmentPageState extends State<AllotmentPage> {
                             ),
                           ],
                           const SizedBox(height: 18),
-                          Row(
-                            children: [
-                              Expanded(
-                                child: TextField(
-                                  onChanged: (v) => setState(() {
-                                    _query = v;
-                                    _page = 0;
-                                  }),
-                                  decoration: const InputDecoration(
-                                    hintText:
-                                        'Search name, email, enrollment or room',
-                                    prefixIcon: Icon(Icons.search_rounded),
-                                    isDense: true,
-                                  ),
+                          // Side by side when there's room; stacked on a
+                          // phone, where "Pending (530)" alone makes the
+                          // segmented button wider than the card and squeezed
+                          // the search box to nothing.
+                          LayoutBuilder(
+                            builder: (context, box) {
+                              final search = TextField(
+                                // Owned by the page, so the typed text
+                                // survives the switch between the two
+                                // layouts below, which remounts the field.
+                                controller: _searchCtl,
+                                onChanged: (v) => setState(() {
+                                  _query = v;
+                                  _page = 0;
+                                }),
+                                decoration: const InputDecoration(
+                                  hintText:
+                                      'Search name, email, enrollment or room',
+                                  prefixIcon: Icon(Icons.search_rounded),
+                                  isDense: true,
                                 ),
-                              ),
-                              const SizedBox(width: 14),
-                              SegmentedButton<_Filter>(
+                              );
+                              final narrow = box.maxWidth < 600;
+                              final status = SegmentedButton<_Filter>(
+                                expandedInsets: narrow ? EdgeInsets.zero : null,
                                 segments: [
                                   ButtonSegment(
                                     value: _Filter.pending,
@@ -311,8 +381,26 @@ class _AllotmentPageState extends State<AllotmentPage> {
                                   _filter = s.first;
                                   _page = 0;
                                 }),
-                              ),
-                            ],
+                              );
+                              if (narrow) {
+                                return Column(
+                                  crossAxisAlignment:
+                                      CrossAxisAlignment.stretch,
+                                  children: [
+                                    search,
+                                    const SizedBox(height: 10),
+                                    status,
+                                  ],
+                                );
+                              }
+                              return Row(
+                                children: [
+                                  Expanded(child: search),
+                                  const SizedBox(width: 14),
+                                  status,
+                                ],
+                              );
+                            },
                           ),
                           const SizedBox(height: 14),
                           _ChipFilter<String>(
@@ -324,6 +412,8 @@ class _AllotmentPageState extends State<AllotmentPage> {
                                 '(${courseCounts[c] ?? 0})',
                             onChanged: (c) => setState(() {
                               _course = c;
+                              // LEET only exists within Graduation.
+                              if (!hasLateralEntry(c)) _entry = null;
                               // A 4th-year pick means nothing once PG is chosen.
                               if (c != null &&
                                   _year != null &&
@@ -345,6 +435,73 @@ class _AllotmentPageState extends State<AllotmentPage> {
                               _page = 0;
                             }),
                           ),
+                          // A sub-filter of Graduation: shown once it's picked.
+                          if (showEntry) ...[
+                            const SizedBox(height: 10),
+                            _ChipFilter<String>(
+                              label: 'Entry',
+                              options: const [kEntryRegular, kEntryLeet],
+                              selected: _entry,
+                              labelFor: (e) => '$e (${entryCounts[e] ?? 0})',
+                              onChanged: (e) => setState(() {
+                                _entry = e;
+                                _page = 0;
+                              }),
+                            ),
+                          ],
+                          if (canAllot && hostels.isNotEmpty) ...[
+                            const SizedBox(height: 14),
+                            Row(
+                              children: [
+                                Expanded(
+                                  child: Text(
+                                    rosterError != null
+                                        ? 'Can\'t auto-allot: academic '
+                                              'records didn\'t load '
+                                              '($rosterError).'
+                                        : !rosterReady
+                                        ? 'Loading academic records…'
+                                        : autoReady
+                                        ? '${autoCandidates.length} waiting in '
+                                              '$scopeLabel — fill a hostel\'s '
+                                              'rooms in order, in one click.'
+                                        : _course == null && _year == null
+                                        ? 'Pick a course and/or year to '
+                                              'auto-allot that whole group '
+                                              'into a hostel, room by room.'
+                                        : 'Nobody in $scopeLabel is waiting '
+                                              'for a room.',
+                                    style: TextStyle(
+                                      fontSize: 12.5,
+                                      color: AppColors.textMuted,
+                                    ),
+                                  ),
+                                ),
+                                const SizedBox(width: 12),
+                                FilledButton.icon(
+                                  onPressed: autoReady
+                                      ? () => _openAutoAllot(
+                                          session.user,
+                                          hostels,
+                                          autoCandidates,
+                                          byUid,
+                                          scopeLabel,
+                                        )
+                                      : null,
+                                  icon: const Icon(
+                                    Icons.bolt_rounded,
+                                    size: 18,
+                                  ),
+                                  label: Text(
+                                    autoReady
+                                        ? 'Auto-allot '
+                                              '(${autoCandidates.length})'
+                                        : 'Auto-allot',
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ],
                         ],
                       ),
                     ),
@@ -354,7 +511,7 @@ class _AllotmentPageState extends State<AllotmentPage> {
                         padding: const EdgeInsets.symmetric(vertical: 54),
                         child: Center(
                           child: Text(
-                            _course != null || _year != null
+                            _course != null || _year != null || _entry != null
                                 ? 'Nobody matches these filters.'
                                 : _filter == _Filter.pending
                                 ? 'Everyone has a room. Nice.'
@@ -438,6 +595,31 @@ class _AllotmentPageState extends State<AllotmentPage> {
   }
 
   void _openDetail(AppUser u) => setState(() => _openUser = u);
+
+  /// Everything the dialog needs is handed over here: it opens above
+  /// SessionScope, where `Session.of` throws.
+  Future<void> _openAutoAllot(
+    AppUser actor,
+    List<Hostel> hostels,
+    List<AppUser> students,
+    Map<String, Enrollment> byUid,
+    String scopeLabel,
+  ) async {
+    await showDialog<bool>(
+      context: context,
+      barrierDismissible: false,
+      builder: (_) => AutoAllotDialog(
+        collegeId: actor.collegeId,
+        actor: actor,
+        hostels: hostels,
+        students: students,
+        requiredCapacityByUid: {
+          for (final u in students) u.uid: byUid[u.uid]?.requiredCapacity,
+        },
+        scopeLabel: scopeLabel,
+      ),
+    );
+  }
 
   void _openAllot(AppUser u, {required bool move}) => setState(() {
     _allotUser = u;

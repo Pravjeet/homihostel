@@ -62,6 +62,9 @@ class _StudentOverviewPageState extends State<StudentOverviewPage> {
   String? _batch;
   String? _religion;
   String? _course;
+
+  /// LEET or Regular — only offered, and only meaningful, under Graduation.
+  String? _entry;
   String? _category;
   String? _blood;
 
@@ -193,6 +196,7 @@ class _StudentOverviewPageState extends State<StudentOverviewPage> {
       (_batch == null || u.batch == _batch) &&
       (_religion == null || _religionOf(u) == _religion) &&
       (_course == null || _courseOf(u) == _course) &&
+      (_entry == null || entryTypeOf(u) == _entry) &&
       (_category == null || _categoryOf(u) == _category) &&
       (_blood == null || _bloodOf(u) == _blood);
 
@@ -206,6 +210,7 @@ class _StudentOverviewPageState extends State<StudentOverviewPage> {
       _batch != null ||
       _religion != null ||
       _course != null ||
+      _entry != null ||
       _category != null ||
       _blood != null;
 
@@ -220,6 +225,7 @@ class _StudentOverviewPageState extends State<StudentOverviewPage> {
     _batch = null;
     _religion = null;
     _course = null;
+    _entry = null;
     _category = null;
     _blood = null;
     _page = 0;
@@ -551,6 +557,16 @@ class _StudentOverviewPageState extends State<StudentOverviewPage> {
                                   course: _course,
                                   onCourse: (v) => setState(() {
                                     _course = _course == v ? null : v;
+                                    // LEET only exists within Graduation.
+                                    if (!hasLateralEntry(_course)) {
+                                      _entry = null;
+                                    }
+                                    _page = 0;
+                                  }),
+                                  showEntry: hasLateralEntry(_course),
+                                  entry: _entry,
+                                  onEntry: (v) => setState(() {
+                                    _entry = _entry == v ? null : v;
                                     _page = 0;
                                   }),
                                   categoryOptions: categoryOptions,
@@ -730,6 +746,9 @@ class _SlicerRail extends StatelessWidget {
   final ValueChanged<String> onBatch;
   final ValueChanged<String> onReligion;
   final ValueChanged<String> onCourse;
+  final bool showEntry;
+  final String? entry;
+  final ValueChanged<String> onEntry;
   final ValueChanged<String> onCategory;
   final ValueChanged<String> onBlood;
 
@@ -763,6 +782,9 @@ class _SlicerRail extends StatelessWidget {
     required this.onBatch,
     required this.onReligion,
     required this.onCourse,
+    required this.showEntry,
+    required this.entry,
+    required this.onEntry,
     required this.onCategory,
     required this.onBlood,
   });
@@ -789,6 +811,18 @@ class _SlicerRail extends StatelessWidget {
           onTap: onCourse,
           columns: 1,
         ),
+        // A sub-filter of Graduation, so it sits right under Course and only
+        // appears once Graduation is picked.
+        if (showEntry) ...[
+          const SizedBox(height: 14),
+          _SlicerBox<String>(
+            title: 'Entry',
+            options: const [kEntryRegular, kEntryLeet],
+            selected: entry,
+            onTap: onEntry,
+            columns: 2,
+          ),
+        ],
         const SizedBox(height: 14),
         _SlicerBox<String>(
           title: 'Trade',

@@ -30,6 +30,7 @@ import {
   serverTimestamp,
   deleteField,
   Timestamp,
+  increment,
 } from 'firebase/firestore';
 
 let testEnv;
@@ -607,6 +608,119 @@ describe('enrollments', () => {
       enrollmentsOf(asUser('student-a'), COLLEGE_A)
         .where('session', '==', '2026-27')
         .get(),
+    );
+  });
+
+  it('allotment.manage can read an enrollment and list the session roster', async () => {
+    // Every allot transaction reads the student's enrollment, and Room
+    // Allotment lists the roster for years and the seating policy. A stock
+    // Warden (no academic.*) was denied both — so no Warden could allot.
+    await seed(COLLEGE_A, { wardenRole: ['allotment.manage', 'users.view'] });
+    await seedUser(COLLEGE_A, 'warden-a', 'warden');
+    await testEnv.withSecurityRulesDisabled(async (ctx) => {
+      await ctx
+        .firestore()
+        .collection('colleges')
+        .doc(COLLEGE_A)
+        .collection('enrollments')
+        .doc('student-a_2026-27')
+        .set(enrollment('student-a'));
+    });
+
+    const col = enrollmentsOf(asUser('warden-a'), COLLEGE_A);
+    await assertSucceeds(col.doc('student-a_2026-27').get());
+    await assertSucceeds(col.doc('nobody_2026-27').get());
+    await assertSucceeds(col.where('session', '==', '2026-27').get());
+  });
+
+  it('allotment.manage without users.view cannot list the roster', async () => {
+    // BHS: fills beds but is deliberately kept out of the student directory.
+    // It may read one enrollment by id (the allot transaction does), but not
+    // enumerate every student by listing enrollments.
+    await seed(COLLEGE_A, { wardenRole: ['allotment.manage'] });
+    await seedUser(COLLEGE_A, 'warden-a', 'warden');
+    await testEnv.withSecurityRulesDisabled(async (ctx) => {
+      await ctx
+        .firestore()
+        .collection('colleges')
+        .doc(COLLEGE_A)
+        .collection('enrollments')
+        .doc('student-a_2026-27')
+        .set(enrollment('student-a'));
+    });
+
+    const col = enrollmentsOf(asUser('warden-a'), COLLEGE_A);
+    await assertSucceeds(col.doc('student-a_2026-27').get());
+    await assertFails(col.where('session', '==', '2026-27').get());
+  });
+
+  it('a Warden-shaped role can run the whole allot transaction', async () => {
+    // The exact reads and writes AllotmentService.allot makes, as a role with
+    // the stock Warden's allotment-relevant permissions and nothing academic.
+    await seed(COLLEGE_A, {
+      wardenRole: ['users.view', 'hostels.view', 'allotment.manage'],
+    });
+    await seedUser(COLLEGE_A, 'warden-a', 'warden');
+    await seedUser(COLLEGE_A, 'student-a', 'student');
+    await testEnv.withSecurityRulesDisabled(async (ctx) => {
+      const college = ctx.firestore().collection('colleges').doc(COLLEGE_A);
+      await college.collection('settings').doc('config').set({
+        session: { current: '2026-27' },
+      });
+      await college
+        .collection('hostels')
+        .doc('h1')
+        .set({ name: 'BH-1', occupiedBeds: 0 });
+      await college
+        .collection('hostels')
+        .doc('h1')
+        .collection('rooms')
+        .doc('101')
+        .set({ number: '101', capacity: 3, occupantUids: [] });
+      await college
+        .collection('enrollments')
+        .doc('student-a_2026-27')
+        .set(enrollment('student-a'));
+    });
+
+    const db = asUser('warden-a');
+    const college = db.collection('colleges').doc(COLLEGE_A);
+    const roomRef = college
+      .collection('hostels')
+      .doc('h1')
+      .collection('rooms')
+      .doc('101');
+    const userRef = db.collection('users').doc('student-a');
+    const hostelRef = college.collection('hostels').doc('h1');
+    const settingsRef = college.collection('settings').doc('config');
+    const enrollmentRef = college
+      .collection('enrollments')
+      .doc('student-a_2026-27');
+
+    await assertSucceeds(
+      db.runTransaction(async (tx) => {
+        await tx.get(roomRef);
+        await tx.get(userRef);
+        await tx.get(settingsRef);
+        await tx.get(enrollmentRef);
+        tx.update(roomRef, { occupantUids: ['student-a'] });
+        tx.update(userRef, {
+          hostelId: 'h1',
+          hostelName: 'BH-1',
+          roomId: '101',
+          roomNumber: '101',
+          allottedAt: serverTimestamp(),
+        });
+        tx.update(hostelRef, { occupiedBeds: increment(1) });
+        tx.update(enrollmentRef, {
+          hostelId: 'h1',
+          hostelName: 'BH-1',
+          roomId: '101',
+          roomNumber: '101',
+          roomCapacity: 3,
+          allottedAt: serverTimestamp(),
+        });
+      }),
     );
   });
 

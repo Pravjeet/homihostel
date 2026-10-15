@@ -602,15 +602,25 @@ service cloud.firestore {
     // is no meaningful distinction between "first write" and "re-run" here.
 
     match /colleges/{collegeId}/enrollments/{enrollmentId} {
+      // allotment.manage reads too: every allot/move/vacate transaction reads
+      // the student's enrollment to keep its room fields in step, and Room
+      // Allotment lists the session roster for years and the seating policy.
+      // Without it a stock Warden got permission-denied on every bed — only
+      // a Super Admin (who short-circuits hasPerm) could allot at all.
       allow get: if sameCollege(collegeId) && (
                    resource.data.uid == request.auth.uid
                    || hasPerm('academic.view')
                    || hasPerm('academic.manage')
+                   || hasPerm('allotment.manage')
                  );
 
+      // Listing the roster also needs users.view: a role kept out of the
+      // student directory (BHS has allotment.manage but not users.view)
+      // must not get it back by listing enrollments instead.
       allow list: if sameCollege(collegeId) && (
                     hasPerm('academic.view')
                     || hasPerm('academic.manage')
+                    || (hasPerm('allotment.manage') && hasPerm('users.view'))
                     || resource.data.uid == request.auth.uid
                   );
 
