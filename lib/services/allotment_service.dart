@@ -3,6 +3,7 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import '../models/app_user.dart';
 import '../models/enrollment.dart';
 import '../models/hostel.dart';
+import '../utils/enrollment_helpers.dart';
 import 'audit_service.dart';
 
 /// Moving students in and out of rooms.
@@ -174,6 +175,43 @@ class AllotmentService {
     return out;
   }
 
+  static String seatingRefusal(
+    String name, {
+    required Room room,
+    required int requiredCapacity,
+  }) =>
+      'Room ${room.number} is a ${roomTypeLabel(room.capacity)}, but the '
+      'seating policy entitles $name to a ${roomTypeLabel(requiredCapacity)} '
+      'this year.';
+
+  /// Marks a UG student as having earned a single on merit (or not).
+  ///
+  /// Stored on the student's own record, `users/{uid}.singleRoomEligible` —
+  /// the field the seating policy already reads. It is an allotment decision,
+  /// so it rides on allotment.manage (the rules allow exactly this field
+  /// alongside the room fields), and it changes no room by itself: a student
+  /// already in a 3-Seater stays there until moved.
+  Future<void> setMerit({
+    required String collegeId,
+    required AppUser student,
+    required bool merit,
+    required AppUser actor,
+  }) async {
+    await _db.collection('users').doc(student.uid).update({
+      'singleRoomEligible': merit,
+      'updatedAt': FieldValue.serverTimestamp(),
+    });
+    await AuditService.instance.record(
+      collegeId: collegeId,
+      actor: actor,
+      action: 'allotment.merit',
+      summary:
+          '${merit ? 'Marked' : 'Unmarked'} ${student.name} as merit '
+          '(single room)',
+      targetLabel: student.name,
+    );
+  }
+
   static String genderRefusal(HostelGender hostel, String? studentGender) =>
       'This is a ${hostel.label} hostel and the student is recorded as '
       '${studentGender ?? 'unspecified'}. Change the hostel, or correct the '
@@ -185,11 +223,18 @@ class AllotmentService {
 
   /// Places [student] into [room]. Fails if the room filled up in the meantime,
   /// if the student already holds a bed, or if gender rules forbid it.
+  ///
+  /// [requiredCapacity] is the room type the seating policy entitles the
+  /// student to (see `entitledRoomCapacity`); a room of any other capacity is
+  /// refused. Every screen passes it, so the policy holds whichever way a bed
+  /// is filled. Null means no policy applies — or a Super Admin has chosen to
+  /// bypass it for this one allotment.
   Future<void> allot({
     required String collegeId,
     required AppUser student,
     required Hostel hostel,
     required Room room,
+    int? requiredCapacity,
   }) async {
     if (student.isGraduated) {
       throw AllotmentFailure(graduatedRefusal(student.name));
@@ -276,6 +321,14 @@ class AllotmentService {
         refusal =
             'Room ${fresh.number} filled up while you were choosing '
             '(${fresh.occupied}/${fresh.capacity}).';
+        return;
+      }
+      if (requiredCapacity != null && fresh.capacity != requiredCapacity) {
+        refusal = seatingRefusal(
+          freshUser.name,
+          room: fresh,
+          requiredCapacity: requiredCapacity,
+        );
         return;
       }
 
@@ -400,7 +453,13 @@ class AllotmentService {
       for (var i = 0; i < open.length; i++) {
         if (remaining[i] == 0) continue;
         if (need != null && open[i].capacity != need) continue;
-        assignments.add(AutoAllotAssignment(student: student, room: open[i]));
+        assignments.add(
+          AutoAllotAssignment(
+            student: student,
+            room: open[i],
+            requiredCapacity: need,
+          ),
+        );
         remaining[i]--;
         placed = true;
         break;
@@ -491,6 +550,7 @@ class AllotmentService {
             student: a.student,
             hostel: hostel,
             room: a.room,
+            requiredCapacity: a.requiredCapacity,
           );
           allotted++;
         } catch (e) {
@@ -721,6 +781,7 @@ class AllotmentService {
     required AppUser student,
     required Hostel toHostel,
     required Room toRoom,
+    int? requiredCapacity,
   }) async {
     // Checked here as well as in `allot`: the rebuilt `cleared` student below
     // carries no status, so `allot` can't see the graduation, and by then the
@@ -730,6 +791,17 @@ class AllotmentService {
     }
     if (!genderAllows(toHostel.gender, student.gender)) {
       throw AllotmentFailure(genderRefusal(toHostel.gender, student.gender));
+    }
+    // Before the vacate, for the same reason as the checks above: refusing
+    // only inside `allot` would leave the student with no room at all.
+    if (requiredCapacity != null && toRoom.capacity != requiredCapacity) {
+      throw AllotmentFailure(
+        seatingRefusal(
+          student.name,
+          room: toRoom,
+          requiredCapacity: requiredCapacity,
+        ),
+      );
     }
 
     await vacate(collegeId: collegeId, student: student);
@@ -754,6 +826,7 @@ class AllotmentService {
       student: cleared,
       hostel: toHostel,
       room: toRoom,
+      requiredCapacity: requiredCapacity,
     );
   }
 
@@ -794,7 +867,16 @@ class AllotmentService {
 class AutoAllotAssignment {
   final AppUser student;
   final Room room;
-  const AutoAllotAssignment({required this.student, required this.room});
+
+  /// The room type the policy entitles [student] to, carried through to
+  /// [AllotmentService.allot] so the write enforces what the plan assumed.
+  final int? requiredCapacity;
+
+  const AutoAllotAssignment({
+    required this.student,
+    required this.room,
+    this.requiredCapacity,
+  });
 }
 
 /// What [AllotmentService.planAutoAllot] decided, with everyone it could not

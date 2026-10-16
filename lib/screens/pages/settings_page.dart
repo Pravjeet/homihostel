@@ -1533,10 +1533,11 @@ class _DangerZoneState extends State<_DangerZone> {
                       ),
                       const SizedBox(height: 3),
                       Text(
-                        'One button for a clean slate: every profile, mess fee '
-                        'record, fine, request and room assignment. Hostels, '
-                        'rooms, college details, roles and Super Admins are '
-                        'kept.',
+                        'One button for a clean slate: every profile and its '
+                        'sign-in account, mess fee record, fine, request, '
+                        'academic record and room assignment. Hostels, rooms, '
+                        'college details, roles and Super Admins are kept.'
+                        '${session.user.isSuperAdmin ? '' : '\nSuper Admin only.'}',
                         style: TextStyle(
                           fontSize: 12.5,
                           color: AppColors.danger,
@@ -1548,7 +1549,11 @@ class _DangerZoneState extends State<_DangerZone> {
                 ),
                 const SizedBox(width: 16),
                 FilledButton(
-                  onPressed: _busy ? null : () => _resetAll(session),
+                  // Super Admin only — see ResetService.resetStudentData,
+                  // which refuses anyone else before touching anything.
+                  onPressed: _busy || !session.user.isSuperAdmin
+                      ? null
+                      : () => _resetAll(session),
                   style: FilledButton.styleFrom(
                     backgroundColor: AppColors.danger,
                   ),
@@ -1678,7 +1683,9 @@ class _DangerZoneState extends State<_DangerZone> {
                 'Clears every room\'s occupants and resets occupancy to '
                 'zero. Use if deleted students are still shown occupying a '
                 'room.',
-            busy: _busy,
+            // Disabled, not refused half-way, for a role that can't write
+            // every part it touches — see Session.canEmptyAllRooms.
+            busy: _busy || !session.canEmptyAllRooms,
             onTap: () => _confirm(
               title: 'Empty all rooms?',
               body:

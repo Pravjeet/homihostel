@@ -422,9 +422,11 @@ enum CourseSeating {
   /// Every year in a shared room. Diploma/ICD, whose students never move up.
   alwaysShared,
 
-  /// Shared for the first two years, then a single **if** the student earned
-  /// one on second-year results ([AppUser.singleRoomEligible]) — otherwise
-  /// shared again. The UG rule.
+  /// Shared for the first two years; in the years between that and the last,
+  /// a single **if** the student was marked on merit
+  /// ([AppUser.singleRoomEligible]), otherwise shared; and a single for
+  /// everyone in the final year. The UG rule: 3rd year on merit, 4th year all
+  /// singles.
   meritSingle,
 
   /// A single throughout, regardless of year or merit. Masters and PhD.
@@ -434,7 +436,8 @@ enum CourseSeating {
 extension CourseSeatingX on CourseSeating {
   String get label => switch (this) {
     CourseSeating.alwaysShared => 'Shared every year',
-    CourseSeating.meritSingle => 'Shared, then single on merit',
+    CourseSeating.meritSingle =>
+      'Shared 1st–2nd · single on merit · single in final year',
     CourseSeating.alwaysSingle => 'Single every year',
   };
 

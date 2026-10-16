@@ -532,6 +532,18 @@ String? _normaliseGender(String raw) {
 // Execution
 // =====================================================================
 
+/// Which part of an import is running, for the progress display. Each phase
+/// counts its own students, so the numbers always mean "students".
+enum ImportPhase {
+  updating('Updating existing students'),
+  accounts('Creating accounts'),
+  hostels('Assigning hostels'),
+  rooms('Allotting rooms');
+
+  final String label;
+  const ImportPhase(this.label);
+}
+
 class ImportOutcome {
   final int created;
   final int updated;
@@ -593,17 +605,17 @@ bool _isThrottle(Object e) {
 /// These are plain Firestore writes — no Auth involved, and nothing Firebase
 /// rate limits at this scale. The phase is purely round-trip bound, so this
 /// is the one number here that can be raised without thinking hard about it.
-const int kUpdateConcurrency = 10;
+const int kUpdateConcurrency = 20;
 
 /// How many accounts to create at once, *before* Firebase objects.
 ///
-/// Deliberately much lower than the Node importer's 10. That script holds a
+/// Deliberately lower than the Node importer's 10. That script holds a
 /// service-account key and talks to the Admin endpoint; this runs in a
 /// browser and must go through the public sign-up door, which is quota'd per
-/// project. Four is a bet that the quota is above one-at-a-time — and
+/// project. Six is a bet that the quota is above one-at-a-time — and
 /// [runImport] gives the bet back the moment Firebase says no, by collapsing
 /// to a single lane for the rest of the run.
-const int kCreateConcurrency = 4;
+const int kCreateConcurrency = 6;
 
 /// What one pooled task learned about whether the pool should stay wide.
 enum LaneVerdict {
@@ -664,7 +676,7 @@ Future<void> runPooled<T>({
   await Future.wait([for (var id = 0; id < lanes; id++) worker(id)]);
 }
 
-/// Runs the plan, in three phases rather than one row-at-a-time pass.
+/// Runs the plan in phases rather than one row-at-a-time pass.
 ///
 /// The pass this replaced was sequential end to end, which meant a 200-student
 /// import paid full network latency 600+ times over. Splitting it works
@@ -678,7 +690,11 @@ Future<void> runPooled<T>({
 ///    **collapse to one** the first time a throttle is seen, so a generous
 ///    quota gets used and a tight one gets today's behaviour instead of a
 ///    project-wide block.
-///  * **Allotment stays strictly sequential.** Two rows can name the same
+///    A new student named against a hostel with no room gets the hostel in
+///    that same create write, so most of a typical sheet needs nothing more.
+///  * **Hostel-only for existing students** runs in parallel waves — no room,
+///    so nothing to contend over.
+///  * **Room allotment stays strictly sequential.** Two rows can name the same
 ///    room, and the shared room cache is what stops the phase re-reading a
 ///    hostel per student. The transaction would keep it correct either way;
 ///    running it in parallel would just trade correctness-by-design for
@@ -696,13 +712,14 @@ Future<void> runPooled<T>({
 Future<ImportOutcome> runImport({
   required ImportPlan plan,
   required String collegeId,
-  required void Function(int done, int total, String label) onProgress,
+  required void Function(ImportPhase phase, int done, int total, String label)
+  onProgress,
   bool Function()? isCancelled,
 }) async {
   final work = plan.rows.where((r) => r.isValid).toList();
   final failures = <String>[];
   final allotIssues = <String>[];
-  var created = 0, updated = 0, allotted = 0, hostelOnly = 0, done = 0;
+  var created = 0, updated = 0, allotted = 0, hostelOnly = 0;
   var stoppedEarly = false;
 
   // Cache rooms per hostel so a 30-row import doesn't re-read the same
@@ -711,16 +728,32 @@ Future<ImportOutcome> runImport({
 
   final creates = work.where((r) => r.action == RowAction.create).toList();
   final updates = work.where((r) => r.action != RowAction.create).toList();
-  final allotWork = work
+
+  // A NEW student named against a hostel with no room gets that hostel in
+  // the very write that creates their profile — no separate transaction
+  // afterwards. That used to be a second, strictly one-at-a-time pass over
+  // nearly every row of a typical sheet (496 of 530), and the slowest part of
+  // the import. Safe because a brand-new student has no room to contend over
+  // and no enrollment yet to sync; the gender rule is still applied.
+  final hostelAtCreate = <ImportRow>{
+    for (final r in creates)
+      if (r.hostel != null &&
+          r.roomNumber == null &&
+          AllotmentService.genderAllows(r.hostel!.gender, r.values['gender']))
+        r,
+  };
+
+  // What's left for after the accounts: rooms (careful, sequential), and
+  // hostel-only for existing students (parallel — nothing to contend over).
+  final roomWork = work.where((r) => r.wantsAllotment).toList();
+  final hostelWork = work
       .where(
-        (r) => r.wantsAllotment || (r.hostel != null && r.roomNumber == null),
+        (r) =>
+            r.hostel != null &&
+            r.roomNumber == null &&
+            !hostelAtCreate.contains(r),
       )
       .toList();
-
-  // Progress is counted in units of work, not rows: a student who also needs
-  // a room is two. Without this the bar would sit at 100% for the whole
-  // allotment phase.
-  final totalUnits = work.length + allotWork.length;
 
   // Who each row ended up being, so the allotment phase doesn't have to
   // re-query for a uid the account phase was already handed.
@@ -728,9 +761,19 @@ Future<ImportOutcome> runImport({
 
   bool cancelled() => isCancelled?.call() ?? false;
 
-  void step(String label) {
-    done++;
-    onProgress(done, totalUnits, label);
+  // Progress counts STUDENTS, per phase — "Creating accounts · 156 of 530",
+  // then "Allotting rooms · 12 of 34". It used to count units of work across
+  // phases, so a 530-student sheet read "of 1060" and looked like a double
+  // import.
+  var studentsDone = 0;
+  void studentDone(String label) {
+    studentsDone++;
+    onProgress(
+      creates.isEmpty ? ImportPhase.updating : ImportPhase.accounts,
+      studentsDone,
+      work.length,
+      label,
+    );
   }
 
   void recordFailure(ImportRow row, Object e) {
@@ -754,7 +797,12 @@ Future<ImportOutcome> runImport({
       i,
       (i + kUpdateConcurrency).clamp(0, updates.length),
     );
-    onProgress(done, totalUnits, slice.first.name);
+    onProgress(
+      ImportPhase.updating,
+      studentsDone,
+      work.length,
+      slice.first.name,
+    );
 
     await Future.wait(
       slice.map((row) async {
@@ -778,9 +826,10 @@ Future<ImportOutcome> runImport({
       }),
     );
 
-    // Counted after the wave commits, so `done` never runs ahead of the work.
+    // Counted after the wave commits, so the count never runs ahead of the
+    // work.
     for (final row in slice) {
-      step(row.name);
+      studentDone(row.name);
     }
   }
 
@@ -807,7 +856,7 @@ Future<ImportOutcome> runImport({
       task: (row, id) async {
         // Report before the work, so the label moves the moment a row starts
         // rather than only once it finishes.
-        onProgress(done, totalUnits, row.name);
+        onProgress(ImportPhase.accounts, studentsDone, work.length, row.name);
 
         var throttled = false;
         try {
@@ -834,7 +883,13 @@ Future<ImportOutcome> runImport({
                     enrollmentNo: row.registrationNo.isEmpty
                         ? null
                         : row.registrationNo,
-                    extra: _detailFields(row),
+                    extra: {
+                      ..._detailFields(row),
+                      if (hostelAtCreate.contains(row)) ...{
+                        'hostelId': row.hostel!.id,
+                        'hostelName': row.hostel!.name,
+                      },
+                    },
                     app: apps[id],
                   )
                   .timeout(kRowTimeout);
@@ -846,8 +901,9 @@ Future<ImportOutcome> runImport({
               if (attempt >= kThrottleBackoff.length) rethrow;
               final wait = kThrottleBackoff[attempt];
               onProgress(
-                done,
-                totalUnits,
+                ImportPhase.accounts,
+                studentsDone,
+                work.length,
                 'Firebase is throttling — waiting ${wait.inSeconds}s, then '
                 'retrying ${row.name}',
               );
@@ -855,10 +911,11 @@ Future<ImportOutcome> runImport({
             }
           }
           created++;
+          if (hostelAtCreate.contains(row)) hostelOnly++;
         } catch (e) {
           recordFailure(row, e);
         }
-        step(row.name);
+        studentDone(row.name);
         return throttled ? LaneVerdict.narrow : LaneVerdict.ok;
       },
     );
@@ -868,87 +925,131 @@ Future<ImportOutcome> runImport({
     }
   }
 
-  // ---- phase 3: rooms, strictly sequential -------------------------------
+  // A row whose student wasn't named against a hostel they can live in is
+  // reported here rather than silently dropped.
+  for (final r in creates) {
+    if (r.hostel != null &&
+        r.roomNumber == null &&
+        !hostelAtCreate.contains(r) &&
+        resolved[r] != null) {
+      allotIssues.add(
+        'Row ${r.lineNumber}: '
+        '${AllotmentService.genderRefusal(r.hostel!.gender, r.values['gender'])}',
+      );
+    }
+  }
 
-  for (final row in allotWork) {
+  // ---- phase 3: hostel-only for EXISTING students, in parallel waves ------
+  //
+  // Existing students go through assignHostelOnly — it also syncs their
+  // current-session enrollment, which a plain write would miss. Nothing is
+  // contended (no room, no capacity), so waves run side by side.
+  final hostelRows = hostelWork.where((r) => resolved[r] != null).toList();
+  var hostelDone = 0;
+  for (var i = 0; i < hostelRows.length; i += kUpdateConcurrency) {
     if (cancelled()) {
       stoppedEarly = true;
       break;
     }
-    // Absent means the account stage failed for this row — it has already
-    // been reported, and there is nobody to put in a bed.
-    final person = resolved[row];
-    if (person == null) continue;
-
-    onProgress(done, totalUnits, row.name);
-
-    // --- allotment, best-effort: a room problem must not undo the account ---
-    if (row.wantsAllotment) {
-      try {
-        final h = row.hostel!;
-        final rooms = roomCache[h.id] ??= await HostelService.instance
-            .roomsOnce(collegeId, h.id)
-            .timeout(kAllotTimeout);
-        Room? target;
-        var targetIndex = -1;
-        for (var i = 0; i < rooms.length; i++) {
-          if (rooms[i].number == row.roomNumber) {
-            target = rooms[i];
-            targetIndex = i;
-            break;
-          }
-        }
-        if (target == null) {
-          allotIssues.add(
-            'Row ${row.lineNumber}: ${h.name} has no room ${row.roomNumber}',
-          );
-        } else if (person.isAllotted) {
-          allotIssues.add(
-            'Row ${row.lineNumber}: ${person.name} already has '
-            '${person.roomLabel}',
-          );
-        } else {
+    final slice = hostelRows.sublist(
+      i,
+      (i + kUpdateConcurrency).clamp(0, hostelRows.length),
+    );
+    onProgress(
+      ImportPhase.hostels,
+      hostelDone,
+      hostelRows.length,
+      slice.first.name,
+    );
+    await Future.wait(
+      slice.map((row) async {
+        try {
           await AllotmentService.instance
-              .allot(
+              .assignHostelOnly(
                 collegeId: collegeId,
-                student: person,
-                hostel: h,
-                room: target,
+                student: resolved[row]!,
+                hostel: row.hostel!,
               )
               .timeout(kAllotTimeout);
-          allotted++;
-          // Patch the cached room rather than dropping the whole hostel's
-          // room list and re-reading it on the next student.
-          rooms[targetIndex] = target.copyWith(
-            occupantUids: [...target.occupantUids, person.uid],
+          hostelOnly++;
+        } catch (e) {
+          allotIssues.add(
+            'Row ${row.lineNumber}: '
+            '${e is AllotmentFailure ? e.message : AuthService.describeError(e)}',
           );
         }
-      } catch (e) {
-        allotIssues.add(
-          'Row ${row.lineNumber}: '
-          '${e is AllotmentFailure ? e.message : AuthService.describeError(e)}',
-        );
+      }),
+    );
+    hostelDone += slice.length;
+    onProgress(
+      ImportPhase.hostels,
+      hostelDone,
+      hostelRows.length,
+      slice.last.name,
+    );
+  }
+
+  // ---- phase 4: rooms, strictly sequential -------------------------------
+  //
+  // Two rows can name the same room; the transaction keeps that correct, and
+  // the shared room cache stops a re-read of the hostel per student.
+  final roomRows = roomWork.where((r) => resolved[r] != null).toList();
+  var roomDone = 0;
+  for (final row in roomRows) {
+    if (cancelled()) {
+      stoppedEarly = true;
+      break;
+    }
+    final person = resolved[row]!;
+    onProgress(ImportPhase.rooms, roomDone, roomRows.length, row.name);
+
+    try {
+      final h = row.hostel!;
+      final rooms = roomCache[h.id] ??= await HostelService.instance
+          .roomsOnce(collegeId, h.id)
+          .timeout(kAllotTimeout);
+      Room? target;
+      var targetIndex = -1;
+      for (var i = 0; i < rooms.length; i++) {
+        if (rooms[i].number == row.roomNumber) {
+          target = rooms[i];
+          targetIndex = i;
+          break;
+        }
       }
-    } else if (row.hostel != null && row.roomNumber == null) {
-      // Hostel named but no room — record membership without a bed.
-      try {
+      if (target == null) {
+        allotIssues.add(
+          'Row ${row.lineNumber}: ${h.name} has no room ${row.roomNumber}',
+        );
+      } else if (person.isAllotted) {
+        allotIssues.add(
+          'Row ${row.lineNumber}: ${person.name} already has '
+          '${person.roomLabel}',
+        );
+      } else {
         await AllotmentService.instance
-            .assignHostelOnly(
+            .allot(
               collegeId: collegeId,
               student: person,
-              hostel: row.hostel!,
+              hostel: h,
+              room: target,
             )
             .timeout(kAllotTimeout);
-        hostelOnly++;
-      } catch (e) {
-        allotIssues.add(
-          'Row ${row.lineNumber}: '
-          '${e is AllotmentFailure ? e.message : AuthService.describeError(e)}',
+        allotted++;
+        // Patch the cached room rather than dropping the whole hostel's
+        // room list and re-reading it on the next student.
+        rooms[targetIndex] = target.copyWith(
+          occupantUids: [...target.occupantUids, person.uid],
         );
       }
+    } catch (e) {
+      allotIssues.add(
+        'Row ${row.lineNumber}: '
+        '${e is AllotmentFailure ? e.message : AuthService.describeError(e)}',
+      );
     }
-
-    step(row.name);
+    roomDone++;
+    onProgress(ImportPhase.rooms, roomDone, roomRows.length, row.name);
   }
 
   return ImportOutcome(
@@ -959,7 +1060,7 @@ Future<ImportOutcome> runImport({
     failures,
     allotIssues,
     stoppedEarly: stoppedEarly,
-    remaining: totalUnits - done,
+    remaining: work.length - studentsDone,
   );
 }
 

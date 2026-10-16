@@ -2,12 +2,14 @@ import 'package:flutter/material.dart';
 
 import '../../core/theme.dart';
 import '../../models/app_user.dart';
+import '../../models/college_settings.dart';
 import '../../models/enrollment.dart';
 import '../../models/hostel.dart';
 import '../../services/allotment_service.dart';
 import '../../services/auth_service.dart';
 import '../../services/data_service.dart';
 import '../../services/enrollment_service.dart';
+import '../../utils/enrollment_helpers.dart';
 import '../../widgets/student_photo.dart';
 
 /// Renders one past-session enrollment through the same `_OccupantTile` a
@@ -75,6 +77,18 @@ class RoomDetailDialog extends StatefulWidget {
   /// additionally explained rather than merely absent.
   final String? viewingSession;
 
+  /// The college's course rules — for the seating policy, so a student is
+  /// only offered a room of the type they're entitled to. The same rule Room
+  /// Allotment and auto-allot use; passed in because this dialog sits above
+  /// SessionScope.
+  final CollegeSettings settings;
+
+  /// The live session, whose enrollments give each candidate's year.
+  final String? liveSession;
+
+  /// Only a Super Admin is offered "Bypass course room allotment rules".
+  final bool isSuperAdmin;
+
   const RoomDetailDialog({
     super.key,
     required this.collegeId,
@@ -84,6 +98,9 @@ class RoomDetailDialog extends StatefulWidget {
     required this.canSeeRoster,
     this.onEditRoom,
     this.viewingSession,
+    this.settings = const CollegeSettings(),
+    this.liveSession,
+    this.isSuperAdmin = false,
   });
 
   @override
@@ -100,6 +117,21 @@ class _RoomDetailDialogState extends State<RoomDetailDialog> {
 
   bool _busy = false;
   String? _error;
+
+  /// Super Admin's per-allotment override of the seating policy.
+  bool _bypass = false;
+
+  /// The room type [u] must get, or null when no rule covers them or the
+  /// Super Admin is bypassing it. [yearByUid] is the live session's roster.
+  int? _requiredFor(AppUser u, Map<String, int> yearByUid) {
+    if (_bypass && widget.isSuperAdmin) return null;
+    return entitledRoomCapacity(
+      settings: widget.settings,
+      course: u.course,
+      year: yearByUid[u.uid] ?? int.tryParse(u.year?.trim() ?? ''),
+      singleRoomEligible: u.singleRoomEligible,
+    );
+  }
 
   /// Rendering every candidate is what made other screens crawl — a campus
   /// with thousands awaiting a room would build thousands of rows here.
@@ -242,7 +274,7 @@ class _RoomDetailDialogState extends State<RoomDetailDialog> {
     );
   }
 
-  Future<void> _allot(AppUser student) async {
+  Future<void> _allot(AppUser student, int? requiredCapacity) async {
     setState(() {
       _busy = true;
       _error = null;
@@ -254,6 +286,7 @@ class _RoomDetailDialogState extends State<RoomDetailDialog> {
         student: student,
         hostel: widget.hostel,
         room: widget.room,
+        requiredCapacity: requiredCapacity,
       );
       if (!mounted) return;
       setState(() {
@@ -262,6 +295,9 @@ class _RoomDetailDialogState extends State<RoomDetailDialog> {
         // student at a time, and leaving a stale query up implies the next
         // person is already filtered for.
         _picking = false;
+        // The bypass was for that one student. The next bed follows the
+        // policy again unless the Super Admin deliberately bypasses again.
+        _bypass = false;
         _query = '';
         _search.clear();
       });
@@ -456,25 +492,73 @@ class _RoomDetailDialogState extends State<RoomDetailDialog> {
                       // `_picking` gates this branch, so the subscription is
                       // only opened once someone actually taps "Allot a
                       // student".
-                      StreamBuilder<List<AppUser>>(
-                        stream: DataService.instance.watchUsers(
-                          widget.collegeId,
-                        ),
-                        builder: (context, rosterSnap) => _Picker(
-                          hostel: widget.hostel,
-                          roster: rosterSnap.data ?? const <AppUser>[],
-                          controller: _search,
-                          query: _query,
-                          busy: _busy,
-                          maxShown: _maxCandidates,
-                          onQuery: (v) => setState(() => _query = v),
-                          onCancel: () => setState(() {
-                            _picking = false;
-                            _query = '';
-                            _search.clear();
-                          }),
-                          onPick: _allot,
-                        ),
+                      // The live session's enrollments give each candidate's
+                      // year for the seating policy. Pooled with Room
+                      // Allotment's roster, so usually already loaded.
+                      StreamBuilder<List<Enrollment>>(
+                        stream: widget.liveSession == null
+                            ? const Stream<List<Enrollment>>.empty()
+                            : EnrollmentService.instance.watchRoster(
+                                widget.collegeId,
+                                widget.liveSession!,
+                              ),
+                        builder: (context, enrollSnap) {
+                          // Wait for the live years before offering anyone.
+                          // Falling back to the sheet's year meanwhile would
+                          // judge a promoted 4th-year as a 3rd-year — and the
+                          // service would accept that wrong entitlement.
+                          if (widget.liveSession != null) {
+                            if (enrollSnap.hasError) {
+                              return _Banner(
+                                'Can\'t check the seating policy — academic '
+                                'records didn\'t load '
+                                '(${AuthService.describeError(enrollSnap.error!)}).',
+                                AppColors.danger,
+                                AppColors.dangerSoft,
+                              );
+                            }
+                            if (!enrollSnap.hasData) {
+                              return const Padding(
+                                padding: EdgeInsets.symmetric(vertical: 24),
+                                child: Center(
+                                  child: CircularProgressIndicator(),
+                                ),
+                              );
+                            }
+                          }
+                          final yearByUid = {
+                            for (final e
+                                in enrollSnap.data ?? const <Enrollment>[])
+                              e.uid: e.year,
+                          };
+                          return StreamBuilder<List<AppUser>>(
+                            stream: DataService.instance.watchUsers(
+                              widget.collegeId,
+                            ),
+                            builder: (context, rosterSnap) => _Picker(
+                              hostel: widget.hostel,
+                              room: room,
+                              roster: rosterSnap.data ?? const <AppUser>[],
+                              requiredFor: (u) => _requiredFor(u, yearByUid),
+                              isSuperAdmin: widget.isSuperAdmin,
+                              bypass: _bypass,
+                              onBypass: (v) => setState(() => _bypass = v),
+                              controller: _search,
+                              query: _query,
+                              busy: _busy,
+                              maxShown: _maxCandidates,
+                              onQuery: (v) => setState(() => _query = v),
+                              onCancel: () => setState(() {
+                                _picking = false;
+                                _bypass = false;
+                                _query = '';
+                                _search.clear();
+                              }),
+                              onPick: (u) =>
+                                  _allot(u, _requiredFor(u, yearByUid)),
+                            ),
+                          );
+                        },
                       ),
                   ],
                 ],
@@ -777,7 +861,16 @@ class _OccupantCard extends StatelessWidget {
 /// find one is the difference between this being useful and being ignored.
 class _Picker extends StatelessWidget {
   final Hostel hostel;
+  final Room room;
   final List<AppUser> roster;
+
+  /// The room type each student must get (null: any). Students entitled to a
+  /// different type than [room] are left out, the same as the room list in
+  /// Room Allotment leaves out rooms of the wrong type.
+  final int? Function(AppUser) requiredFor;
+  final bool isSuperAdmin;
+  final bool bypass;
+  final ValueChanged<bool> onBypass;
   final TextEditingController controller;
   final String query;
   final bool busy;
@@ -788,7 +881,12 @@ class _Picker extends StatelessWidget {
 
   const _Picker({
     required this.hostel,
+    required this.room,
     required this.roster,
+    required this.requiredFor,
+    required this.isSuperAdmin,
+    required this.bypass,
+    required this.onBypass,
     required this.controller,
     required this.query,
     required this.busy,
@@ -802,10 +900,20 @@ class _Picker extends StatelessWidget {
   Widget build(BuildContext context) {
     // The eligibility rule and its ordering live on the service, so they can
     // be tested directly and stay consistent with what `allot` will accept.
-    final eligible = AllotmentService.bedCandidates(
+    final waiting = AllotmentService.bedCandidates(
       hostel: hostel,
       roster: roster,
     );
+
+    // The seating policy, applied exactly as Room Allotment applies it:
+    // a Single goes to students entitled to a Single, and so on.
+    bool fits(AppUser u) {
+      final need = requiredFor(u);
+      return need == null || need == room.capacity;
+    }
+
+    final eligible = waiting.where(fits).toList();
+    final hiddenByPolicy = waiting.length - eligible.length;
 
     // Counted separately only to explain the omission: silently dropping the
     // students a Boys/Girls hostel can't take looks like a missing roster.
@@ -870,8 +978,11 @@ class _Picker extends StatelessWidget {
           Padding(
             padding: const EdgeInsets.symmetric(vertical: 18),
             child: Text(
-              eligible.isEmpty
+              waiting.isEmpty
                   ? 'Nobody is waiting for a room.'
+                  : eligible.isEmpty
+                  ? 'Nobody waiting is entitled to a '
+                        '${roomTypeLabel(room.capacity)} room.'
                   : 'No unallotted student matches that search.',
               style: TextStyle(fontSize: 13, color: AppColors.textMuted),
             ),
@@ -901,6 +1012,30 @@ class _Picker extends StatelessWidget {
             'Showing $maxShown of ${matched.length} — keep typing to narrow it '
             'down.',
             style: TextStyle(fontSize: 11.5, color: AppColors.textMuted),
+          ),
+        ],
+        if (hiddenByPolicy > 0) ...[
+          const SizedBox(height: 6),
+          Text(
+            '$hiddenByPolicy waiting student'
+            '${hiddenByPolicy == 1 ? '' : 's'} not shown — the seating policy '
+            'entitles them to a different room type than this '
+            '${roomTypeLabel(room.capacity)}.',
+            style: TextStyle(fontSize: 11.5, color: AppColors.textMuted),
+          ),
+        ],
+        // Super Admin only, and per allotment — never in auto-allot.
+        if (isSuperAdmin && (hiddenByPolicy > 0 || bypass)) ...[
+          const SizedBox(height: 4),
+          SwitchListTile(
+            contentPadding: EdgeInsets.zero,
+            dense: true,
+            value: bypass,
+            onChanged: busy ? null : onBypass,
+            title: const Text('Bypass course room allotment rules'),
+            subtitle: const Text(
+              'Super Admin: offer every waiting student for this room.',
+            ),
           ),
         ],
         if (hiddenByGender > 0) ...[

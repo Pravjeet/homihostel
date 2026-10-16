@@ -387,6 +387,7 @@ class HostelService {
   ) async {
     // Fail fast, before any write.
     final allotted = await _allottedStudentRefs(collegeId);
+    final enrollments = await _liveEnrollmentsWithRooms(collegeId);
 
     final hostels = await _hostels(collegeId).get();
     var roomsCleared = 0;
@@ -422,11 +423,32 @@ class HostelService {
       await _hostels(collegeId).doc(hostelDoc.id).update({'occupiedBeds': 0});
     }
 
-    final refs = {
-      for (final r in allotted) r.path: r,
-      for (final uid in seenUids) 'users/$uid': _db.collection('users').doc(uid),
-    }.values.toList();
-    final studentsFreed = await _clearStudentAllotments(refs);
+    // Enrollments before students: the student half below has failed before,
+    // and that must not leave Student Overview showing everyone still housed.
+    await _clearEnrollmentRooms(enrollments);
+
+    final allottedPaths = {for (final r in allotted) r.path};
+    var studentsFreed = await _clearStudentAllotments(allotted);
+
+    // Uids a room listed but the hostelId query didn't find — one at a time
+    // and best-effort, because often it's a student who was deleted and left
+    // in a room: an update to a missing document is refused, and inside a
+    // batch it took every real student in that batch down with it.
+    for (final uid in seenUids) {
+      final ref = _db.collection('users').doc(uid);
+      if (allottedPaths.contains(ref.path)) continue;
+      try {
+        await ref.update({
+          'hostelId': null,
+          'hostelName': null,
+          'roomId': null,
+          'roomNumber': null,
+          'allottedAt': null,
+          'updatedAt': FieldValue.serverTimestamp(),
+        });
+        studentsFreed++;
+      } catch (_) {}
+    }
 
     return (
       roomsCleared: roomsCleared,
@@ -452,6 +474,59 @@ class HostelService {
         .where('hostelId', isNull: false)
         .get();
     return snap.docs.map((d) => d.reference).toList();
+  }
+
+  /// The live session's enrollments that still hold a hostel or room.
+  ///
+  /// An allotment is in fact stored *three* times: the room, the student, and
+  /// the student's enrollment for the running session — which is what Student
+  /// Overview and Academic Records read hostel and room from. Emptying only
+  /// the first two left Student Overview filtering "BH-1" to 111 students in
+  /// a building every other page showed as empty.
+  ///
+  /// Only the running session. A past session's enrollment records the room
+  /// someone held *then*, which is history and must survive an emptying.
+  /// Filtered client-side on purpose: a `hostelId != null` clause would need
+  /// another composite index, and one session's roster is a few hundred reads.
+  Future<List<DocumentReference<Map<String, dynamic>>>>
+  _liveEnrollmentsWithRooms(String collegeId) async {
+    final college = _db.collection('colleges').doc(collegeId);
+    final settings = (await college.collection('settings').doc('config').get())
+        .data();
+    final session = settings?['session'];
+    final current = session is Map ? session['current'] : null;
+    if (current is! String || current.trim().isEmpty) return const [];
+
+    final snap = await college
+        .collection('enrollments')
+        .where('session', isEqualTo: current)
+        .get();
+    return [
+      for (final d in snap.docs)
+        if (d.data()['hostelId'] != null || d.data()['roomId'] != null)
+          d.reference,
+    ];
+  }
+
+  /// The same fields [AllotmentService.vacate] clears on an enrollment.
+  Future<void> _clearEnrollmentRooms(
+    List<DocumentReference<Map<String, dynamic>>> refs,
+  ) async {
+    for (var start = 0; start < refs.length; start += _batchLimit) {
+      final end = (start + _batchLimit).clamp(0, refs.length);
+      final batch = _db.batch();
+      for (final ref in refs.sublist(start, end)) {
+        batch.update(ref, {
+          'hostelId': null,
+          'hostelName': null,
+          'roomId': null,
+          'roomNumber': null,
+          'roomCapacity': null,
+          'allottedAt': null,
+        });
+      }
+      await batch.commit();
+    }
   }
 
   /// Clears the room fields on the given users.

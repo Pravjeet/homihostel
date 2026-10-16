@@ -4,6 +4,7 @@ import '../../core/permissions.dart';
 import '../../core/session.dart';
 import '../../core/theme.dart';
 import '../../models/app_user.dart';
+import '../../models/college_settings.dart';
 import '../../models/enrollment.dart';
 import '../../models/hostel.dart';
 import '../../services/allotment_service.dart';
@@ -43,6 +44,10 @@ class _AllotmentPageState extends State<AllotmentPage> {
 
   /// LEET or Regular — a sub-filter of Graduation, null for everyone.
   String? _entry;
+
+  /// Branches (trade codes, e.g. "GCS"), any number at once; empty means
+  /// every branch. A student matches if they're in any of them.
+  final Set<String> _trades = {};
 
   /// A student's year in the live session.
   ///
@@ -167,18 +172,48 @@ class _AllotmentPageState extends State<AllotmentPage> {
                 bool yearOk(AppUser u) => _year == null || yearOf(u) == _year;
                 bool entryOk(AppUser u) =>
                     _entry == null || entryTypeOf(u) == _entry;
+                bool tradeOk(AppUser u) =>
+                    _trades.isEmpty || _trades.contains(u.trade);
 
                 final searched = source.where(matchesQuery).toList();
                 final shown = searched
-                    .where((u) => courseOk(u) && yearOk(u) && entryOk(u))
+                    .where(
+                      (u) =>
+                          courseOk(u) && yearOk(u) && entryOk(u) && tradeOk(u),
+                    )
                     .toList();
+
+                // Branch: counted under every other filter, so "GCS (27)"
+                // is what picking it would show. Every configured branch is
+                // offered (plus any a sheet invented), the ones with anybody
+                // in them first — 35 branches with "(0)" on most would bury
+                // the few that matter under a course and year.
+                final tradeCounts = <String, int>{};
+                for (final u in searched.where(
+                  (u) => courseOk(u) && yearOk(u) && entryOk(u),
+                )) {
+                  final t = u.trade;
+                  if (t != null && t.isNotEmpty) {
+                    tradeCounts[t] = (tradeCounts[t] ?? 0) + 1;
+                  }
+                }
+                final allTrades = {
+                  ...settings.tradeCodes,
+                  for (final u in people)
+                    if (u.trade != null && u.trade!.isNotEmpty) u.trade!,
+                  ..._trades,
+                }.toList()..sort();
+                final tradeOptions = [
+                  ...allTrades.where((t) => (tradeCounts[t] ?? 0) > 0),
+                  ...allTrades.where((t) => (tradeCounts[t] ?? 0) == 0),
+                ];
 
                 // LEET / Regular, counted under the course and year picked.
                 final showEntry = hasLateralEntry(_course);
                 final entryCounts = <String, int>{};
                 if (showEntry) {
                   for (final u in searched.where(
-                    (u) => courseOk(u) && yearOk(u),
+                    (u) => courseOk(u) && yearOk(u) && tradeOk(u),
                   )) {
                     final t = entryTypeOf(u);
                     if (t != null) entryCounts[t] = (entryCounts[t] ?? 0) + 1;
@@ -199,7 +234,7 @@ class _AllotmentPageState extends State<AllotmentPage> {
                 ];
                 final courseCounts = <String, int>{};
                 for (final u in searched.where(
-                  (u) => yearOk(u) && entryOk(u),
+                  (u) => yearOk(u) && entryOk(u) && tradeOk(u),
                 )) {
                   final c = courseOf(u);
                   if (c != null) courseCounts[c] = (courseCounts[c] ?? 0) + 1;
@@ -217,7 +252,7 @@ class _AllotmentPageState extends State<AllotmentPage> {
                       );
                 final yearCounts = <int, int>{};
                 for (final u in searched.where(
-                  (u) => courseOk(u) && entryOk(u),
+                  (u) => courseOk(u) && entryOk(u) && tradeOk(u),
                 )) {
                   final y = yearOf(u);
                   if (y != null) yearCounts[y] = (yearCounts[y] ?? 0) + 1;
@@ -237,7 +272,8 @@ class _AllotmentPageState extends State<AllotmentPage> {
                           matchesQuery(u) &&
                           courseOk(u) &&
                           yearOk(u) &&
-                          entryOk(u),
+                          entryOk(u) &&
+                          tradeOk(u),
                     )
                     .toList();
                 // The roster carries each student's seating-policy room type
@@ -251,13 +287,17 @@ class _AllotmentPageState extends State<AllotmentPage> {
                     liveSession == null ||
                     (enrollSnap.hasData && rosterError == null);
                 final autoReady =
-                    (_course != null || _year != null || _entry != null) &&
+                    (_course != null ||
+                        _year != null ||
+                        _entry != null ||
+                        _trades.isNotEmpty) &&
                     autoCandidates.isNotEmpty &&
                     rosterReady;
                 final scopeLabel = [
                   if (_course != null) courseLabel(_course!),
                   if (_year != null) '${ordinal(_year!)} year',
                   if (_entry != null) _entry!,
+                  if (_trades.isNotEmpty) (_trades.toList()..sort()).join(', '),
                   if (q.isNotEmpty) 'matching "$q"',
                 ].join(' · ');
 
@@ -449,6 +489,22 @@ class _AllotmentPageState extends State<AllotmentPage> {
                               }),
                             ),
                           ],
+                          const SizedBox(height: 10),
+                          _BranchFilter(
+                            options: tradeOptions,
+                            selected: _trades,
+                            labelFor: (t) =>
+                                '${settings.tradeLabelFor(t)} '
+                                '(${tradeCounts[t] ?? 0})',
+                            onToggle: (t) => setState(() {
+                              if (!_trades.remove(t)) _trades.add(t);
+                              _page = 0;
+                            }),
+                            onClear: () => setState(() {
+                              _trades.clear();
+                              _page = 0;
+                            }),
+                          ),
                           if (canAllot && hostels.isNotEmpty) ...[
                             const SizedBox(height: 14),
                             Row(
@@ -481,6 +537,7 @@ class _AllotmentPageState extends State<AllotmentPage> {
                                 FilledButton.icon(
                                   onPressed: autoReady
                                       ? () => _openAutoAllot(
+                                          settings,
                                           session.user,
                                           hostels,
                                           autoCandidates,
@@ -511,7 +568,10 @@ class _AllotmentPageState extends State<AllotmentPage> {
                         padding: const EdgeInsets.symmetric(vertical: 54),
                         child: Center(
                           child: Text(
-                            _course != null || _year != null || _entry != null
+                            _course != null ||
+                                    _year != null ||
+                                    _entry != null ||
+                                    _trades.isNotEmpty
                                 ? 'Nobody matches these filters.'
                                 : _filter == _Filter.pending
                                 ? 'Everyone has a room. Nice.'
@@ -529,6 +589,13 @@ class _AllotmentPageState extends State<AllotmentPage> {
                               _PersonRow(
                                 person: pageItems[i],
                                 canAllot: canAllot,
+                                showMerit: _meritApplies(
+                                  settings,
+                                  pageItems[i],
+                                  yearOf(pageItems[i]),
+                                ),
+                                onMerit: (v) =>
+                                    _setMerit(session.user, pageItems[i], v),
                                 onOpen: () => _openDetail(pageItems[i]),
                                 onAllot: () =>
                                     _openAllot(pageItems[i], move: false),
@@ -596,9 +663,48 @@ class _AllotmentPageState extends State<AllotmentPage> {
 
   void _openDetail(AppUser u) => setState(() => _openUser = u);
 
+  /// Whether merit decides this student's room type this year — the years
+  /// of a "merit single" course between the always-shared start and the
+  /// all-singles final year. For UG that is exactly 3rd year. Read off the
+  /// course rule rather than hard-coded, so it follows Settings.
+  static bool _meritApplies(CollegeSettings settings, AppUser u, int? year) {
+    final rule = settings.courseRuleFor(u.course);
+    if (rule == null || rule.seating != CourseSeating.meritSingle) {
+      return false;
+    }
+    return year != null && year > 2 && year < rule.totalYears;
+  }
+
+  Future<void> _setMerit(AppUser actor, AppUser student, bool merit) async {
+    final messenger = ScaffoldMessenger.of(context);
+    try {
+      await AllotmentService.instance.setMerit(
+        collegeId: student.collegeId,
+        student: student,
+        merit: merit,
+        actor: actor,
+      );
+      messenger.showSnackBar(
+        SnackBar(
+          content: Text(
+            merit
+                ? '${student.name} marked merit — entitled to a Single.'
+                : '${student.name} marked non-merit — entitled to a shared '
+                      'room.',
+          ),
+        ),
+      );
+    } catch (e) {
+      messenger.showSnackBar(
+        SnackBar(content: Text(AuthService.describeError(e))),
+      );
+    }
+  }
+
   /// Everything the dialog needs is handed over here: it opens above
   /// SessionScope, where `Session.of` throws.
   Future<void> _openAutoAllot(
+    CollegeSettings settings,
     AppUser actor,
     List<Hostel> hostels,
     List<AppUser> students,
@@ -613,8 +719,17 @@ class _AllotmentPageState extends State<AllotmentPage> {
         actor: actor,
         hostels: hostels,
         students: students,
+        // Live from Settings + year + merit — the same answer the single
+        // picker and Hostels & Rooms get — not the copy frozen on the
+        // enrollment when backfill wrote it.
         requiredCapacityByUid: {
-          for (final u in students) u.uid: byUid[u.uid]?.requiredCapacity,
+          for (final u in students)
+            u.uid: entitledRoomCapacity(
+              settings: settings,
+              course: u.course,
+              year: _yearOf(u, byUid),
+              singleRoomEligible: u.singleRoomEligible,
+            ),
         },
         scopeLabel: scopeLabel,
       ),
@@ -672,6 +787,131 @@ class _AllotmentPageState extends State<AllotmentPage> {
 }
 
 enum _Filter { pending, allotted, all }
+
+/// "Branch  [GCS, GME +1 ▾]  ✕" — tick any number of branches.
+///
+/// A menu of checkboxes rather than chips: a college has dozens of branches,
+/// and a wall of chips would push the worklist off the screen. The menu stays
+/// open while ticking, so picking four branches is four taps, and each line
+/// shows the live count. The picks also show as removable chips beside it, so
+/// what's applied is visible without reopening the menu.
+class _BranchFilter extends StatelessWidget {
+  final List<String> options;
+  final Set<String> selected;
+  final String Function(String) labelFor;
+  final ValueChanged<String> onToggle;
+  final VoidCallback onClear;
+
+  const _BranchFilter({
+    required this.options,
+    required this.selected,
+    required this.labelFor,
+    required this.onToggle,
+    required this.onClear,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final picked = selected.toList()..sort();
+    final summary = picked.isEmpty
+        ? 'All branches'
+        : picked.length <= 2
+        ? picked.join(', ')
+        : '${picked.take(2).join(', ')} +${picked.length - 2}';
+
+    return Row(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Padding(
+          padding: const EdgeInsets.only(top: 9),
+          child: SizedBox(
+            width: 58,
+            child: Text(
+              'Branch',
+              style: TextStyle(
+                fontSize: 12.5,
+                fontWeight: FontWeight.w700,
+                color: AppColors.textMuted,
+              ),
+            ),
+          ),
+        ),
+        Expanded(
+          child: Wrap(
+            spacing: 8,
+            runSpacing: 8,
+            crossAxisAlignment: WrapCrossAlignment.center,
+            children: [
+              MenuAnchor(
+                style: const MenuStyle(
+                  maximumSize: WidgetStatePropertyAll(Size(420, 420)),
+                ),
+                menuChildren: [
+                  for (final t in options)
+                    CheckboxMenuButton(
+                      value: selected.contains(t),
+                      // Stay open: several branches are usually picked in one
+                      // go, and closing after each tick would mean reopening.
+                      closeOnActivate: false,
+                      onChanged: (_) => onToggle(t),
+                      child: Text(labelFor(t)),
+                    ),
+                ],
+                builder: (context, menu, _) => OutlinedButton.icon(
+                  onPressed: () => menu.isOpen ? menu.close() : menu.open(),
+                  icon: const Icon(Icons.arrow_drop_down_rounded),
+                  label: Text(summary),
+                ),
+              ),
+              for (final t in picked)
+                InputChip(
+                  label: Text(t),
+                  tooltip: labelFor(t),
+                  onDeleted: () => onToggle(t),
+                  visualDensity: VisualDensity.compact,
+                ),
+              if (picked.length > 1)
+                TextButton(onPressed: onClear, child: const Text('Clear')),
+            ],
+          ),
+        ),
+      ],
+    );
+  }
+}
+
+/// "Non-merit | Merit" for one student. Merit means a Single this year under
+/// the seating policy; non-merit, a shared room. Read-only without
+/// allotment.manage.
+class _MeritToggle extends StatelessWidget {
+  final bool merit;
+  final ValueChanged<bool>? onChanged;
+
+  const _MeritToggle({required this.merit, required this.onChanged});
+
+  /// One chip that names the current state and flips on tap — not a
+  /// two-segment button, which needs ~155px and at phone width squeezed
+  /// "Merit" to nothing inside the row's name column.
+  @override
+  Widget build(BuildContext context) => FilterChip(
+    selected: merit,
+    showCheckmark: false,
+    visualDensity: VisualDensity.compact,
+    materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
+    avatar: Icon(
+      merit ? Icons.star_rounded : Icons.star_border_rounded,
+      size: 15,
+    ),
+    label: Text(
+      merit ? 'Merit' : 'Non-merit',
+      style: const TextStyle(fontSize: 11.5),
+    ),
+    tooltip: merit
+        ? 'Merit — entitled to a Single. Tap to mark non-merit.'
+        : 'Non-merit — entitled to a shared room. Tap to mark merit.',
+    onSelected: onChanged == null ? null : (v) => onChanged!(v),
+  );
+}
 
 /// "Course  [All] [UG — Graduation (316)] [ICD — Diploma (197)] …"
 ///
@@ -769,6 +1009,10 @@ class _Metric extends StatelessWidget {
 class _PersonRow extends StatelessWidget {
   final AppUser person;
   final bool canAllot;
+
+  /// Shown only where merit decides the room type (UG 3rd year).
+  final bool showMerit;
+  final ValueChanged<bool> onMerit;
   final VoidCallback onOpen;
   final VoidCallback onAllot;
   final VoidCallback onMove;
@@ -777,6 +1021,8 @@ class _PersonRow extends StatelessWidget {
   const _PersonRow({
     required this.person,
     required this.canAllot,
+    required this.showMerit,
+    required this.onMerit,
     required this.onOpen,
     required this.onAllot,
     required this.onMove,
@@ -830,6 +1076,13 @@ class _PersonRow extends StatelessWidget {
                       fontSize: 12.5,
                     ),
                   ),
+                  if (showMerit) ...[
+                    const SizedBox(height: 6),
+                    _MeritToggle(
+                      merit: person.singleRoomEligible,
+                      onChanged: canAllot ? onMerit : null,
+                    ),
+                  ],
                 ],
               ),
             ),

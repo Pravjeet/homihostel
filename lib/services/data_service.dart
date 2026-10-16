@@ -397,6 +397,26 @@ class DataService {
   Future<void> deleteUserProfile(String uid) =>
       _db.collection('users').doc(uid).delete();
 
+  /// The passwords the app can reconstruct for [user] — only ever the ones
+  /// derived from their registration number. The app has no store of real
+  /// passwords and must not pretend otherwise. Shared by the single delete
+  /// and the "delete all students" reset, so the two can never disagree.
+  ///
+  /// Mirrors both importers, which set `derivedPassword(registrationNo ||
+  /// authEmail)` — so someone imported with an email and no registration
+  /// number (staff, typically) got their lower-cased email as the password,
+  /// and that is tried too.
+  static List<String> derivedPasswordsFor(AppUser user) => <String>{
+    if ((user.enrollmentNo ?? '').trim().isNotEmpty)
+      Identity.derivedPassword(user.enrollmentNo!.trim()),
+    if (Identity.isSynthetic(user.email))
+      Identity.derivedPassword(Identity.display(user.email)),
+    if ((user.enrollmentNo ?? '').trim().isEmpty &&
+        !Identity.isSynthetic(user.email) &&
+        user.email.trim().isNotEmpty)
+      Identity.derivedPassword(user.email.trim().toLowerCase()),
+  }.toList();
+
   /// Removes a user completely: the Firestore profile, their room, and — where
   /// possible — the Firebase Auth account too.
   ///
@@ -420,18 +440,9 @@ class DataService {
     final snapshot = await _db.collection('users').doc(user.uid).get();
     final before = snapshot.data();
 
-    // Only the derived password is ever tried — the app has no store of real
-    // ones and must not pretend otherwise.
-    final candidates = <String>{
-      if ((user.enrollmentNo ?? '').trim().isNotEmpty)
-        Identity.derivedPassword(user.enrollmentNo!.trim()),
-      if (Identity.isSynthetic(user.email))
-        Identity.derivedPassword(Identity.display(user.email)),
-    }.toList();
-
     final auth = await AuthService.instance.deleteAuthAccount(
       email: user.email,
-      candidatePasswords: candidates,
+      candidatePasswords: derivedPasswordsFor(user),
       app: provisioningApp,
     );
 

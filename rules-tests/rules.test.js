@@ -654,6 +654,26 @@ describe('enrollments', () => {
     await assertFails(col.where('session', '==', '2026-27').get());
   });
 
+  it('allotment.manage can mark merit, but still not edit anything else', async () => {
+    await seed(COLLEGE_A, {
+      wardenRole: ['users.view', 'hostels.view', 'allotment.manage'],
+    });
+    await seedUser(COLLEGE_A, 'warden-a', 'warden');
+    await seedUser(COLLEGE_A, 'student-a', 'student');
+
+    const student = asUser('warden-a').collection('users').doc('student-a');
+    await assertSucceeds(
+      student.update({
+        singleRoomEligible: true,
+        updatedAt: serverTimestamp(),
+      }),
+    );
+    // The widened list must not have opened the profile itself.
+    await assertFails(
+      student.update({ singleRoomEligible: false, name: 'Someone Else' }),
+    );
+  });
+
   it('a Warden-shaped role can run the whole allot transaction', async () => {
     // The exact reads and writes AllotmentService.allot makes, as a role with
     // the stock Warden's allotment-relevant permissions and nothing academic.

@@ -182,6 +182,9 @@ class _HostelsPageState extends State<HostelsPage> {
     // Every mutating control on this page is disabled for exactly that
     // reason whenever the lens is pointed at the past.
     final canMutate = session.can(Perm.hostelsManage) && !session.isViewingHistory;
+    // Emptying writes students and academic records too, not just rooms —
+    // so it needs more than hostels.manage to finish rather than half-run.
+    final canEmpty = session.canEmptyAllRooms && !session.isViewingHistory;
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
@@ -200,27 +203,27 @@ class _HostelsPageState extends State<HostelsPage> {
                         children: [
                           if (hostels.isNotEmpty) ...[
                             OutlinedButton.icon(
-                              onPressed: canMutate
+                              onPressed: canEmpty
                                   ? () => _emptyAllRooms(collegeId)
                                   : null,
                               icon: Icon(
                                 Icons.meeting_room_outlined,
                                 size: 18,
-                                color: canMutate
+                                color: canEmpty
                                     ? AppColors.danger
                                     : AppColors.textMuted,
                               ),
                               label: Text(
                                 'Empty all rooms',
                                 style: TextStyle(
-                                  color: canMutate
+                                  color: canEmpty
                                       ? AppColors.danger
                                       : AppColors.textMuted,
                                 ),
                               ),
                               style: OutlinedButton.styleFrom(
                                 side: BorderSide(
-                                  color: canMutate
+                                  color: canEmpty
                                       ? AppColors.dangerSoft
                                       : AppColors.border,
                                 ),

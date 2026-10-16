@@ -1,3 +1,6 @@
+import 'dart:convert';
+
+import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
@@ -57,6 +60,7 @@ class _ImportStudentsDialogState extends State<ImportStudentsDialog> {
   int _done = 0;
   int _total = 0;
   String _currentLabel = '';
+  ImportPhase? _phase;
   ImportOutcome? _outcome;
 
   /// A failure that killed the whole run, as opposed to a single bad row.
@@ -135,9 +139,10 @@ class _ImportStudentsDialogState extends State<ImportStudentsDialog> {
       final outcome = await runImport(
         plan: plan,
         collegeId: collegeId,
-        onProgress: (done, total, label) {
+        onProgress: (phase, done, total, label) {
           if (mounted) {
             setState(() {
+              _phase = phase;
               _done = done;
               _total = total;
               _currentLabel = label;
@@ -204,6 +209,7 @@ class _ImportStudentsDialogState extends State<ImportStudentsDialog> {
             stopRequested: _stopRequested,
             done: _done,
             total: _total,
+            phase: _phase,
             label: _currentLabel,
             outcome: _outcome,
             fatalError: _fatalError,
@@ -277,15 +283,44 @@ class _PasteStep extends StatelessWidget {
     required this.onDefaultRoleChanged,
   });
 
+  /// Reads a CSV/TSV from the user's computer into the paste box — the same
+  /// text pasting would put there, so preview and import are unchanged. All
+  /// in the browser: nothing is uploaded anywhere, so no Storage (and no
+  /// Blaze plan) is involved. Excel's own .xlsx isn't read — save as CSV.
+  Future<void> _pickFile(BuildContext context) async {
+    final messenger = ScaffoldMessenger.of(context);
+    final result = await FilePicker.platform.pickFiles(
+      type: FileType.custom,
+      allowedExtensions: ['csv', 'tsv', 'txt'],
+      withData: true,
+    );
+    final file = result?.files.single;
+    if (file == null || file.bytes == null) return;
+    // Excel writes a UTF-8 BOM, and sometimes stray non-UTF-8 bytes in a name;
+    // neither should stop a 2,000-row import at the first character.
+    var text = utf8.decode(file.bytes!, allowMalformed: true);
+    if (text.startsWith('\uFEFF')) text = text.substring(1);
+    if (text.trim().isEmpty) {
+      messenger.showSnackBar(SnackBar(content: Text('${file.name} is empty.')));
+      return;
+    }
+    controller.text = text;
+    final rows = '\n'.allMatches(text.trimRight()).length;
+    messenger.showSnackBar(
+      SnackBar(content: Text('Loaded ${file.name} — $rows data row(s).')),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         Text(
-          'Open your CSV in Excel or Notepad, select everything, copy, and '
-          'paste it below. Each row needs a name and either a registration '
-          'number or an email — every other column can be left blank.',
+          'Choose a CSV file, or open it in Excel or Notepad, select '
+          'everything, copy, and paste it below. Each row needs a name and '
+          'either a registration number or an email — every other column can '
+          'be left blank.',
           style: TextStyle(
             fontSize: 13,
             color: AppColors.textMuted,
@@ -301,6 +336,11 @@ class _PasteStep extends StatelessWidget {
           runSpacing: 10,
           crossAxisAlignment: WrapCrossAlignment.center,
           children: [
+            FilledButton.icon(
+              onPressed: () => _pickFile(context),
+              icon: const Icon(Icons.upload_file_rounded, size: 18),
+              label: const Text('Choose CSV file…'),
+            ),
             OutlinedButton.icon(
               onPressed: () async {
                 await Clipboard.setData(
@@ -798,6 +838,10 @@ class _RunStep extends StatelessWidget {
   final int done;
   final int total;
   final String label;
+
+  /// Which part is running — each phase counts its own students, so "of N"
+  /// always means students, never units of work.
+  final ImportPhase? phase;
   final ImportOutcome? outcome;
   final String? fatalError;
 
@@ -807,6 +851,7 @@ class _RunStep extends StatelessWidget {
     required this.done,
     required this.total,
     required this.label,
+    this.phase,
     required this.outcome,
     this.fatalError,
   });
@@ -860,9 +905,20 @@ class _RunStep extends StatelessWidget {
       return Column(
         mainAxisAlignment: MainAxisAlignment.center,
         children: [
+          if (phase != null) ...[
+            Text(
+              phase!.label,
+              style: const TextStyle(fontSize: 14, fontWeight: FontWeight.w700),
+            ),
+            const SizedBox(height: 6),
+          ],
           Text(
             '$done of $total',
             style: const TextStyle(fontSize: 30, fontWeight: FontWeight.w800),
+          ),
+          Text(
+            'students',
+            style: TextStyle(fontSize: 12.5, color: AppColors.textMuted),
           ),
           const SizedBox(height: 16),
           ClipRRect(

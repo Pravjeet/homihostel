@@ -55,7 +55,12 @@ void main() {
       // Same shape as above, but three current students really are missing —
       // a batch that would not parse, say. Those must not be masked by the
       // graduates sitting in the roster alongside them.
-      final students = ['new1', 'new2', 'new3', ...[for (var i = 0; i < 10; i++) 'u$i']];
+      final students = [
+        'new1',
+        'new2',
+        'new3',
+        ...[for (var i = 0; i < 10; i++) 'u$i'],
+      ];
       final roster = [for (var i = 0; i < 40; i++) 'u$i'];
 
       expect(countMissing(students, roster), 3);
@@ -84,13 +89,7 @@ void main() {
         s = previousSessionBefore(s)!;
         walked.add(s);
       }
-      expect(walked, [
-        '2029-30',
-        '2028-29',
-        '2027-28',
-        '2026-27',
-        '2025-26',
-      ]);
+      expect(walked, ['2029-30', '2028-29', '2027-28', '2026-27', '2025-26']);
     });
   });
 
@@ -142,11 +141,14 @@ void main() {
       expect(hasGraduated(5, 4), isTrue);
     });
 
-    test('a repeater still in year 2 has not graduated even on an old batch', () {
-      // The point of comparing year rather than recomputing from batch:
-      // someone whose batch alone would suggest they are further along.
-      expect(hasGraduated(2, 4), isFalse);
-    });
+    test(
+      'a repeater still in year 2 has not graduated even on an old batch',
+      () {
+        // The point of comparing year rather than recomputing from batch:
+        // someone whose batch alone would suggest they are further along.
+        expect(hasGraduated(2, 4), isFalse);
+      },
+    );
 
     test('the three configured course lengths', () {
       expect(hasGraduated(4, 4), isFalse); // UG, final year
@@ -204,7 +206,7 @@ void main() {
         }
       });
 
-      test('year 3+ is single only if eligible', () {
+      test('3rd year is single only on merit', () {
         expect(
           requiredRoomCapacity(rule: ug, year: 3, singleRoomEligible: true),
           1,
@@ -213,13 +215,42 @@ void main() {
           requiredRoomCapacity(rule: ug, year: 3, singleRoomEligible: false),
           3,
         );
-        expect(
-          requiredRoomCapacity(rule: ug, year: 4, singleRoomEligible: true),
-          1,
+      });
+
+      test('the final year is single for everyone, merit or not', () {
+        for (final eligible in [false, true]) {
+          expect(
+            requiredRoomCapacity(
+              rule: ug,
+              year: 4,
+              singleRoomEligible: eligible,
+            ),
+            1,
+          );
+        }
+      });
+
+      test('"final" follows the course length, not a hard-coded 4', () {
+        const fiveYear = CourseRule(
+          course: 'B.Arch',
+          totalYears: 5,
+          seating: CourseSeating.meritSingle,
         );
         expect(
-          requiredRoomCapacity(rule: ug, year: 4, singleRoomEligible: false),
+          requiredRoomCapacity(
+            rule: fiveYear,
+            year: 4,
+            singleRoomEligible: false,
+          ),
           3,
+        );
+        expect(
+          requiredRoomCapacity(
+            rule: fiveYear,
+            year: 5,
+            singleRoomEligible: false,
+          ),
+          1,
         );
       });
     });
@@ -254,22 +285,25 @@ void main() {
       }
     });
 
-    test('a college using two-seaters instead of three respects sharedCapacity', () {
-      const twoSeaterUg = CourseRule(
-        course: 'UG',
-        totalYears: 4,
-        seating: CourseSeating.meritSingle,
-        sharedCapacity: 2,
-      );
-      expect(
-        requiredRoomCapacity(
-          rule: twoSeaterUg,
-          year: 1,
-          singleRoomEligible: false,
-        ),
-        2,
-      );
-    });
+    test(
+      'a college using two-seaters instead of three respects sharedCapacity',
+      () {
+        const twoSeaterUg = CourseRule(
+          course: 'UG',
+          totalYears: 4,
+          seating: CourseSeating.meritSingle,
+          sharedCapacity: 2,
+        );
+        expect(
+          requiredRoomCapacity(
+            rule: twoSeaterUg,
+            year: 1,
+            singleRoomEligible: false,
+          ),
+          2,
+        );
+      },
+    );
   });
 
   group('roomTypeLabel', () {

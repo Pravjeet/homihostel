@@ -3,6 +3,7 @@ import 'package:flutter/widgets.dart';
 import '../models/app_role.dart';
 import '../models/app_user.dart';
 import '../models/college_settings.dart';
+import 'permissions.dart';
 
 /// Everything the UI needs to know about "who is looking at this screen".
 ///
@@ -68,6 +69,19 @@ class Session {
       user.isSuperAdmin || (role?.permissions.contains(permission) ?? false);
 
   bool canAny(List<String> permissions) => permissions.any(can);
+
+  /// Whether "Empty all rooms" can finish once started. It writes rooms
+  /// (hostels.manage), every allotted student (users.edit or
+  /// allotment.manage, after listing them with users.view) and the live
+  /// session's enrollments (academic.manage, or allotment.manage limited to
+  /// room fields). Checked up front, because a role missing the last of
+  /// those used to empty every room and student and then be refused the
+  /// enrollments — half-done, every time.
+  bool get canEmptyAllRooms =>
+      can(Perm.hostelsManage) &&
+      can(Perm.usersView) &&
+      (can(Perm.usersEdit) || can(Perm.allotmentManage)) &&
+      (can(Perm.academicManage) || can(Perm.allotmentManage));
 
   /// A user with no role assigned yet gets a friendly holding screen instead
   /// of an empty dashboard.

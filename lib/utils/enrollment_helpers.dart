@@ -104,11 +104,38 @@ int? requiredRoomCapacity({
   return switch (rule.seating) {
     CourseSeating.alwaysShared => rule.sharedCapacity,
     CourseSeating.alwaysSingle => 1,
+    // 1st–2nd year shared; the final year single for everyone; the years in
+    // between (UG's 3rd) single only for students marked on merit. "Final"
+    // comes from the course length in Settings, not a hard-coded 4.
     CourseSeating.meritSingle =>
       year <= 2
           ? rule.sharedCapacity
+          : year >= rule.totalYears
+          ? 1
           : (singleRoomEligible ? 1 : rule.sharedCapacity),
   };
+}
+
+/// The room capacity [student] must get this session, or null when no rule
+/// covers them or their year isn't known — the one place every allotment
+/// screen asks, so Room Allotment, Hostels & Rooms and auto-allot can never
+/// disagree.
+///
+/// Worked out live from Settings rather than read off the enrollment, which
+/// only holds whatever the policy was when backfill or promotion wrote it —
+/// so a policy change takes effect at once, without re-running backfill.
+int? entitledRoomCapacity({
+  required CollegeSettings settings,
+  required String? course,
+  required int? year,
+  required bool singleRoomEligible,
+}) {
+  if (year == null) return null;
+  return requiredRoomCapacity(
+    rule: settings.courseRuleFor(course),
+    year: year,
+    singleRoomEligible: singleRoomEligible,
+  );
 }
 
 /// "Single" / "3-Seater", for messages referencing [requiredRoomCapacity]'s

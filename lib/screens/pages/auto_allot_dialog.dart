@@ -59,7 +59,6 @@ class _AutoAllotDialogState extends State<AutoAllotDialog> {
   bool _loadingRooms = false;
   String? _loadError;
 
-  bool _followPolicy = true;
   bool _includeOtherHostels = false;
 
   late final Set<String> _knownHostelIds = {
@@ -139,9 +138,9 @@ class _AutoAllotDialogState extends State<AutoAllotDialog> {
       hostel: hostel,
       rooms: rooms,
       students: widget.students,
-      requiredCapacityOf: _followPolicy
-          ? (u) => widget.requiredCapacityByUid[u.uid]
-          : null,
+      // Always the seating policy: bypassing it is a Super Admin decision
+      // about one student at a time, never a whole group in one click.
+      requiredCapacityOf: (u) => widget.requiredCapacityByUid[u.uid],
       includeOtherHostels: _includeOtherHostels,
       knownHostelIds: _knownHostelIds,
     );
@@ -350,8 +349,7 @@ class _AutoAllotDialogState extends State<AutoAllotDialog> {
           _Note(
             '${e.value} ${e.value == 1 ? 'is' : 'are'} entitled to a '
             '${roomTypeLabel(e.key)} by the seating policy, and $hostel has '
-            'no ${roomTypeLabel(e.key)} rooms. Pick another hostel, or turn '
-            'off "Follow the seating policy" to use the rooms it has.',
+            'no ${roomTypeLabel(e.key)} rooms. Pick another hostel for them.',
             AppColors.warning,
           ),
         for (final e in plan.outOfServiceTypes.entries)
@@ -365,7 +363,7 @@ class _AutoAllotDialogState extends State<AutoAllotDialog> {
         if (plan.noBed.isNotEmpty)
           _Note(
             '${plan.noBed.length} won\'t fit — $hostel runs out of free '
-            '${_followPolicy && _anyPolicy ? 'beds of the type they need' : 'beds'}. '
+            '${_anyPolicy ? 'beds of the type they need' : 'beds'}. '
             'Run again with another hostel for them.',
             AppColors.warning,
           ),
@@ -388,16 +386,10 @@ class _AutoAllotDialogState extends State<AutoAllotDialog> {
             AppColors.info,
           ),
         if (_anyPolicy)
-          SwitchListTile(
-            contentPadding: EdgeInsets.zero,
-            dense: true,
-            value: _followPolicy,
-            onChanged: (v) => setState(() => _followPolicy = v),
-            title: const Text('Follow the seating policy'),
-            subtitle: const Text(
-              'Only give each student the room type their course and year '
-              'entitle them to.',
-            ),
+          _Note(
+            'Each student only gets the room type the seating policy entitles '
+            'them to.',
+            AppColors.info,
           ),
         if (plan.otherHostel.isNotEmpty || _includeOtherHostels)
           SwitchListTile(

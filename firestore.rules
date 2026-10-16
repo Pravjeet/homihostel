@@ -63,10 +63,15 @@ service cloud.firestore {
     // The only user fields an allotment write may touch. Someone holding
     // allotment.manage can put a student in a room, but cannot rename them,
     // change their role, or reactivate a disabled account.
+    //
+    // 'singleRoomEligible' is the merit flag for a UG single room. Marking it
+    // is an allotment decision (it only decides which room type a student may
+    // be given), so it rides on the same permission as filling the bed.
     function onlyAllotmentFields() {
       return request.resource.data.diff(resource.data).affectedKeys()
         .hasOnly(['hostelId', 'hostelName', 'roomId', 'roomNumber',
-                  'roomCapacity', 'allottedAt', 'updatedAt']);
+                  'roomCapacity', 'allottedAt', 'updatedAt',
+                  'singleRoomEligible']);
     }
 
     // 'roomCapacity' only ever appears on an enrollment document, never on

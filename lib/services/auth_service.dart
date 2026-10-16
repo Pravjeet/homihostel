@@ -322,10 +322,19 @@ class AuthService {
   /// app. A bulk import should open **one** and pass it to every
   /// [createSubUser] call, then [closeProvisioningApp] at the end. Doing it
   /// per row is what made a 30-row import take minutes.
+  ///
+  /// Named with a counter as well as the time: on web the clock only has
+  /// millisecond resolution, so two apps opened together — one per lane when
+  /// sign-in accounts are removed in parallel — would otherwise get the same
+  /// name, and Firebase refuses a duplicate.
   Future<FirebaseApp> openProvisioningApp() => Firebase.initializeApp(
-    name: 'user-provisioning-${DateTime.now().microsecondsSinceEpoch}',
+    name:
+        'user-provisioning-${DateTime.now().microsecondsSinceEpoch}'
+        '-${_provisioningSeq++}',
     options: Firebase.app().options,
   );
+
+  static int _provisioningSeq = 0;
 
   Future<void> closeProvisioningApp(FirebaseApp app) async {
     try {
@@ -544,10 +553,13 @@ extension AuthDeleteResultX on AuthDeleteResult {
   String get explanation => switch (this) {
     AuthDeleteResult.deleted => 'sign-in account removed',
     AuthDeleteResult.alreadyGone => 'no sign-in account existed',
+    // Not a definite "kept": with Firebase's email enumeration protection on
+    // (the default for new projects), signing in to an account that no
+    // longer exists fails exactly like a wrong password does.
     AuthDeleteResult.wrongPassword =>
-      'sign-in account KEPT — its password is not the registration number, '
-          'so re-adding this person will say "email already in use". '
-          'Run: node delete-students.js --orphans --commit',
+      'could not sign in as this account — its password was changed, or it '
+          'was already removed. If re-adding this person says "email already '
+          'in use", run: node delete-students.js --orphans --commit',
     AuthDeleteResult.noCredential =>
       'sign-in account KEPT — no derivable password. '
           'Run: node delete-students.js --orphans --commit',

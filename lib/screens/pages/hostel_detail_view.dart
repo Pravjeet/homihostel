@@ -162,9 +162,7 @@ class _HostelDetailViewState extends State<HostelDetailView> {
                   builder: (context, roomSnap) {
                     if (roomSnap.hasError) {
                       return AppCard(
-                        child: Text(
-                          AuthService.describeError(roomSnap.error!),
-                        ),
+                        child: Text(AuthService.describeError(roomSnap.error!)),
                       );
                     }
                     final rooms = roomSnap.data ?? const <Room>[];
@@ -192,8 +190,7 @@ class _HostelDetailViewState extends State<HostelDetailView> {
                           canManage: canMutate,
                           onBack: onBack,
                           onAddRoom: () => _addRoom(context, hostel),
-                          onAddFloor: () =>
-                              _addFloor(context, hostel, floors),
+                          onAddFloor: () => _addFloor(context, hostel, floors),
                           onEditDetails: () => _editHostel(context, hostel),
                           onRecalculate: () => _recalculate(context),
                         ),
@@ -278,6 +275,11 @@ class _HostelDetailViewState extends State<HostelDetailView> {
         // always has, reading `watchRoomOccupants` live.
         viewingSession: isHistory ? session.viewingSession : null,
         onEditRoom: canManage ? () => _editRoom(context, hostel, room) : null,
+        // The seating policy, same as Room Allotment — read here because the
+        // dialog can't reach SessionScope.
+        settings: session.settings,
+        liveSession: session.settings.session.current,
+        isSuperAdmin: session.user.isSuperAdmin,
       ),
     );
   }
